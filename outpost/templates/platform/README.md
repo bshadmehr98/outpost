@@ -1,6 +1,6 @@
 # My platform
 
-This folder is read by [Outpost](https://github.com/your-org/outpost). Commit it, except `secrets/` and `box/`.
+This folder is read by [Outpost](https://github.com/bshadmehr98/outpost). Commit it, except `secrets/` and `box/`.
 
 | File or folder | What it is |
 |---|---|

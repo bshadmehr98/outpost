@@ -11,9 +11,6 @@ license = { text = "MIT" }
 requires-python = ">=3.11"
 dependencies = ["pyyaml>=6.0"]
 
-[project.scripts]
-outpost = "outpost.cli:main"
-
 keywords = ["air-gap", "airgapped", "offline", "gitea", "docker", "swarm", "k3s", "mirror", "pypi", "npm", "apt"]
 classifiers = [
     "Development Status :: 4 - Beta",
@@ -25,10 +22,13 @@ classifiers = [
     "Topic :: System :: Systems Administration",
 ]
 
+[project.scripts]
+outpost = "outpost.cli:main"
+
 [project.urls]
-Homepage = "https://github.com/bshadmehr/outpost"
-Documentation = "https://github.com/bshadmehr/outpost/tree/main/docs"
-Changelog = "https://github.com/bshadmehr/outpost/blob/main/CHANGELOG.md"
+Homepage = "https://github.com/bshadmehr98/outpost"
+Documentation = "https://github.com/bshadmehr98/outpost/tree/main/docs"
+Changelog = "https://github.com/bshadmehr98/outpost/blob/main/CHANGELOG.md"
 
 [project.optional-dependencies]
 dev = ["pytest>=8", "ruff>=0.6"]
