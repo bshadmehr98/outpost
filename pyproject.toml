@@ -41,4 +41,5 @@ outpost = ["ui/*.html", "templates/lab/*", "templates/platform/*", "templates/pl
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+pythonpath = ["."]   # so `from tests.conftest import FakeHost` works under a plain `pytest`, not only `python -m pytest`
 markers = ["integration: needs Docker and the internet (run with OUTPOST_INTEGRATION=1)"]
