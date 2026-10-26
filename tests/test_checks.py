@@ -4,7 +4,7 @@ from outpost.checks import load_checks, run_check
 from outpost.ssh import Result
 from tests.conftest import FakeHost
 
-TEMPLATE_CHECKS = Path("outpost/templates/platform/checks")
+TEMPLATE_CHECKS = Path(__file__).resolve().parents[1] / "outpost" / "templates" / "platform" / "checks"
 
 
 def test_load_template_checks():
