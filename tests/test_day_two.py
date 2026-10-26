@@ -1,0 +1,288 @@
+"""Backup and restore, the host facts cache, upgrades, error translation, the report, and architectures."""
+
+import urllib.error
+
+import pytest
+
+from outpost import hosts, report, versions
+from outpost.cli import build_parser, main
+from outpost.config import ConfigError, Mirrors, load_servers
+from outpost.gitea import backup as backupmod
+from outpost.http import Http
+from outpost.paths import Platform
+from outpost.ssh import Result
+from outpost.ui import explain, status
+from tests.conftest import FakeHost
+
+HOST_FACTS = """id=ubuntu
+codename=noble
+pretty=Ubuntu 24.04.5 LTS
+hostname=node-1
+ip=10.0.0.11
+arch=x86_64
+uptime=3 days, 2 hours
+disk_free=23G
+disk_pct=61
+egress=sealed
+egress_boot=enabled
+gitea=
+docker=29.9.2
+compose=5.6.1
+buildx=0.38.1
+k3s=
+coredns=1.15.0
+runner=5.2.2
+svc_docker=active
+svc_outpost-dns=active
+containers=2
+compose_projects=demo-dev
+swarm=active true
+stacks=demo-prod
+swarm_services=demo-prod_web 2/2,
+deployments=
+pods=0
+"""
+
+
+@pytest.fixture
+def amd64():
+    yield
+    versions.use_arch("amd64")
+
+
+# -- backup and restore -----------------------------------------------------------
+
+def test_backup_pauses_gitea_archives_and_copies_home(platform_dir):
+    platform, servers = Platform(platform_dir), load_servers(platform_dir / "servers.yml")
+    host = FakeHost("gitea-1", responses=[(r"gitea --version", "gitea version 28.2.0 built with go"), (r"stat -c %s", "4096"), (r"curl -sk", "")])
+    local = backupmod.backup(platform, servers, platform_dir / "backups", log=lambda *_: None, host=host)
+    assert local.exists() and local.name.startswith("gitea-gitea.internal-") and local.suffix == ".gz"
+    archive = next(s for s in host.scripts if "tar -C /" in s)
+    assert "systemctl stop gitea" in archive and "trap 'systemctl start gitea' EXIT" in archive and "var/lib/gitea/data etc/gitea" in archive
+    assert host.gets[0][0].startswith("/var/tmp/outpost-backups/") and any(s.startswith("rm -f /var/tmp/outpost-backups/") for s in host.scripts)
+    assert platform.read_state("backup")["gitea"] == "28.2.0" and platform.read_state("backup")["bytes"] == len(b"archive-bytes")
+
+
+def test_backup_needs_an_installed_gitea(platform_dir):
+    platform, servers = Platform(platform_dir), load_servers(platform_dir / "servers.yml")
+    with pytest.raises(RuntimeError, match="not installed"):
+        backupmod.backup(platform, servers, platform_dir / "backups", log=lambda *_: None, host=FakeHost("gitea-1"))
+
+
+def test_restore_moves_current_data_aside_and_checks_the_token(platform_dir, tmp_path):
+    platform, servers = Platform(platform_dir), load_servers(platform_dir / "servers.yml")
+    archive = tmp_path / "gitea-x.tar.gz"
+    archive.write_bytes(b"tar")
+    platform.write_secret("gitea-token", "tok")
+    host = FakeHost("gitea-1", responses=[(r"gitea --version", "gitea version 28.2.0 built with go"), (r"api/v1/user", "401")])
+    messages = []
+    backupmod.restore(platform, servers, archive, log=messages.append, host=host)
+    joined = "\n".join(host.scripts)
+    assert host.puts == [(str(archive), "/var/tmp/outpost-backups/restore.tar.gz")]
+    assert "mv /var/lib/gitea/data /var/lib/gitea/data.before-restore-" in joined and "tar -xzf /var/tmp/outpost-backups/restore.tar.gz -C /" in joined
+    assert "chown -R git:git /var/lib/gitea" in joined and "systemctl start gitea" in joined
+    assert any("does not belong to this data" in m for m in messages)
+    assert platform.read_state("gitea")["restored_from"] == "gitea-x.tar.gz"
+
+
+# -- upgrades ---------------------------------------------------------------------
+
+def test_gitea_setup_backs_up_before_upgrading(platform_dir, monkeypatch):
+    from contextlib import contextmanager
+    from outpost.gitea import setup as setupmod
+    binary = platform_dir / "box" / "files" / "gitea" / versions.GITEA / "gitea"
+    binary.parent.mkdir(parents=True)
+    binary.write_bytes(b"ELF")
+    host = FakeHost("gitea-1", facts={"id": "ubuntu", "codename": "noble", "arch": "x86_64", "ip": "10.0.0.5"},
+                    responses=[(r"gitea --version", "gitea version 28.1.0 built with go"), (r"stat -c %s", "7"), (r"generate-access-token", "tok\n"),
+                               (r"admin user list", ""), (r"api/v1/user", "200"), (r"test -s /etc/gitea/app.ini", Result(1, "", ""))])
+    monkeypatch.setattr(setupmod, "Host", lambda alias: host)
+
+    class Client:
+        def ensure_org(self, name): return False
+        def version(self): return versions.GITEA
+
+    @contextmanager
+    def fake_connect(platform, servers):
+        yield Client()
+    monkeypatch.setattr(setupmod, "connect", fake_connect)
+    setupmod.setup(Platform(platform_dir), load_servers(platform_dir / "servers.yml"), log=lambda *_: None)
+    tar = next(i for i, s in enumerate(host.scripts) if "tar -C /" in s)
+    stop = next(i for i, s in enumerate(host.scripts) if s.startswith("systemctl stop gitea 2>/dev/null"))
+    assert tar < stop and host.puts and (platform_dir / "backups").exists()   # backup first, then the binary is replaced
+
+
+def test_infra_upgrade_runs_apt_from_gitea_and_reports_failures(platform_dir, monkeypatch):
+    from outpost import cli
+    platform, servers = Platform(platform_dir), load_servers(platform_dir / "servers.yml")
+    infra = servers.infra("dev")
+    good = FakeHost("dev-1", responses=[(r"apt-get upgrade", "3 upgraded, 0 newly installed, 0 to remove and 0 not upgraded.\nREBOOT-REQUIRED"), (r"egress_boot", HOST_FACTS)])
+    messages = []
+    monkeypatch.setattr(cli, "log", messages.append)
+    assert cli._infra_upgrade(platform, servers, infra, [good]) == 0
+    assert "apt-get update" in good.scripts[0] and "apt-get upgrade -y" in good.scripts[0]
+    assert any("reboot is required" in m for m in messages) and (platform.state_dir / "hosts" / "dev-1.json").exists()
+    bad = FakeHost("dev-1", responses=[(r"apt-get upgrade", "E: Unable to locate package foo")])
+    assert cli._infra_upgrade(platform, servers, infra, [bad]) == 1
+
+
+def test_docker_install_restarts_the_daemon_on_a_version_change():
+    from outpost.infra import common
+    from outpost.infra.clients import GiteaInfo
+    ctx = common.NodeContext(gitea=GiteaInfo("gitea.internal", "10.0.0.5", "pkgs"), ca_pem="CA")
+    host = FakeHost(responses=[(r"docker --version", "Docker version 29.0.0, build x")])
+    common.install_docker(host, ctx, log=lambda *_: None)
+    assert any("systemctl restart docker" in s for s in host.scripts) and not any("enable --now docker" in s for s in host.scripts)
+
+
+# -- host facts -------------------------------------------------------------------
+
+def test_inspect_parses_facts_services_and_workloads():
+    data = hosts.inspect(FakeHost(responses=[(r"egress_boot", HOST_FACTS)]))
+    assert data["reachable"] and data["pretty"] == "Ubuntu 24.04.5 LTS" and data["egress"] == "sealed"
+    assert data["installed"]["docker"] == "29.9.2" and data["installed"]["gitea"] == ""
+    assert data["services"] == {"docker": "active", "outpost-dns": "active"}
+    assert data["workloads"]["compose_projects"] == ["demo-dev"] and data["workloads"]["stacks"] == ["demo-prod"]
+    assert data["workloads"]["services"] == ["demo-prod_web 2/2"] and data["workloads"]["containers"] == 2
+    assert hosts.drift(data) == []
+    data["installed"]["docker"] = "29.0.0"
+    assert hosts.drift(data) == [f"docker 29.0.0 (pinned {versions.DOCKER})"]
+
+
+def test_inspect_reports_an_unreachable_host_and_refresh_caches(platform_dir):
+    assert hosts.inspect(FakeHost()) == {"reachable": False, "error": "no answer"}
+    platform, servers = Platform(platform_dir), load_servers(platform_dir / "servers.yml")
+    out = hosts.refresh(platform, servers, log=lambda *_: None, make_host=lambda a: FakeHost(a, responses=[(r"egress_boot", HOST_FACTS)]))
+    assert set(out) == {"gitea-1", "dev-1"} and hosts.cached(platform)["dev-1"]["ip"] == "10.0.0.11"
+    assert hosts.roles(servers) == {"gitea-1": ["gitea"], "dev-1": ["dev: compose"]}
+
+
+# -- translations and summaries ---------------------------------------------------
+
+def test_explain_knows_the_common_failures():
+    assert explain.explain("x\nssh: connect to host dev-1 port 22: Connection timed out\nerror: boom")["title"].startswith("The server did not answer")
+    assert "passwordless sudo" in explain.explain("sudo: a password is required")["fix"]
+    assert explain.explain("error: [dev-1] cannot reach https://gitea.internal: curl: (7)")["title"] == "A node cannot reach Gitea."
+    assert explain.explain("pip: No matching distribution found for flassk==1")["title"].startswith("A Python package")
+    assert explain.explain("everything fine") is None
+    assert explain.explain("error: something odd")["title"] == "The command stopped with an error."
+
+
+def test_summaries_read_like_history():
+    assert explain.summarize(["upload"], "    files: 3 uploaded, 10 already there\n    pypi: 0 uploaded, 5 already there\n", 0) == "Uploaded 3 new files to Gitea, 15 were already there"
+    assert explain.summarize(["fetch"], "Box: 62 files, 666 MB in /x\n", 0) == "Fetched everything; the box has 62 files, 666 MB"
+    assert explain.summarize(["infra", "setup", "dev"], "  dev-1: all good\n", 0) == "Set up and verified dev: 1 node all good"
+    assert explain.summarize(["check", "--infra", "dev"], "1/1 checks passed\n", 0) == "Smoke checks on dev: 1/1 passed"
+    assert explain.summarize(["egress", "dev", "open"], "", 0) == "Switched the internet ON for dev"
+    assert explain.summarize(["fetch"], "error: No space left on device", 1) == "failed: A disk is full."
+    assert explain.summarize(["fetch"], "", None) == "was cut short"
+
+
+def test_steps_and_box_changes(tmp_path):
+    log = "$ outpost gitea setup\n==> [1/3] connecting\nhello\n==> [2/3] certificates\n"
+    assert status.steps(log) == [{"text": "connecting", "n": 1, "of": 3, "done": True}, {"text": "certificates", "n": 2, "of": 3, "done": False}]
+    assert status.steps(log + "[outpost exit 0 after 3s]\n")[-1]["done"] is True
+    from outpost.needs import Needs, NpmNeed
+    p = Platform(tmp_path)
+    (p.box_dir / "npm").mkdir(parents=True)
+    (p.box_dir / "npm" / "chalk-5.3.0.tgz").write_bytes(b"x")
+    (p.box_dir / "npm" / "old-1.0.0.tgz").write_bytes(b"xx")
+    (p.box_dir / "images" / "redis_7").mkdir(parents=True)
+    c = status.box_changes(p, Needs(npm=[NpmNeed("chalk", "5.3.0")]))
+    assert c["new_files"] == 2 and c["unneeded"] == ["image redis_7", "npm old-1.0.0.tgz"]
+    p.write_state("upload", {})
+    assert status.box_changes(p, Needs(npm=[NpmNeed("chalk", "5.3.0")]))["new_files"] == 0
+
+
+# -- the report -------------------------------------------------------------------
+
+def test_report_says_what_is_proven(platform_dir):
+    platform, servers = Platform(platform_dir), load_servers(platform_dir / "servers.yml")
+    data = report.build(platform, servers)
+    assert report.verdict(data)["ok"] is False and "Not fully proven" in report.render(data)
+    platform.write_state("gitea", {"name": "gitea.internal", "ip": "10.0.0.5", "host": "gitea-1", "version": "28.2.0"})
+    platform.write_state("verify-dev", {"result": "ok", "nodes": {"dev-1": [{"name": "egress sealed", "ok": True, "detail": ""}]}})
+    hosts.record(platform, "gitea-1", {**hosts.inspect(FakeHost(responses=[(r"egress_boot", HOST_FACTS)]))})
+    hosts.record(platform, "dev-1", {**hosts.inspect(FakeHost(responses=[(r"egress_boot", HOST_FACTS)]))})
+    data = report.build(platform, servers)
+    v = report.verdict(data)
+    assert v["ok"] and v["sealed"] == ["dev-1", "gitea-1"] and v["verified"] == ["dev"]
+    html = report.render(data)
+    assert "Sealed and verified" in html and "egress sealed" in html and "switched off" in html
+    out = report.write(platform, servers)
+    assert out == platform.state_dir / "report.html" and out.read_text().startswith("<!doctype html>")
+    assert main(["--dir", str(platform_dir), "report"]) == 0
+
+
+# -- architectures ----------------------------------------------------------------
+
+def test_arm64_changes_every_download_name(amd64):
+    versions.use_arch("aarch64")
+    urls = {f["name"]: f["url"] for f in versions.platform_files(Mirrors(), {"compose", "k3s"})}
+    assert urls["gitea"].endswith("linux-arm64") and urls["coredns"].endswith("linux_arm64.tgz") and urls["gitea-runner"].endswith("linux-arm64")
+    assert urls["docker"] == f"https://download.docker.com/linux/static/stable/aarch64/docker-{versions.DOCKER}.tgz"
+    assert urls["docker-compose"].endswith("docker-compose-linux-aarch64") and urls["docker-buildx"].endswith("linux-arm64")
+    assert urls["k3s"].endswith("/k3s-arm64") and urls["k3s-airgap-images"].endswith("k3s-airgap-images-arm64.tar.gz")
+    assert "manylinux2014_aarch64" in versions.names()["pip"]
+    versions.use_arch("amd64")
+    assert versions.platform_files(Mirrors(), set())[0]["url"].endswith("linux-amd64")
+    with pytest.raises(ValueError):
+        versions.use_arch("mips")
+
+
+def test_servers_yml_arch_key(platform_dir, amd64):
+    f = platform_dir / "servers.yml"
+    f.write_text(f.read_text() + "\narch: aarch64\n")
+    assert load_servers(f).arch == "arm64"
+    f.write_text(f.read_text().replace("arch: aarch64", "arch: sparc"))
+    with pytest.raises(ConfigError, match="unknown arch"):
+        load_servers(f)
+
+
+def test_setup_refuses_a_node_of_the_wrong_architecture():
+    from outpost.infra import compose
+    from outpost.infra.clients import GiteaInfo
+    from outpost.infra.common import NodeContext
+    ctx = NodeContext(gitea=GiteaInfo("gitea.internal", "10.0.0.5", "pkgs"), ca_pem="CA")
+    with pytest.raises(RuntimeError, match="aarch64 but this platform is built for x86_64"):
+        compose.setup(ctx, [FakeHost(facts={"ip": "10.0.0.11", "arch": "aarch64"})], log=lambda *_: None)
+
+
+# -- retries ----------------------------------------------------------------------
+
+def test_http_retries_reads_on_network_errors(monkeypatch):
+    http = Http("http://127.0.0.1:9")
+    calls = []
+
+    class Resp:
+        status, headers = 200, {}
+        def read(self): return b"ok"
+        def __enter__(self): return self
+        def __exit__(self, *a): return False
+
+    def open_(req, timeout):
+        calls.append(req.full_url)
+        if len(calls) < 3:
+            raise urllib.error.URLError("connection reset")
+        return Resp()
+    monkeypatch.setattr(http, "_opener", type("O", (), {"open": staticmethod(open_)})())
+    monkeypatch.setattr(Http, "_sleep", staticmethod(lambda s: None))
+    assert http.get("/x", ok=(200,)).body == b"ok" and len(calls) == 3
+    calls.clear()
+    with pytest.raises(urllib.error.URLError):
+        http.request("POST", "/x", data=b"1")
+    assert len(calls) == 1   # writes are not retried on network errors
+
+
+# -- the command line -------------------------------------------------------------
+
+def test_new_commands_parse_and_explain_themselves(platform_dir, capsys):
+    p = build_parser()
+    assert p.parse_args(["gitea", "backup", "--out", "b"]).out == "b"
+    assert p.parse_args(["gitea", "restore", "backups/x.tar.gz"]).archive == "backups/x.tar.gz"
+    assert p.parse_args(["infra", "upgrade", "dev"]).action == "upgrade"
+    assert p.parse_args(["pki", "rotate"]).action == "rotate" and p.parse_args(["hosts", "--refresh"]).refresh
+    assert main(["--dir", str(platform_dir), "gitea", "restore"]) == 1
+    assert "needs the archive" in capsys.readouterr().err
+    assert main(["--dir", str(platform_dir), "pki", "rotate"]) == 1
+    assert "nothing to rotate" in capsys.readouterr().err

@@ -1,0 +1,10 @@
+# Compose deploy. The workflow runs: IMAGE=... INFRA=dev PORT=8000 docker compose -f compose.yml up -d
+services:
+  web:
+    image: ${IMAGE}
+    ports:
+      - "${PORT:-8000}:8000"
+    environment:
+      INFRA: ${INFRA:-dev}
+      NODE: ${NODE:-}
+    restart: unless-stopped

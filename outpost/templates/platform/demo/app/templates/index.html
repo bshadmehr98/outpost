@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Outpost demo on {{ f.infra }}</title>
+<style>
+  :root { --bg:#f6f7f9; --card:#fff; --ink:#1b1f24; --muted:#5b6470; --line:#e3e6ea; --ok:#15803d; --okbg:#dcfce7; --bad:#b91c1c; --badbg:#fee2e2; --accent:#1d4ed8; }
+  @media (prefers-color-scheme: dark) { :root { --bg:#0f1115; --card:#171a21; --ink:#e7e9ee; --muted:#9aa3b2; --line:#262b35; --okbg:#0f2e1b; --badbg:#3a1010; --ok:#4ade80; --bad:#f87171; --accent:#60a5fa; } }
+  * { box-sizing: border-box }
+  body { margin:0; background:var(--bg); color:var(--ink); font: 15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  main { max-width: 900px; margin: 0 auto; padding: 32px 16px 60px; }
+  h1 { font-size: 28px; margin: 0 0 4px; }
+  .sub { color: var(--muted); margin: 0 0 24px; }
+  .badge { display:inline-block; padding: 6px 12px; border-radius: 999px; font-weight: 600; }
+  .badge.ok { background: var(--okbg); color: var(--ok); } .badge.bad { background: var(--badbg); color: var(--bad); }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 16px; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 18px; }
+  .card h2 { font-size: 15px; margin: 0 0 10px; color: var(--muted); font-weight: 600; text-transform: uppercase; letter-spacing: .04em; }
+  table { width: 100%; border-collapse: collapse; font-size: 14px; } td { padding: 6px 0; border-top: 1px solid var(--line); vertical-align: top; } td:first-child { color: var(--muted); width: 40%; }
+  .r { font-weight: 600 } .r.REACHED { color: var(--bad) } .r.gitea { color: var(--ok) } .r.rejected, .r.timeout, .r.unresolvable, .r.noroute { color: var(--ok) }
+  pre { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; font: 12px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--muted); }
+  code { font: 13px ui-monospace, Menlo, monospace; }
+  a { color: var(--accent) }
+  .big { font-size: 22px; font-weight: 700; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Hello from <span style="color:var(--accent)">{{ f.infra }}</span></h1>
+  <p class="sub">A Flask site built and deployed by Gitea Actions on a sealed node. Commit <code>{{ f.sha[:12] }}</code>, running on <code>{{ f.hostname }}</code>.</p>
+
+  {% set sealed_build = f.build and f.build.sealed %}
+  <p>
+    {% if sealed_build and f.now.sealed %}<span class="badge ok">No internet at build time, no internet now</span>
+    {% else %}<span class="badge bad">Internet reachable: {% if not sealed_build %}at build time{% endif %}{% if not f.now.sealed %} now{% endif %}</span>{% endif %}
+    {% if f.now.gitea_ok %}<span class="badge ok">Gitea reachable</span>{% elif f.gitea %}<span class="badge bad">Gitea not reachable</span>{% endif %}
+  </p>
+
+  <div class="grid">
+    <div class="card">
+      <h2>Right now, from this container</h2>
+      <table>
+        {% for r in f.now.results %}{% set is_gitea = r.target.startswith(f.gitea ~ ':') %}<tr><td>{{ r.target }}{% if is_gitea %} <span style="color:var(--muted)">(Gitea)</span>{% endif %}</td><td><span class="r {{ 'gitea' if is_gitea and r.result == 'REACHED' else r.result }}">{{ 'reachable' if is_gitea and r.result == 'REACHED' else r.result }}</span> <span style="color:var(--muted)">{{ r.detail }}, {{ r.ms }} ms</span></td></tr>{% endfor %}
+      </table>
+      <p style="color:var(--muted);font-size:13px;margin:10px 0 0">Measured on every page load. Reload to measure again.
+      <i>rejected</i> = the node's firewall refused the connection; <i>timeout</i> = it dropped the packets (what containers and pods get); <i>unresolvable</i> = no DNS. All three mean no internet.</p>
+    </div>
+
+    <div class="card">
+      <h2>At build time, inside <code>docker build</code></h2>
+      {% if f.build %}
+      <table>
+        {% for r in f.build.results %}{% set is_gitea = r.target.startswith(f.gitea ~ ':') %}<tr><td>{{ r.target }}{% if is_gitea %} <span style="color:var(--muted)">(Gitea)</span>{% endif %}</td><td><span class="r {{ 'gitea' if is_gitea and r.result == 'REACHED' else r.result }}">{{ 'reachable' if is_gitea and r.result == 'REACHED' else r.result }}</span> <span style="color:var(--muted)">{{ r.detail }}</span></td></tr>{% endfor %}
+        <tr><td>when</td><td>{{ f.build.when }} on {{ f.build.hostname[:12] }}</td></tr>
+      </table>
+      <p style="color:var(--muted);font-size:13px;margin:10px 0 0">The Dockerfile refuses to build when any public target answers, so this image could not exist otherwise.</p>
+      {% else %}<p>No build proof in this image.</p>{% endif %}
+    </div>
+
+    <div class="card">
+      <h2>Where the packages came from</h2>
+      <table>
+        <tr><td>pip</td><td><pre>{{ f.pip_conf }}</pre></td></tr>
+        <tr><td>apt</td><td><pre>{{ f.apt_sources }}</pre></td></tr>
+        <tr><td>images</td><td><code>python:3.12-slim</code> through Gitea's registry</td></tr>
+      </table>
+    </div>
+
+    <div class="card">
+      <h2>What is installed</h2>
+      <table>
+        <tr><td>Python</td><td>{{ f.python }}</td></tr>
+        {% for name, version in f.packages.items() %}<tr><td>{{ name }}</td><td>{{ version }}</td></tr>{% endfor %}
+        <tr><td>curl</td><td>from apt, through Gitea</td></tr>
+      </table>
+    </div>
+  </div>
+
+  <p style="margin-top:28px;color:var(--muted);font-size:13px">
+    Source and workflow: <code>{{ f.gitea }}</code>, repository <code>demo</code>, tab Actions.
+    Change <code>demo/app/templates/index.html</code> on your laptop, run <code>outpost demo push</code>, and this page changes.
+    Health: <a href="/healthz">/healthz</a>
+  </p>
+</main>
+</body>
+</html>

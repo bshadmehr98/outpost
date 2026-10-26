@@ -1,0 +1,3 @@
+# Pinned on purpose: `outpost fetch` downloads exactly these (and what they depend on) into the box.
+flask==3.1.3
+gunicorn==26.2.0

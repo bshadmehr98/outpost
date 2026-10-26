@@ -1,0 +1,53 @@
+# Publish the docs as a site:  uvx --with mkdocs-material mkdocs serve   (or `mkdocs build`)
+# GitHub renders the same Markdown and Mermaid diagrams without any build.
+site_name: Outpost
+site_description: Run Gitea, Docker, Swarm or k3s on servers that never touch the internet.
+docs_dir: docs
+theme:
+  name: material
+  features: [navigation.sections, navigation.expand, content.code.copy, toc.integrate]
+markdown_extensions:
+  - tables
+  - admonition
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+nav:
+  - Home: index.md
+  - Quickstart: quickstart.md
+  - Tutorial:
+      - tutorial/01-the-problem.md
+      - tutorial/02-install.md
+      - tutorial/03-lab.md
+      - tutorial/04-needs-and-fetch.md
+      - tutorial/05-gitea.md
+      - tutorial/06-upload.md
+      - tutorial/07-nodes.md
+      - tutorial/08-prove.md
+      - tutorial/09-deploy.md
+      - tutorial/10-day-two.md
+  - Architecture:
+      - architecture/overview.md
+      - architecture/box.md
+      - architecture/gitea.md
+      - architecture/nodes.md
+      - architecture/egress.md
+      - architecture/ci.md
+      - architecture/security.md
+  - Reference:
+      - reference/cli.md
+      - reference/servers.md
+      - reference/needs.md
+      - reference/dockerfiles.md
+      - reference/checks.md
+      - reference/platform-folder.md
+      - reference/dashboard.md
+      - reference/maintenance.md
+      - reference/distribution.md
+      - reference/limits.md
+  - Development:
+      - development/development.md
+      - development/testing.md
+      - development/decisions.md

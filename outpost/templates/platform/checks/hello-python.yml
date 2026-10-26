@@ -1,0 +1,9 @@
+name: hello-python
+description: Build an image that installs apt and pip packages from Gitea, run it, and confirm the internet is blocked.
+infra: [compose, swarm]
+steps:
+  - run: docker build --build-arg GITEA=$GITEA --build-arg ORG=$ORG -t outpost-check-hello .
+  - run: docker run --rm outpost-check-hello
+    expect: Hello from Outpost
+  - run: docker run --rm outpost-check-hello python -c "import urllib.request; urllib.request.urlopen('https://pypi.org', timeout=5)" && echo LEAK || echo SEALED
+    expect: SEALED

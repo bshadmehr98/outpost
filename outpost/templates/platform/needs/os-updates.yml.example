@@ -1,0 +1,11 @@
+# Operating-system security updates for the servers, served by Gitea like everything else.
+# Rename this file to os-updates.yml, set the distro to what your servers run (`outpost hosts`
+# shows it: noble, jammy, bookworm ...), list the packages to keep current, then:
+#   outpost fetch --only apt      (the current versions and their dependency trees are downloaded)
+#   outpost upload                (they go into Gitea's Debian registry)
+#   outpost infra upgrade <name>  (apt-get upgrade on every node, with the internet still off)
+# A full distro mirror is tens of gigabytes; a short list of what matters is a few hundred megabytes.
+name: os-updates
+apt:
+  distro: noble
+  packages: [openssl, libssl3t64, ca-certificates, curl, openssh-server, sudo, systemd, libc6, tzdata]

@@ -1,0 +1,10 @@
+__pycache__/
+*.pyc
+.venv/
+*.egg-info/
+dist/
+build/
+.pytest_cache/
+# a platform folder used for local testing
+/my-platform/
+.ruff_cache/

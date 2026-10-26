@@ -1,0 +1,38 @@
+# Unit tests and lint on every push and pull request; the integration suite (real Gitea, Docker Hub,
+# the lab) on pushes to main and on demand, because it takes ten minutes and needs Docker.
+name: tests
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+jobs:
+  unit:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python: ["3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "${{ matrix.python }}" }
+      - run: pip install -e '.[dev]'
+      - run: ruff check --select E,F,W --ignore E501 outpost tests
+      - run: pytest -q
+  package:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - run: pip install build && python -m build
+      - run: pip install dist/*.whl && outpost --version && outpost init /tmp/p && test -f /tmp/p/demo/Dockerfile
+  integration:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - run: pip install -e '.[dev]'
+      - run: OUTPOST_INTEGRATION=1 pytest -q tests/integration -x

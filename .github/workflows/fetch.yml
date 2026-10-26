@@ -1,0 +1,35 @@
+# Build a box from the platform folder in this repository and publish it as a GitHub release.
+#
+# To use: fork, put your platform folder at ./platform (servers.yml, needs/, pki/box.pub),
+# add the repository secret BOX_SIGNING_KEY with the contents of secrets/box.key, and this
+# workflow produces a release named box-<date> every Monday, or on demand.
+name: fetch box
+on:
+  schedule:
+    - cron: "0 3 * * 1"
+  workflow_dispatch:
+jobs:
+  fetch:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - run: pip install .   # or outpost-airgap once it is on PyPI
+      - name: Restore the signing key
+        run: |
+          mkdir -p platform/secrets
+          printf '%s' "${{ secrets.BOX_SIGNING_KEY }}" > platform/secrets/box.key
+          chmod 600 platform/secrets/box.key
+      - run: outpost --dir platform needs
+      - run: outpost --dir platform fetch
+      - run: outpost --dir platform pack --out dist
+      - name: Publish as a release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag="box-$(date -u +%Y-%m-%d)"
+          gh release create "$tag" dist/*.tar.xz --title "$tag" --notes "Built by outpost fetch. Upload with: outpost upload *.tar.xz" || \
+          gh release upload "$tag" dist/*.tar.xz --clobber

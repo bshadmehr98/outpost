@@ -1,0 +1,42 @@
+from pathlib import Path
+
+from outpost.checks import load_checks, run_check
+from outpost.ssh import Result
+from tests.conftest import FakeHost
+
+TEMPLATE_CHECKS = Path("outpost/templates/platform/checks")
+
+
+def test_load_template_checks():
+    checks = load_checks(TEMPLATE_CHECKS)
+    names = {c.name: c for c in checks}
+    assert set(names) == {"hello-python", "hello-k3s"}
+    hello = names["hello-python"]
+    assert hello.context == TEMPLATE_CHECKS / "hello-python" and hello.applies_to("compose") and not hello.applies_to("k3s")
+    assert hello.steps[1]["expect"] == "Hello from Outpost"
+    assert names["hello-k3s"].context is None
+
+
+def test_run_check_passes_and_copies_context():
+    host = FakeHost(responses=[(r"docker run --rm outpost-check-hello$", "Hello from Outpost (flask 3)"), (r"LEAK \|\| echo SEALED", "SEALED")])
+    check = load_checks(TEMPLATE_CHECKS)[1]
+    result = run_check(check, host, {"GITEA": "gitea.internal", "ORG": "pkgs"}, log=lambda *_: None)
+    assert result["ok"] and len(result["steps"]) == 3
+    assert host.puts and host.puts[0][1].endswith("/hello-python/context.tgz")
+    assert any("export GITEA=gitea.internal ORG=pkgs" in s for s in host.scripts)
+    assert host.scripts[-1].startswith("rm -rf /tmp/outpost-checks/hello-python")
+
+
+def test_run_check_fails_on_expect_and_stops():
+    host = FakeHost(responses=[(r"docker run --rm outpost-check-hello$", "something else")])
+    check = load_checks(TEMPLATE_CHECKS)[1]
+    result = run_check(check, host, {"GITEA": "g", "ORG": "o"}, log=lambda *_: None)
+    assert not result["ok"]
+    assert [s["ok"] for s in result["steps"]] == [True, False]
+
+
+def test_run_check_fails_on_exit_code():
+    host = FakeHost(responses=[(r"docker build", Result(1, "", "boom"))])
+    check = load_checks(TEMPLATE_CHECKS)[1]
+    result = run_check(check, host, {"GITEA": "g", "ORG": "o"}, log=lambda *_: None)
+    assert not result["ok"] and result["steps"][0]["output"] == "boom"

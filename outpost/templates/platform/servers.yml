@@ -1,0 +1,20 @@
+# Which servers play which role. Hosts are aliases from your ~/.ssh/config.
+# The SSH user must be root or have passwordless sudo.
+
+gitea:
+  host: gitea-1               # ssh alias of the Gitea server
+  name: gitea.internal        # the name every node will use to reach it (no DNS needed)
+  # ip: 10.0.0.5              # detected over SSH when left out
+  # org: pkgs                 # Gitea organisation that holds pip, npm, apt and files
+  # allow: [10.0.0.0/24]      # extra addresses this host may still reach when sealed
+
+infrastructures:
+  dev:
+    type: compose             # compose | swarm | k3s
+    nodes: [dev-1]
+  # prod:
+  #   type: swarm
+  #   nodes: [prod-1, prod-2, prod-3]
+  # lab:
+  #   type: k3s
+  #   nodes: [lab-1, lab-2]

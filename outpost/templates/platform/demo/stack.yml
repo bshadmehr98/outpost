@@ -1,0 +1,14 @@
+# Swarm deploy. The workflow runs: IMAGE=... INFRA=prod PORT=8080 docker stack deploy -c stack.yml demo-prod
+# Two replicas; the swarm's routing mesh answers on every node.
+services:
+  web:
+    image: ${IMAGE}
+    ports:
+      - "${PORT:-8080}:8000"
+    environment:
+      INFRA: ${INFRA:-prod}
+      NODE: "{{.Node.Hostname}}"
+    deploy:
+      replicas: 2
+      update_config:
+        order: start-first

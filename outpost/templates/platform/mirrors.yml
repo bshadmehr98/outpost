@@ -1,0 +1,7 @@
+# Where `outpost fetch` downloads from. Only change these if the defaults are blocked where you are.
+# pypi: https://pypi.org/simple
+# npm: https://registry.npmjs.org
+# docker: https://registry-1.docker.io
+# debian: http://deb.debian.org/debian
+# ubuntu: http://archive.ubuntu.com/ubuntu
+# github: https://github.com

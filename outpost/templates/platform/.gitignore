@@ -1,0 +1,11 @@
+# Private keys and tokens
+secrets/
+# Downloaded artifacts (large); publish them as releases instead
+box/
+dist/
+# Gitea backups (large, and they contain your repositories)
+backups/
+# Logs of dashboard runs
+state/runs/
+# Keys for lab servers made by `outpost lab up`
+lab/
