@@ -6,12 +6,14 @@
     name: hello-python
     description: Build an image with apt + pip from Gitea, run it, confirm the internet is blocked.
     infra: [compose, swarm]              # which infrastructure types this applies to (default: all)
+    requires: [proxy]                    # optional: skipped, with a message, unless the egress proxy is set up
     steps:
       - run: docker build --build-arg GITEA=$GITEA --build-arg ORG=$ORG -t check-hello .
       - run: docker run --rm check-hello
         expect: Hello from Outpost
 
-Steps run on the first node, in the copied folder, as root, with $GITEA and $ORG set.
+Steps run on the first node, in the copied folder, as root, with $GITEA and $ORG set, and with an egress
+proxy also $PROXY_URL, $PROXY_ALLOWED (a name it lets through) and $PROXY_REFUSED (one it must refuse).
 A step passes when its command exits 0 and, if `expect:` is given, its output contains that text.
 """
 
@@ -26,6 +28,7 @@ import yaml
 from ..config import ConfigError
 
 REMOTE_ROOT = "/tmp/outpost-checks"
+REQUIREMENTS = ("proxy",)
 
 
 @dataclass
@@ -35,6 +38,7 @@ class Check:
     infra: list[str] = field(default_factory=list)
     steps: list[dict] = field(default_factory=list)
     context: Path | None = None
+    requires: list[str] = field(default_factory=list)   # "proxy": only where the egress proxy is set up
 
     def applies_to(self, infra_type: str) -> bool:
         return not self.infra or infra_type in self.infra
@@ -49,12 +53,18 @@ def load_checks(checks_dir: Path) -> list[Check]:
         if not isinstance(data, dict) or not data.get("steps"):
             raise ConfigError(f"{path}: a check needs a `steps:` list")
         folder = checks_dir / path.stem
+        requires = data.get("requires") or []
+        requires = [requires] if isinstance(requires, str) else requires
+        unknown = [str(r) for r in requires if str(r) not in REQUIREMENTS]
+        if not isinstance(requires, list) or unknown:
+            raise ConfigError(f"{path}: `requires:` may only list {', '.join(REQUIREMENTS)} (got {', '.join(unknown) or requires!r})")
         checks.append(Check(
             name=str(data.get("name") or path.stem),
             description=str(data.get("description", "")),
             infra=[str(i) for i in data.get("infra") or []],
             steps=[{"run": str(s["run"]), "expect": s.get("expect")} if isinstance(s, dict) else {"run": str(s), "expect": None} for s in data["steps"]],
             context=folder if folder.is_dir() else None,
+            requires=[str(r) for r in requires],
         ))
     return checks
 

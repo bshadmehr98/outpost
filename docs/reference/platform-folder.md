@@ -31,6 +31,7 @@ The `.gitignore` that `init` writes excludes `secrets/`, `box/`, `dist/`, `state
 | `state/upload.json` | upload | stats per kind, distros, source |
 | `state/infra-<name>.json` | infra setup | type, nodes with their facts (ip, distro), manager or server, runner |
 | `state/verify-<name>.json` | infra setup, verify | `ok` or `problems`, every check per node |
+| `state/proxy.json` | proxy setup, verify | the egress proxy: host, ip, port, url, allow list, tinyproxy version, when, and the last `verify` result |
 | `state/check-<name>.json` | check | each check's steps and output |
 | `state/demo.json` | demo push | commit, repository, Actions URL, per-infrastructure URLs |
 

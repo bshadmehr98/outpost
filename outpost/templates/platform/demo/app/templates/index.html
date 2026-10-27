@@ -35,6 +35,7 @@
     {% if sealed_build and f.now.sealed %}<span class="badge ok">No internet at build time, no internet now</span>
     {% else %}<span class="badge bad">Internet reachable: {% if not sealed_build %}at build time{% endif %}{% if not f.now.sealed %} now{% endif %}</span>{% endif %}
     {% if f.now.gitea_ok %}<span class="badge ok">Gitea reachable</span>{% elif f.gitea %}<span class="badge bad">Gitea not reachable</span>{% endif %}
+    {% if f.proxy %}{% if f.proxy.ok %}<span class="badge ok">Named exceptions through the proxy only</span>{% else %}<span class="badge bad">Proxy not as expected</span>{% endif %}{% endif %}
   </p>
 
   <div class="grid">
@@ -56,6 +57,20 @@
       </table>
       <p style="color:var(--muted);font-size:13px;margin:10px 0 0">The Dockerfile refuses to build when any public target answers, so this image could not exist otherwise.</p>
       {% else %}<p>No build proof in this image.</p>{% endif %}
+    </div>
+
+    <div class="card">
+      <h2>Through the proxy</h2>
+      {% if f.proxy %}
+      <table>
+        {% for r in f.proxy.results %}<tr><td>{{ r.target }}</td><td><span class="r {{ 'gitea' if r.result == r.expected else 'REACHED' }}">{{ r.result }}</span> <span style="color:var(--muted)">{{ r.detail }}, {{ r.ms }} ms{% if r.result != r.expected %}; expected {{ r.expected }}{% endif %}</span></td></tr>{% endfor %}
+      </table>
+      <p style="color:var(--muted);font-size:13px;margin:10px 0 0">Through <code>{{ f.proxy.url }}</code>, the egress proxy: the names on its allow list are <i>reached</i>, anything else is <i>refused</i>.
+      Only programs that use <code>HTTPS_PROXY</code> get this far; the first card is the direct path, which stays closed.</p>
+      {% else %}
+      <p>No egress proxy variables in this container, so nothing here can reach the internet by name either.
+      With <code>egress_proxy</code> in servers.yml and <code>outpost proxy setup</code>, this card lists the allowed names, reached through the proxy, and <code>example.com</code>, refused.</p>
+      {% endif %}
     </div>
 
     <div class="card">

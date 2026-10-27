@@ -11,6 +11,10 @@
 
 Everything after step 5 runs with the internet blocked. That is the point: if setup
 succeeds, the node provably needs nothing from outside.
+
+With an egress proxy in servers.yml, steps 1 and 3 also carry its settings (apply_proxy): the proxy's
+name in /etc/hosts when it is not on the Gitea host, /etc/outpost/proxy.env, the profile.d exports,
+/etc/environment and the Docker client config. Step 5 then allows the proxy's address too.
 """
 
 import shlex
@@ -19,7 +23,10 @@ from dataclasses import dataclass, field
 from .. import versions
 from ..fetch import rpm as rpmmod
 from . import clients, egress, hostsfile
-from .clients import GiteaInfo
+from .clients import GiteaInfo, ProxyInfo
+
+PROXY_USER = "outpost-proxy"   # the system user the egress proxy runs as; the only owner the seal ever exempts
+RUNNER_HOME = "/var/lib/outpost-runner"   # runner.HOME; Actions jobs read $HOME/.docker/config.json there
 
 DNS_UNIT = """[Unit]
 Description=Outpost node DNS (CoreDNS: answers the Gitea name for containers)
@@ -69,6 +76,16 @@ class NodeContext:
     allow: list[str] = field(default_factory=list)     # extra reachable addresses (other nodes, user list)
     infra_name: str = ""
     args: str = ""                                     # extra flags for the runtime (k3s server, swarm init)
+    proxy: ProxyInfo | None = None                     # the egress proxy, when servers.yml has one
+
+    def proxy_user_for(self, alias: str) -> str | None:
+        """The owner exception goes only into the seal of the host that runs the proxy."""
+        return PROXY_USER if self.proxy and self.proxy.host == alias else None
+
+    def hosts_entries(self) -> list[tuple[str, str]]:
+        g = self.gitea
+        extra = [(self.proxy.ip, self.proxy.name)] if self.proxy and not self.proxy.on_gitea else []
+        return [(g.ip, g.name), *extra]
 
 
 def curl(ctx: NodeContext, url: str, out: str) -> str:
@@ -112,13 +129,14 @@ def prepare_node(host, ctx: NodeContext, log=print) -> dict:
 
     # 1. name resolution without DNS (rewrite in place: /etc/hosts can be a bind mount), and a unit that
     #    puts the line back at boot, because cloud-init and Docker both rewrite /etc/hosts
-    host.run(f"{{ grep -v {shlex.quote(f' {g.name}$')} /etc/hosts; echo {shlex.quote(f'{g.ip} {g.name}')}; }} > /etc/hosts.outpost && cat /etc/hosts.outpost > /etc/hosts && rm /etc/hosts.outpost")
-    hostsfile.install(host, g.ip, g.name)
+    _write_hosts(host, ctx)
 
     # 2 + 3. trust and client configuration
     node_ip = facts.get("ip") or host.ip()
-    for path, content in {**clients.client_files(g, ctx.ca_pem, apt_key=None, distros=[]), **clients.host_files(g, ctx.ca_pem, node_ip)}.items():
+    for path, content in {**clients.client_files(g, ctx.ca_pem, apt_key=None, distros=[], proxy=ctx.proxy),
+                          **clients.host_files(g, ctx.ca_pem, node_ip, proxy=ctx.proxy)}.items():
         host.write(path, content)
+    _proxy_settings(host, ctx, log)
     # Debian and Alpine both ship update-ca-certificates reading /usr/local/share/ca-certificates (Alpine's
     # comes with the ca-certificates package); the RHEL family has update-ca-trust and its anchors folder.
     host.run(
@@ -139,13 +157,53 @@ def prepare_node(host, ctx: NodeContext, log=print) -> dict:
 
     # 5. seal
     log(f"==> {host.alias}: switching the internet off")
-    egress.install(host, g.ip, ctx.allow)
+    egress.install(host, g.ip, ctx.allow, proxy_user=ctx.proxy_user_for(host.alias))
     log(f"  [{host.alias}] egress: {egress.seal(host, f'setup {ctx.infra_name}'.strip())}")
 
     # 6. DNS for containers, from Gitea, with the internet already blocked
     log(f"==> {host.alias}: installing node DNS from Gitea")
     install_dns(host, ctx, log)
     return facts
+
+
+def _write_hosts(host, ctx: NodeContext) -> None:
+    entries = ctx.hosts_entries()
+    host.run(hostsfile.rewrite(entries))
+    hostsfile.install(host, entries[0][0], entries[0][1], entries[1:])
+
+
+def _proxy_settings(host, ctx: NodeContext, log=print) -> None:
+    """The proxy settings that are merged into existing files rather than written whole: the Docker client
+    config of root and of the Actions runner, and /etc/environment. Without a proxy only what Outpost wrote
+    before is removed, and /etc/outpost/proxy.env is left as a comment, so `env_file:` can always name it."""
+    g = ctx.gitea
+    if not ctx.proxy:
+        host.write(clients.PATH_PROXY_ENV, clients.NO_PROXY_ENV)
+    for home in ("/root", RUNNER_HOME):
+        path = f"{home}/.docker/config.json"
+        existing = host.run(f"cat {path} 2>/dev/null || true", check=False).stdout
+        updated = clients.docker_client_config(existing, ctx.proxy, g.name)
+        if updated is not None:
+            host.write(path, updated, mode="0600")
+    host.run(clients.environment_script(ctx.proxy))
+    if ctx.proxy:
+        log(f"  [{host.alias}] egress proxy {ctx.proxy.url} for programs that opt in (HTTPS_PROXY), containers through the Docker client config")
+
+
+def apply_proxy(host, ctx: NodeContext, log=print) -> None:
+    """Bring an already set-up node up to date with the egress proxy (or its removal), without redoing
+    the rest of prepare_node: names, files, merged settings, and the seal when the proxy's address is new."""
+    g = ctx.gitea
+    _write_hosts(host, ctx)
+    files = {clients.PATH_PROFILE: clients.profile_script(g, ctx.proxy)}
+    if ctx.proxy:
+        files[clients.PATH_PROXY_ENV] = clients.proxy_env(ctx.proxy)
+    for path, content in files.items():
+        host.write(path, content)
+    _proxy_settings(host, ctx, log)
+    if ctx.proxy and not ctx.proxy.on_gitea:
+        egress.install(host, g.ip, ctx.allow, proxy_user=ctx.proxy_user_for(host.alias))
+        log(f"  [{host.alias}] egress: {egress.seal(host, 'proxy setup')} (allows the proxy at {ctx.proxy.ip})")
 
 
 def _configure_apt(host, ctx: NodeContext, facts: dict) -> None:

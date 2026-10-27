@@ -4,10 +4,20 @@ k3s ships an "airgap images" tarball with everything the cluster itself needs; w
 where k3s looks and tell containerd to trust Gitea's certificate. Application images are
 referenced by their Gitea name (`gitea.internal/pkgs/library--alpine:3.20`); there is no
 `docker.io` mirror, so a bare Docker Hub name fails at once on a sealed node.
+
+The egress proxy never touches the k3s unit: proxy variables there would make containerd pull images
+through the proxy. Pods opt in instead, from a ConfigMap `outpost-proxy` in the `default` namespace:
+
+    envFrom:
+      - configMapRef: {name: outpost-proxy, optional: true}
 """
+
+import json
 
 from .. import versions
 from . import clients, common
+
+CONFIGMAP = "outpost-proxy"
 
 IMAGES_DIR = "/var/lib/rancher/k3s/agent/images"
 
@@ -22,6 +32,23 @@ def registries_yaml(ctx: common.NodeContext) -> str:
         f"  \"{g.name}\":\n"
         f"    tls:\n      ca_file: {clients.PATH_CA}\n"
     )
+
+
+def configmap_yaml(proxy: clients.ProxyInfo) -> str:
+    """The proxy variables as a ConfigMap. JSON strings are valid YAML scalars, so values are quoted safely."""
+    data = {**proxy.env(), "OUTPOST_PROXY_ALLOWED": ",".join(proxy.allowed)}
+    return ("apiVersion: v1\nkind: ConfigMap\nmetadata:\n"
+            f"  name: {CONFIGMAP}\n  namespace: default\n  labels:\n    app.kubernetes.io/managed-by: outpost\n"
+            "data:\n" + "".join(f"  {k}: {json.dumps(v)}\n" for k, v in data.items()))
+
+
+def apply_configmap(server, proxy: clients.ProxyInfo | None, log=print) -> None:
+    """Idempotent: `kubectl apply` of the same ConfigMap changes nothing; without a proxy it is removed."""
+    if proxy:
+        server.run(f"cat <<'OUTPOST_EOF' | k3s kubectl apply -f -\n{configmap_yaml(proxy)}OUTPOST_EOF\n")
+        log(f"  [{server.alias}] ConfigMap default/{CONFIGMAP}: pods opt in with envFrom configMapRef {CONFIGMAP}")
+    else:
+        server.run(f"k3s kubectl -n default delete configmap {CONFIGMAP} --ignore-not-found >/dev/null")
 
 
 def _install(host, ctx: common.NodeContext, exec_args: str, env: str, log) -> None:
@@ -54,6 +81,7 @@ def setup(ctx: common.NodeContext, hosts: list, log=print) -> dict:
         "sleep 2; done; k3s kubectl get nodes")
     token = server.run("cat /var/lib/rancher/k3s/server/node-token").stdout.strip()
     log(f"  [{server.alias}] k3s server ready")
+    apply_configmap(server, ctx.proxy, log)
 
     for host in hosts[1:]:
         facts[host.alias] = common.prepare_node(host, ctx, log)

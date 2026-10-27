@@ -36,7 +36,7 @@ def test_page_and_overview(ui):
     data = json.loads(body)
     assert data["servers"]["gitea"]["name"] == "gitea.internal"
     assert data["needs"]["images"] == 2 and data["box"] is None
-    assert "needs/demo.yml" in data["files"] and [c["name"] for c in data["checks"]] == ["hello-alpine", "hello-k3s", "hello-python"]
+    assert "needs/demo.yml" in data["files"] and [c["name"] for c in data["checks"]] == ["hello-alpine", "hello-k3s", "hello-proxy-k3s", "hello-proxy", "hello-python"]
 
 
 def test_file_edit_is_restricted_and_validated(ui):
@@ -162,3 +162,31 @@ def test_search_and_run_history(ui, platform_dir):
 
 def test_server_status_rejects_odd_aliases(ui):
     assert json.loads(call(ui + "/api/server-status", "POST", {"alias": "x;y"})[1])["ok"] is False
+
+
+def test_servers_form_round_trips_the_egress_proxy(ui, platform_dir):
+    from outpost.config import load_servers
+    form = {"gitea": {"host": "g1", "name": "gitea.internal"}, "infrastructures": {"dev": {"type": "compose", "nodes": "d1"}},
+            "egress_proxy": {"allow": "api.twilio.com\n*.sendgrid.net, api.twilio.com", "host": "", "port": "3128", "distro": "noble"}}
+    assert call(ui + "/api/servers", "POST", form)[0] == 200
+    proxy = load_servers(platform_dir / "servers.yml").egress_proxy
+    assert proxy.host == "g1" and proxy.port == 3128 and proxy.allow == ["api.twilio.com", "*.sendgrid.net"] and proxy.distro == "noble"
+    assert "port" not in (platform_dir / "servers.yml").read_text()   # defaults stay out of the file
+    data = json.loads(call(ui + "/api/overview")[1])["servers"]["egress_proxy"]
+    assert data["allow"] == ["api.twilio.com", "*.sendgrid.net"] and data["host"] == "g1"
+    # a form without the card keeps the section; an empty allow list removes it; a bad entry is refused
+    assert call(ui + "/api/servers", "POST", {k: v for k, v in form.items() if k != "egress_proxy"})[0] == 200
+    assert load_servers(platform_dir / "servers.yml").egress_proxy.allow == ["api.twilio.com", "*.sendgrid.net"]
+    status, body = call(ui + "/api/servers", "POST", {**form, "egress_proxy": {"allow": "https://api.twilio.com", "port": "3128"}})
+    assert status == 400 and "egress_proxy.allow" in json.loads(body)["error"]
+    other = {**form, "egress_proxy": {"allow": "api.twilio.com", "host": "p1", "port": "8888"}}
+    assert call(ui + "/api/servers", "POST", other)[0] == 200
+    proxy = load_servers(platform_dir / "servers.yml").egress_proxy
+    assert (proxy.host, proxy.port) == ("p1", 8888)
+    assert call(ui + "/api/servers", "POST", {**form, "egress_proxy": {"allow": ""}})[0] == 200
+    assert load_servers(platform_dir / "servers.yml").egress_proxy is None
+
+
+def test_proxy_commands_are_allowed_from_the_page():
+    from outpost.ui.server import ALLOWED_COMMANDS
+    assert "proxy" in ALLOWED_COMMANDS

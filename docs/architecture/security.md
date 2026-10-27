@@ -12,6 +12,7 @@ Gitea, and cannot get anything from outside Gitea.** This page is the precise ve
 | Containers and pods are sealed too | the same chains on `FORWARD` and `DOCKER-USER`, evaluated for routed traffic | `hello-python` and `hello-k3s` checks |
 | The seal survives a reboot | a oneshot systemd unit before Docker and k3s | verify: `egress seal survives reboot` |
 | Every exception is written down | `allow:` in `servers.yml`; node-to-node addresses added automatically | `iptables -S OUTPOST` on the node |
+| A named exception reaches only its names, and only for programs that ask | the egress proxy's allow list (tinyproxy `FilterDefaultDeny`), the seal's single owner exception for user `outpost-proxy` on TCP 443 and 80 on the proxy host only; programs without `HTTPS_PROXY` still hit the seal ([named exceptions](proxy.md)) | `outpost proxy verify`; every node's verify: `proxy refuses unknown names`; the `hello-proxy` checks; `/var/log/outpost-proxy.log` |
 | Every time the internet was opened is logged | the egress script appends to `/var/log/outpost-egress.log` | the node page in the dashboard, or `cat` the file |
 | Nodes only trust Gitea, over TLS | a private CA you own; no insecure flags anywhere | verify: `gitea reachable with trusted TLS` |
 | Everything a build needs is listed | needs files and lockfiles are the only input to fetch | `outpost needs`; a build that needs more fails by name |
@@ -33,6 +34,12 @@ Gitea, and cannot get anything from outside Gitea.** This page is the precise ve
   happens. Protect `secrets/`; `outpost pki rotate` replaces the CA if it leaks.
 - **OS security updates are mirrored only for the packages you list** in `needs/os-updates.yml`
   and installed by `outpost infra upgrade`. A distro mirror is tens of gigabytes and out of scope.
+- **What an allowed name is used for.** With an egress proxy, every workload that sets `HTTPS_PROXY`
+  can reach every allowed name, for any request; the proxy sees names, not callers or content
+  (TLS stays end to end). An allowed name that hosts user content (a whole CDN, `*.amazonaws.com`)
+  is an exfiltration path; allow the narrowest names that work. Programs that ignore the proxy
+  variables, protocols other than HTTP(S), and DNS (port 53 is open to any resolver) are not
+  covered by the proxy at all.
 - **Private address ranges are allowed.** A node can reach anything on `10/8`, `172.16/12`
   and `192.168/16`. On a cloud provider that is usually your own VPC; check what else lives there.
 

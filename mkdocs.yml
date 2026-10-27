@@ -34,6 +34,7 @@ nav:
       - architecture/gitea.md
       - architecture/nodes.md
       - architecture/egress.md
+      - architecture/proxy.md
       - architecture/ci.md
       - architecture/security.md
   - Reference:

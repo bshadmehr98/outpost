@@ -6,7 +6,7 @@ another one. `outpost <command> --help` prints the options.
 | command | what it does | needs |
 |---|---|---|
 | `outpost init [folder]` | create a platform folder: `servers.yml`, `needs/demo.yml`, `checks/`, `demo/`, `mirrors.yml`, `.gitignore` | nothing |
-| `outpost needs` | print the merged needs, including the pinned platform files | nothing |
+| `outpost needs` | print the merged needs, including the pinned platform files (and tinyproxy for the proxy host when `servers.yml` has `egress_proxy`) | nothing |
 | `outpost fetch [--only kinds]` | download everything into `box/`; incremental; failures listed at the end | internet; Docker for apt, apk and rpm; pip for pypi |
 | `outpost pack [--out dist]` | one `tar.xz` per kind plus a signed manifest, for releases or USB | openssl |
 | `outpost gitea setup` | install or upgrade Gitea on its server (a backup is taken before an upgrade), make certificates, admin, token, org; seal it | ssh, openssl |
@@ -21,7 +21,9 @@ another one. `outpost <command> --help` prints the options.
 | `outpost check [name] --infra <name>` | run the smoke checks (or one) on the infrastructure's first node | ssh |
 | `outpost demo push` | write the workflow, create the repo and secret, commit `demo/`; Actions deploys | ssh |
 | `outpost demo status` | workflow runs and jobs, and what each node serves | ssh |
-| `outpost egress <target> seal\|open\|status [--reason]` | flip or show the seal on `gitea`, an infrastructure, or an SSH alias | ssh |
+| `outpost egress <target> seal\|open\|status [--reason]` | flip or show the seal on `gitea`, an infrastructure, or an SSH alias; on the proxy host the seal keeps the proxy's exception | ssh |
+| `outpost proxy setup` | with `egress_proxy` in `servers.yml`: install tinyproxy from Gitea on the proxy host, write the allow list, run it as `outpost-proxy`, seal the host with the one exception for that user; bring already set-up nodes up to date (proxy settings, the k3s ConfigMap); verify; writes `state/proxy.json`. See [named exceptions](../architecture/proxy.md) | ssh |
+| `outpost proxy verify` | the proxy checks only: service, package from Gitea, allow list, seal and exception, an allowed name reached, another refused with 403 | ssh |
 | `outpost ui [--port 8484]` | the dashboard on localhost | nothing |
 | `outpost lab up [--small]` / `down` | throwaway servers in Docker; `--small` skips k3s | Docker |
 | `outpost hosts [--refresh]` | what every server runs: OS, seal, versions, workloads; `--refresh` asks over SSH | ssh for `--refresh` |

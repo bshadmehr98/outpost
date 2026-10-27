@@ -5,6 +5,8 @@ services:
     image: ${IMAGE}
     ports:
       - "${PORT:-8080}:8000"
+    # the egress proxy's variables; `outpost infra setup` always writes this file (only a comment without a proxy)
+    env_file: /etc/outpost/proxy.env
     environment:
       INFRA: ${INFRA:-prod}
       NODE: "{{.Node.Hostname}}"

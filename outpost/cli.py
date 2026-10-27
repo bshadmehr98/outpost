@@ -11,6 +11,8 @@
   outpost check           run the smoke checks on an infrastructure
   outpost demo push       push the demo project to Gitea; Actions builds and deploys it on the sealed nodes
   outpost egress          seal or open a server's outbound internet
+  outpost proxy setup     the egress proxy: named exceptions to the seal (api.twilio.com...), if servers.yml has one
+  outpost proxy verify    prove it lets the allowed names through and refuses the rest
   outpost ui              the same, as a local web page
   outpost lab up|down     throwaway servers in Docker, to see a full run without any VPS
 
@@ -26,6 +28,7 @@ import argparse
 import json
 import shutil
 import sys
+import time
 from pathlib import Path
 
 from . import __version__, box as boxmod, hosts as hostsmod, pki, report as reportmod, versions
@@ -69,21 +72,64 @@ def _ca_pem(platform: Platform) -> str:
     return ca.read_text()
 
 
+def _cached_facts(platform: Platform, alias: str) -> dict | None:
+    """What `outpost hosts` last learned about a server (state/hosts/<alias>.json), without asking it."""
+    return hostsmod.cached(platform).get(alias)
+
+
+def _proxy_info(platform: Platform, servers, gitea=None, make_host=Host):
+    """How nodes reach the egress proxy, or None when servers.yml has no egress_proxy. On the Gitea host its
+    address is Gitea's; elsewhere the address recorded by `proxy setup`, else the cached facts, else asked over SSH."""
+    cfg = servers.egress_proxy
+    if not cfg:
+        return None
+    from .gitea.connect import gitea_info
+    from .infra import proxy as proxymod
+    gitea = gitea or gitea_info(platform, servers)
+    ip = None
+    if cfg.host != servers.gitea.host:
+        state = platform.read_state("proxy") or {}
+        ip = (state.get("ip") if state.get("host") == cfg.host else None) \
+            or (_cached_facts(platform, cfg.host) or {}).get("ip") or make_host(cfg.host).ip()
+    return proxymod.info(cfg, gitea, servers.gitea.host, ip)
+
+
+def _add_proxy_package(platform: Platform, servers, needs) -> None:
+    """With an egress proxy, tinyproxy joins the apt or rpm needs of the proxy host's distro."""
+    from .infra import proxy as proxymod
+    cfg = servers.egress_proxy
+    if cfg:
+        proxymod.add_package(needs, cfg, None if cfg.distro else _cached_facts(platform, cfg.host))
+
+
 def _node_context(platform: Platform, servers, infra, hosts: list[Host]) -> NodeContext:
     from .gitea.connect import gitea_info
     info = gitea_info(platform, servers)
     uploaded = platform.read_state("upload") or {}
     node_ips = [h.ip() for h in hosts] if len(hosts) > 1 else []
+    proxy = _proxy_info(platform, servers, info)
+    # a proxy on its own host is one more address every node may reach; on the Gitea host it already is
+    proxy_ip = [proxy.ip] if proxy and not proxy.on_gitea else []
     return NodeContext(
         gitea=info,
         ca_pem=_ca_pem(platform),
         distros=uploaded.get("distros", []),
         apk_branches=uploaded.get("apk_branches", []),
         rpm_distros=uploaded.get("rpm_distros", []),
-        allow=list(dict.fromkeys(infra.allow + node_ips)),
+        allow=list(dict.fromkeys(infra.allow + node_ips + proxy_ip)),
         infra_name=infra.name,
         args=infra.args,
+        proxy=proxy,
     )
+
+
+def _proxy_info_or_warn(platform: Platform, servers, info):
+    """For the config image: the proxy settings when they can be known; a warning instead of a failure."""
+    try:
+        return _proxy_info(platform, servers, info)
+    except (RuntimeError, SshError) as e:
+        log(f"  note: the egress proxy's address is unknown ({e}); the config image is built without proxy.env")
+        return None
 
 
 def _print_results(node: str, results: list[dict]) -> bool:
@@ -121,6 +167,7 @@ def cmd_needs(args) -> int:
     mirrors = load_mirrors(platform.mirrors_file)
     servers = _servers(platform)
     add_platform_files(needs, versions.platform_files(mirrors, servers.infra_types))
+    _add_proxy_package(platform, servers, needs)
     log(f"Needs from {', '.join(needs.sources) or 'no needs files'}:")
     for ref in needs.images:
         log(f"  image  {ref}")
@@ -136,6 +183,8 @@ def cmd_needs(args) -> int:
         log(f"  rpm    ({distro}) {', '.join(pkgs)}")
     for f in needs.files:
         log(f"  file   {f.name} {f.version}  <- {f.url}")
+    if servers.egress_proxy:
+        log(f"  (tinyproxy is for the egress proxy on {servers.egress_proxy.host}, from servers.yml egress_proxy)")
     log(f"Total: {json.dumps(needs.summary())}")
     return 0
 
@@ -147,6 +196,7 @@ def cmd_fetch(args) -> int:
     mirrors = load_mirrors(platform.mirrors_file)
     servers = _servers(platform)
     add_platform_files(needs, versions.platform_files(mirrors, servers.infra_types))
+    _add_proxy_package(platform, servers, needs)
     results = fetch_all(needs, platform.box_dir, mirrors, only=set(args.only) if args.only else None, log=log)
     platform.write_state("fetch", results)
     failures = [f"{k}: {v['error']}" for k, v in results.items() if isinstance(v, dict) and v.get("error")]
@@ -219,8 +269,9 @@ def cmd_upload(args) -> int:
                 raise RuntimeError("manifest.sig does not match pki/box.pub. The box was altered or signed with another key.")
             log("Signature OK")
         info = gitea_info(platform, servers)
+        proxy = _proxy_info_or_warn(platform, servers, info)
         with connect(platform, servers) as client:
-            stats = upload_box(box, client, info, _ca_pem(platform), log=log)
+            stats = upload_box(box, client, info, _ca_pem(platform), log=log, proxy=proxy)
         config = stats.get("config_image", {})
         platform.write_state("upload", {"distros": config.get("distros", []), "apk_branches": config.get("apk_branches", []),
                                         "rpm_distros": config.get("rpm_distros", []), "stats": stats, "source": [str(s) for s in sources]})
@@ -357,9 +408,13 @@ def cmd_check(args) -> int:
         log(f"No checks for {infra.type} in {platform.checks_dir}" + (f" named {args.name}" if args.name else ""))
         return 1
     host = Host(infra.nodes[0])
-    env = {"GITEA": info.name, "ORG": info.org}
+    env = {"GITEA": info.name, "ORG": info.org, **_proxy_check_env(platform, servers)}
     results = []
     for check in checks:
+        if "proxy" in check.requires and "PROXY_URL" not in env:
+            log(f"check {check.name}: skipped, it needs the egress proxy and none is set up "
+                "(egress_proxy in servers.yml, then `outpost proxy setup`)")
+            continue
         log(f"check {check.name} on {host.alias}: {check.description}")
         results.append(run_check(check, host, env, log=log))
     platform.write_state(f"check-{infra.name}", {"results": results})
@@ -367,6 +422,70 @@ def cmd_check(args) -> int:
     log()
     log(f"{len(results) - len(failed)}/{len(results)} checks passed" + (f"; failed: {', '.join(failed)}" if failed else ""))
     return 1 if failed else 0
+
+
+def _proxy_check_env(platform: Platform, servers) -> dict[str, str]:
+    """PROXY_URL, PROXY_ALLOWED (a name the proxy lets through) and PROXY_REFUSED (one it must refuse) for the
+    smoke checks, from state/proxy.json; empty when no proxy is configured or it was never set up."""
+    from .infra import proxy as proxymod
+    state = platform.read_state("proxy") or {}
+    if not servers.egress_proxy or not state.get("url") or not state.get("allow"):
+        return {}
+    return {"PROXY_URL": state["url"], "PROXY_ALLOWED": proxymod.probe_name(state["allow"]),
+            "PROXY_REFUSED": proxymod.refused_name(state["allow"])}
+
+
+def cmd_proxy(args) -> int:
+    """The egress proxy: install and seal it on its host, bring already set-up nodes up to date, verify."""
+    from .gitea.connect import gitea_info
+    from .infra import k3s, proxy as proxymod
+    from .infra.common import apply_proxy
+    platform = _platform(args)
+    servers = _servers(platform)
+    cfg = servers.egress_proxy
+    if not cfg:
+        raise ConfigError("servers.yml has no egress_proxy section. Add one (allow: [api.twilio.com]) to give sealed "
+                          "nodes named exceptions; see docs/architecture/proxy.md.")
+    info = gitea_info(platform, servers)
+    host = Host(cfg.host)
+    on_gitea = cfg.host == servers.gitea.host
+    proxy = proxymod.info(cfg, info, servers.gitea.host, None if on_gitea else host.ip())
+    # what the proxy host itself may reach when sealed: Gitea's own list on the Gitea host; elsewhere that of
+    # the infrastructure it belongs to, if any, plus its fellow nodes
+    member = next((i for i in servers.infrastructures.values() if cfg.host in i.nodes), None)
+    egress_allow = list(servers.gitea.allow) if on_gitea else list(member.allow) if member else []
+    client_allow = list(dict.fromkeys(servers.gitea.allow + [a for i in servers.infrastructures.values() for a in i.allow]))
+    uploaded = platform.read_state("upload") or {}
+    ctx = NodeContext(gitea=info, ca_pem=_ca_pem(platform), distros=uploaded.get("distros", []),
+                      apk_branches=uploaded.get("apk_branches", []), rpm_distros=uploaded.get("rpm_distros", []),
+                      allow=egress_allow, infra_name="egress proxy", proxy=proxy)
+    if args.action == "setup":
+        log(f"Setting up the egress proxy on {cfg.host}: {proxy.url}, allowing {', '.join(cfg.allow)}")
+        result = proxymod.setup(host, ctx, cfg, egress_allow=egress_allow, client_allow=client_allow, log=log)
+        platform.write_state("proxy", {**result, "when": time.strftime("%Y-%m-%dT%H:%M:%S")})
+        done = [n for n in servers.infrastructures if platform.read_state(f"infra-{n}")]
+        if done:
+            log(f"==> nodes of {', '.join(done)}: proxy settings (proxy.env, profile, Docker client config)")
+        for name in done:
+            infra = servers.infra(name)
+            hosts = [Host(n) for n in infra.nodes]
+            node_ctx = _node_context(platform, servers, infra, hosts)
+            for node in hosts:
+                apply_proxy(node, node_ctx, log=log)
+            if infra.type == "k3s":
+                k3s.apply_configmap(hosts[0], node_ctx.proxy, log=log)
+        log()
+    log(f"==> verifying the egress proxy on {cfg.host}")
+    results = proxymod.verify(host, ctx, cfg)
+    ok = _print_results(cfg.host, results)
+    state = platform.read_state("proxy") or {}
+    platform.write_state("proxy", {**state, "verify": {"result": "ok" if ok else "problems", "checks": results,
+                                                         "when": time.strftime("%Y-%m-%dT%H:%M:%S")}})
+    hostsmod.record(platform, cfg.host, hostsmod.inspect(host))
+    if ok and args.action == "setup":
+        log(f"Programs opt in with HTTPS_PROXY={proxy.url} (see /etc/outpost/proxy.env on every node); "
+            "those that do not still have no internet. Next: outpost check hello-proxy --infra <name>")
+    return 0 if ok else 1
 
 
 def cmd_egress(args) -> int:
@@ -464,8 +583,10 @@ def cmd_pki(args) -> int:
     from .gitea.upload import push_config_image
     uploaded = platform.read_state("upload") or {}
     with connect(platform, servers) as client:
-        push_config_image(client, gitea_info(platform, servers), _ca_pem(platform), uploaded.get("distros", []),
-                          apk_branches=uploaded.get("apk_branches", []), rpm_distros=uploaded.get("rpm_distros", []), log=log)
+        info = gitea_info(platform, servers)
+        push_config_image(client, info, _ca_pem(platform), uploaded.get("distros", []),
+                          apk_branches=uploaded.get("apk_branches", []), rpm_distros=uploaded.get("rpm_distros", []), log=log,
+                          proxy=_proxy_info_or_warn(platform, servers, info))
     done = [n for n in servers.infrastructures if platform.read_state(f"infra-{n}")]
     log(f"==> [3/3] nodes of {', '.join(done) or 'no infrastructure yet'}: trust the new CA")
     rc = 0
@@ -530,6 +651,10 @@ def build_parser() -> argparse.ArgumentParser:
     e.add_argument("action", choices=["seal", "open", "status"])
     e.add_argument("--reason", help="written to the server's egress log")
     e.set_defaults(func=cmd_egress)
+
+    x = sub.add_parser("proxy", help="the egress proxy: named exceptions to the seal (servers.yml egress_proxy)")
+    x.add_argument("action", choices=["setup", "verify"])
+    x.set_defaults(func=cmd_proxy)
 
     w = sub.add_parser("ui", help="open the local dashboard")
     w.add_argument("--port", type=int, default=8484)

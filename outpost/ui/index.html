@@ -549,8 +549,10 @@ function machineDetail(alias, roles, h) {
         <dt>Resources</dt><dd>${esc(h.cpus || '?')} cpu · ${h.mem_total ? Math.round(h.mem_used / h.mem_total * 100) + '% of ' + Math.round(h.mem_total / 1024) + ' GB memory' : '?'} · load ${esc(h.load || '?')} · disk ${esc(h.disk_free || '?')} free of ${esc(h.disk_total || '?')}</dd>
         <dt>Booted</dt><dd>${esc(h.booted || '?')} (${esc(h.uptime || '')})</dd></dl></div>
       <div><table><tr><th>Installed</th><th>Version</th><th>Pinned</th><th>Service</th></tr>
-        ${Object.entries(h.installed).filter(([, v]) => v).map(([k, v]) => { const want = o.versions[k], svc = { gitea: 'gitea', docker: 'docker', k3s: h.services.k3s ? 'k3s' : 'k3s-agent', coredns: 'outpost-dns', runner: 'outpost-runner' }[k]; const ok = !want || v === want || (k === 'k3s' && v.split('+')[0] === want.split('+')[0]); return `<tr><td>${esc(k)}</td><td class="ver ${ok ? '' : 'drift'}">${esc(v)}</td><td class="ver muted">${esc(want || '')}</td><td>${svc ? (h.services[svc] === 'active' ? `<span class="ok">${ic('check')} running</span>` : `<span class="muted">${esc(h.services[svc] || '—')}</span>`) : ''}</td></tr>`; }).join('') || '<tr><td colspan=4 class="muted">nothing installed by Outpost yet</td></tr>'}</table>
+        ${Object.entries(h.installed).filter(([, v]) => v).map(([k, v]) => { const want = o.versions[k], svc = { gitea: 'gitea', docker: 'docker', k3s: h.services.k3s ? 'k3s' : 'k3s-agent', coredns: 'outpost-dns', runner: 'outpost-runner', tinyproxy: 'outpost-proxy' }[k]; const ok = !want || v === want || (k === 'k3s' && v.split('+')[0] === want.split('+')[0]); return `<tr><td>${esc(k)}</td><td class="ver ${ok ? '' : 'drift'}">${esc(v)}</td><td class="ver muted">${esc(want || '')}</td><td>${svc ? (h.services[svc] === 'active' ? `<span class="ok">${ic('check')} running</span>` : `<span class="muted">${esc(h.services[svc] || '—')}</span>`) : ''}</td></tr>`; }).join('') || '<tr><td colspan=4 class="muted">nothing installed by Outpost yet</td></tr>'}</table>
         ${workloads(h)}</div></div>
+      ${roles.includes('egress proxy') ? `<div style="margin-top:14px"><b>Egress proxy log</b> <span class="hint" style="display:inline">· the last lines of /var/log/outpost-proxy.log: every CONNECT with its name, and every refusal</span>
+        <pre class="mono" style="font-size:12px;white-space:pre-wrap;margin:6px 0 0">${esc((h.proxy_log_tail || []).join('\n') || 'no lines yet')}</pre></div>` : ''}
       <div id="srv-${esc(alias)}" style="margin-top:14px"></div>`;
   const infra = o.servers ? Object.entries(o.servers.infrastructures).find(([, i]) => i.nodes.includes(alias))?.[0] : null;
   const isGitea = o.servers && alias === o.servers.gitea.host;
@@ -632,6 +634,15 @@ function pageMaintain() {
   html += card('Certificate', 'lock', `<p style="margin:0 0 10px;color:var(--ink-2)">Every server trusts one private CA that lives in <code>pki/</code> (public half) and <code>secrets/</code> (private half). If the private key may have leaked, or just every few years, <b>rotate</b> it: a new CA and Gitea certificate are made and pushed to Gitea, into the config image and onto every node. Applications keep running; images that baked the old CA into themselves must be rebuilt.</p>
     ${willDo('Moves the old CA aside, runs Gitea setup, pushes a new config image, runs Set up on every infrastructure.', allHosts(), 'five to ten minutes', false)}`,
     `<button class="danger" ${dis(!!g)} onclick="if(confirm('Rotate the CA now? Every server will be reconfigured; this takes a few minutes.')) run('maintain', ['pki','rotate'])">${ic('refresh')}Rotate the CA</button>${cmdHint(['pki', 'rotate'])}`);
+  const px = o.servers?.egress_proxy, pst = o.state.proxy || {};
+  html += card('Named exceptions (egress proxy)', 'globe', px ? `<p style="margin:0 0 10px;color:var(--ink-2)">Sealed workloads reach these names, and only these, through one tinyproxy on <code>${esc(px.host)}</code>, if they set <code>HTTPS_PROXY</code>. A program that does not still has no internet. To change the list, edit <code>egress_proxy.allow</code> in servers.yml (step 1) and run <b>Set up the proxy</b> again.</p>
+    <dl class="kv"><dt>Allowed</dt><dd>${(px.allow || []).map(a => `<code>${esc(a)}</code>`).join(' ')}</dd>
+    <dt>Address</dt><dd class="mono">${esc(pst.url || '(after setup)')}</dd>
+    <dt>Set up</dt><dd>${pst.when ? esc(when(pst.when)) + (pst.tinyproxy ? ', tinyproxy ' + esc(pst.tinyproxy) : '') : pill('warn', 'not yet')}</dd>
+    <dt>Verified</dt><dd>${pst.verify ? pill(pst.verify.result === 'ok' ? 'ok' : 'bad', pst.verify.result === 'ok' ? 'allowed names pass, others refused' : 'problems') + ' <span class="muted">' + esc(when(pst.verify.when)) + '</span>' : pill('', 'never')}</dd></dl>
+    ${willDo('Installs tinyproxy from Gitea on the proxy host, writes the allow list, starts it as its own user, and seals the host with one exception for that user. Nodes already set up get the proxy settings.', [px.host], 'a minute or two', false)}`
+    : `<p style="margin:0;color:var(--ink-2)">None. No sealed workload can reach any name outside the platform. If an application must call a third-party API (an SMS or e-mail provider), add the names under <b>Egress proxy</b> in step 1; see docs/architecture/proxy.md.</p>`,
+    px ? `<button class="primary" ${dis(!!g)} onclick="run('maintain', ['proxy','setup'])">${ic('play')}Set up the proxy</button><button ${dis(!!pst.when)} onclick="run('maintain', ['proxy','verify'])">${ic('shield')}Verify the proxy</button>${cmdHint(['proxy', 'setup'])}` : `<button class="sm" onclick="go('servers')">Add names in step 1</button>`);
   html += card('Evidence', 'file', `<p style="margin:0;color:var(--ink-2)">The <b>proof report</b> is one page built from what the last commands recorded: which machines, their seal state, every verification table, the smoke checks and what the demo reports. Print it or save it for whoever needs to be convinced. It needs no server; refresh the machines and re-run Verify first if you want it fresh.</p>`,
     `<a class="btn" href="/report.html" target="_blank" rel="noopener">${ic('ext')}Open the proof report</a>${cmdHint(['report'])}`);
   return html;
@@ -706,6 +717,16 @@ function sshPanel() {
     `<button class="primary" onclick="saveServers()">${ic('check')}Save servers.yml</button>
      ${o.servers && !first ? `<button onclick="sshCheckAll()">${ic('wifi')}Test all connections</button>` : ''}
      <button class="ghost sm" onclick="ui.yamlServers=!ui.yamlServers;render()">${ui.yamlServers ? 'Hide text editor' : 'Edit as text instead'}</button>`);
+  const px = o.servers?.egress_proxy || null;
+  html += card('Egress proxy (optional)', 'globe', `<p style="margin:0 0 10px;color:var(--ink-2)">Sealed nodes reach nothing outside. If an application must call a few third-party services by name (an SMS API, an e-mail provider behind a CDN), list them here: Outpost installs one proxy that lets only these names through, and programs opt in with <code>HTTPS_PROXY</code>. Leave the list empty for none.</p>
+    <div class="grid2">
+      <div><label class="f">Allowed names</label><textarea id="px-allow" rows="4" placeholder="api.twilio.com&#10;*.sendgrid.net">${esc((px?.allow || []).join('\n'))}</textarea>
+        <div class="hint">One per line. Host names only, no https:// or paths; <code>*.example.com</code> allows the domain and every name under it.</div></div>
+      <div><label class="f">Proxy host <span style="font-weight:400">(SSH alias; empty = the Gitea server)</span></label><input type="text" id="px-host" list="aliases" value="${esc(px && px.host !== g.host ? px.host : '')}" placeholder="${esc(g.host || 'gitea-1')}" autocomplete="off">
+        <div class="grid2" style="margin-top:8px"><div><label class="f">Port</label><input type="text" id="px-port" value="${esc(String(px?.port || 3128))}"></div>
+        <div><label class="f">Its distro <span style="font-weight:400">(optional)</span></label><input type="text" id="px-distro" value="${esc(px?.distro || '')}" placeholder="noble, bookworm, rocky9"></div></div>
+        <div class="hint">The distro tells Fetch which tinyproxy package to download; without it Outpost asks the host (Look again on the Machines page).</div></div></div>`,
+    `<button class="primary" onclick="saveServers()">${ic('check')}Save servers.yml</button>`);
   html += `<div id="ssh-results"></div>${ui.yamlServers ? `<div class="card"><div class="bd">${yamlEditor('servers.yml')}</div></div>` : ''}`;
   if (o.servers && !first) html += serversSummary();
   return html;
@@ -720,7 +741,8 @@ function addInfraRow() { $('infra-table').insertAdjacentHTML('beforeend', infraR
 async function saveServers() {
   const infrastructures = {};
   document.querySelectorAll('.infra-row').forEach(tr => { const name = tr.querySelector('.i-name').value.trim(); if (name) infrastructures[name] = { type: tr.querySelector('.i-type').value, nodes: tr.querySelector('.i-nodes').value, args: tr.querySelector('.i-args').value }; });
-  const r = await api('/api/servers', 'POST', { gitea: { host: $('g-host').value, name: $('g-name').value }, infrastructures, ssh_config: o.servers?.ssh_config ? relSsh() : null });
+  const egress_proxy = $('px-allow') ? { allow: $('px-allow').value, host: $('px-host').value.trim(), port: $('px-port').value.trim(), distro: $('px-distro').value.trim() } : undefined;
+  const r = await api('/api/servers', 'POST', { gitea: { host: $('g-host').value, name: $('g-name').value }, infrastructures, ssh_config: o.servers?.ssh_config ? relSsh() : null, ...(egress_proxy ? { egress_proxy } : {}) });
   if (r.error) { toast('Not saved: ' + r.error, 6000); return; }
   toast('servers.yml saved'); dirty = false; await refresh(true);
 }
@@ -1173,7 +1195,7 @@ async function poll() {
 }
 
 // =============================================================== refresh loop
-const PAGE_OF = { lab: 'servers', fetch: 'fetch', pack: 'fetch', gitea: 'gitea', upload: 'upload', infra: 'infra', check: 'prove', egress: 'prove', needs: 'needs', demo: 'deploy', hosts: 'machines', report: 'maintain', pki: 'maintain' };
+const PAGE_OF = { lab: 'servers', fetch: 'fetch', pack: 'fetch', gitea: 'gitea', upload: 'upload', infra: 'infra', check: 'prove', egress: 'prove', needs: 'needs', demo: 'deploy', hosts: 'machines', report: 'maintain', pki: 'maintain', proxy: 'maintain' };
 async function refresh(force = false) {
   const data = await api('/api/overview');
   if (data.error && !data.root) { $('page').innerHTML = notice('bad', `<b>Cannot reach the dashboard server.</b>${esc(data.error)}`); return; }

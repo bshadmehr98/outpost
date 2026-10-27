@@ -31,7 +31,8 @@ last look over SSH: internet switched off or OPEN, system, address, what Outpost
 uptime. Click a card for the detail: every version against the pin, the services, what runs there
 (Compose projects, Swarm stacks and services, Kubernetes deployments, Gitea repositories and
 package size), the internet-switch log, and buttons to look again, switch the internet on or
-off with a reason, or run that machine's setup again. *Look again at every machine* refreshes
+off with a reason, or run that machine's setup again. The egress proxy's host shows the role
+*egress proxy*, tinyproxy with its service, and the last lines of the proxy log. *Look again at every machine* refreshes
 all of them; a checkbox makes the page do it every five minutes.
 
 **Applications.** Per infrastructure: set up or not, what is running there, the URL the demo
@@ -44,7 +45,7 @@ machines it touches, how long it usually takes, whether it needs internet.
 
 | Step | Page | What it does |
 |---|---|---|
-| 1 | Your servers | fill in SSH aliases and infrastructures, or create a practice lab in Docker; test each connection |
+| 1 | Your servers | fill in SSH aliases and infrastructures, or create a practice lab in Docker; test each connection; the optional *Egress proxy* card: allowed names, proxy host (empty for the Gitea host), port, distro |
 | 2 | What your projects need | scan a folder, upload a lockfile or write the list; *Scan again* shows what is new; *Do we have…?* searches |
 | 3 | Download the supplies | box size by kind, what the next download gets, what failed and why, what is in the box but no longer needed |
 | 4 | Your local internet | where Gitea goes, Set up, its address, token and web links |
@@ -61,7 +62,8 @@ last lines of the output.
 
 **Keep it healthy.** Backups of Gitea (last one, the archives in `backups/`, back up now,
 restore one), the versions table (pinned against every machine), security updates from Gitea,
-rotating the CA, and the proof report.
+rotating the CA, the named exceptions (the allowed names, the proxy's address, when it was set up
+and verified, with *Set up the proxy* and *Verify the proxy*), and the proof report.
 
 **History.** Every command started from the page, newest first, as a sentence ("Uploaded 50 new
 files to Gitea", "Set up and verified dev: 1 node all good", "failed: A disk is full."), with

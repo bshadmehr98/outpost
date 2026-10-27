@@ -94,3 +94,19 @@ def test_setup_replaces_a_token_this_gitea_does_not_accept(prepared):
     host.responses.insert(0, (r"api/v1/user", "401"))
     setupmod.setup(platform, servers, log=lambda *a: None)
     assert platform.read_secret("gitea-token") == "abc123token"
+
+
+def test_setup_again_keeps_the_proxy_exception_on_the_gitea_host(prepared):
+    platform, servers, host = prepared
+    setupmod.setup(platform, servers, log=lambda *_: None)
+    assert "--uid-owner" not in host.files["/usr/local/sbin/outpost-egress"]   # no proxy: the plain seal
+    path = platform.servers_file
+    path.write_text(path.read_text() + "\negress_proxy: {allow: [api.twilio.com]}\n")
+    platform.write_state("proxy", {"host": "gitea-1", "url": "http://gitea.internal:3128", "allow": ["api.twilio.com"]})
+    setupmod.setup(platform, load_servers(path), log=lambda *_: None)
+    script = host.files["/usr/local/sbin/outpost-egress"]
+    assert 'PROXY_USER="outpost-proxy"' in script and "--uid-owner" in script
+    # the proxy moved elsewhere: the Gitea host gets the plain seal back
+    path.write_text(path.read_text().replace("{allow: [api.twilio.com]}", "{host: proxy-1, allow: [api.twilio.com]}"))
+    setupmod.setup(platform, load_servers(path), log=lambda *_: None)
+    assert "--uid-owner" not in host.files["/usr/local/sbin/outpost-egress"]

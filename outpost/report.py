@@ -41,6 +41,8 @@ def build(platform: Platform, servers: Servers | None) -> dict:
         "arch": servers.arch if servers else versions.ARCH,
         "serving": demo.get("serving") or {},
         "demo_at": _mtime(platform.state_dir / "demo-status.json"),
+        "proxy": {"config": vars(servers.egress_proxy) if servers and servers.egress_proxy else None,
+                  "state": state.get("proxy") or {}},
     }
 
 
@@ -57,6 +59,10 @@ def verdict(data: dict) -> dict:
     problems = [n for n, i in data["infras"].items() if i["verify"] and i["verify"].get("result") != "ok"]
     leaks = [n for n, s in data["serving"].items() if s.get("health") and not (s["health"].get("sealed_at_build") and s["health"].get("sealed_now"))]
     drift = {a: hosts.drift(h) for a, h in data["hosts"].items() if hosts.drift(h)}
+    proxy = data.get("proxy") or {}
+    proxy_verify = ((proxy.get("state") or {}).get("verify") or {}).get("result")
+    if proxy.get("config") and proxy_verify and proxy_verify != "ok":
+        problems.append("egress proxy")
     ok = not open_ and not problems and not leaks and bool(verified)
     return {"ok": ok, "sealed": sealed, "open": open_, "unreachable": unreachable, "verified": verified, "problems": problems,
             "leaks": leaks, "drift": drift, "servers": len(data["roles"])}
@@ -127,6 +133,8 @@ def render(data: dict) -> str:
                    f"<td>{e(inst)}{('<div class=small><span class=fail>drift:</span> ' + e('; '.join(drift)) + '</div>') if drift else ''}</td><td>{e(h.get('seen', ''))}</td></tr>")
     out.append("</table>")
 
+    out.extend(_named_exceptions(data, e))
+
     for name, i in data["infras"].items():
         out.append(f"<h2>{e(name)} <span class='muted small'>({e(i['type'])}, nodes {e(', '.join(i['nodes']))})</span></h2>")
         ver = i["verify"]
@@ -167,6 +175,37 @@ def render(data: dict) -> str:
                "Re-run any of them and regenerate this page to refresh the evidence.</p>")
     out.append("</body></html>")
     return "\n".join(out)
+
+
+def _named_exceptions(data: dict, e) -> list[str]:
+    """The egress proxy: the only names a sealed workload can reach, and only if it asks for them."""
+    proxy = data.get("proxy") or {}
+    cfg, st = proxy.get("config"), proxy.get("state") or {}
+    out = ["<h2>Named exceptions</h2>"]
+    if not cfg:
+        out.append("<p>None. There is no egress proxy (no <code>egress_proxy</code> in servers.yml), so no workload can reach any "
+                   "name outside the platform.</p>")
+        return out
+    out.append("<table>")
+    out.append("<tr><th>Allowed names</th><td>" + ", ".join(f"<code>{e(a)}</code>" for a in cfg.get("allow") or []) +
+               "<div class='small muted'>Reached only through the egress proxy, by programs that set HTTPS_PROXY; every other name is refused "
+               "with 403, and a program without the proxy variables still has no internet.</div></td></tr>")
+    where = f"<code>{e(str(cfg.get('host')))}</code>" + (f" ({e(str(st.get('ip')))}), <code>{e(str(st.get('url')))}</code>" if st.get("url") else "")
+    out.append(f"<tr><th>Proxy host</th><td>{where}<div class='small muted'>tinyproxy {e(str(st.get('tinyproxy') or '?'))} from Gitea, "
+               "as user outpost-proxy, the only user whose outbound TCP 443 and 80 the seal lets through, on that host only</div></td></tr>")
+    out.append(f"<tr><th>Set up</th><td>{e(st['when']) if st.get('when') else '<span class=fail>not yet (outpost proxy setup)</span>'}</td></tr>")
+    ver = st.get("verify") or {}
+    if ver:
+        bad = [c for c in ver.get("checks") or [] if not c.get("ok")]
+        out.append(f"<tr><th>Verified</th><td class='{'pass' if ver.get('result') == 'ok' else 'fail'}'>{e(ver.get('when', ''))}: "
+                   f"{'all checks passed' if ver.get('result') == 'ok' else 'problems: ' + e(', '.join(c['name'] for c in bad))}</td></tr>")
+    if st.get("allow") and sorted(st["allow"]) != sorted(cfg.get("allow") or []):
+        out.append("<tr><th>Note</th><td class='fail'>servers.yml allows other names than the proxy was set up with; run <code>outpost proxy setup</code></td></tr>")
+    tail = (data["hosts"].get(cfg.get("host")) or {}).get("proxy_log_tail") or []
+    out.append("<tr><th>Proxy log</th><td>" + (f"<pre class='small'>{e(chr(10).join(tail))}</pre>" if tail else "<span class='muted'>no lines recorded</span>") +
+               "<div class='small muted'>The last lines of /var/log/outpost-proxy.log when the host was last inspected: every CONNECT with its name, and every refusal.</div></td></tr>")
+    out.append("</table>")
+    return out
 
 
 def write(platform: Platform, servers: Servers | None, out: Path | None = None) -> Path:

@@ -100,6 +100,7 @@ ghcr.io, and referenced as `gitea.internal/pkgs/org--app:1.4`, exactly like a Do
 | `apk add` from a branch other than the image's (`v3.19` packages on `alpine:3.20`) | apk refuses the mismatch, or installs an older libc | the `branch:` must match the base image's `/etc/alpine-release` |
 | `npm install` without a lockfile | nothing tells Outpost what to fetch | commit `package-lock.json` and point `needs` at it |
 | a tool that downloads at first run (browsers, models) | same | download on your laptop, list the file, copy it in |
+| a `RUN` step that must call a third-party API (a licence check, a webhook) | the seal rejects it | add the name to `egress_proxy.allow` and run `outpost proxy setup`: on a node with the proxy, `docker build` passes `HTTPS_PROXY`, `HTTP_PROXY` and `NO_PROXY` as build arguments (the Docker client config), so a step that uses them (`curl`, pip, Python's urllib, requests) goes through the proxy. Prefer doing it at run time; a build that depends on the internet is less reproducible |
 
 The failure is always immediate and names the host it tried to reach. That is your to-do list.
 The dashboard's project scan reads the Gitea names back into needs (`library--python:3.12-slim`

@@ -18,3 +18,10 @@ infrastructures:
   # lab:
   #   type: k3s
   #   nodes: [lab-1, lab-2]
+
+# Named exceptions (optional): the few third-party services sealed workloads may call by name.
+# One proxy, by default on the Gitea host, lets through only these names; programs opt in with
+# HTTPS_PROXY (see /etc/outpost/proxy.env on the nodes). Then: fetch, upload, outpost proxy setup.
+# egress_proxy:
+#   allow: [api.twilio.com, "*.sendgrid.net"]
+#   distro: noble            # the proxy host's apt codename or rpm distro, so fetch gets its tinyproxy

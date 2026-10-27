@@ -6,9 +6,11 @@ import platform
 from importlib import metadata
 from pathlib import Path
 
+from concurrent.futures import ThreadPoolExecutor
+
 from flask import Flask, jsonify, render_template
 
-from probe import probe_all
+from probe import probe_all, probe_proxy
 
 app = Flask(__name__)
 HERE = Path(__file__).parent
@@ -24,6 +26,9 @@ def read(path: str) -> str:
 
 def facts() -> dict:
     build = json.loads((HERE / "build-proof.json").read_text()) if (HERE / "build-proof.json").exists() else None
+    with ThreadPoolExecutor(max_workers=2) as pool:   # both at once, so /healthz stays within its probe timeout
+        now, proxy = pool.submit(probe_all, GITEA or None), pool.submit(probe_proxy)
+        now, proxy = now.result(), proxy.result()
     return {
         "infra": os.environ.get("INFRA", "?"),
         "node": os.environ.get("NODE", ""),
@@ -35,7 +40,8 @@ def facts() -> dict:
         "pip_conf": read("/etc/pip.conf"),
         "apt_sources": read("/etc/apt/sources.list.d/outpost.list"),
         "build": build,
-        "now": probe_all(GITEA or None),
+        "now": now,
+        "proxy": proxy,          # None without the egress proxy variables (proxy.env / the outpost-proxy ConfigMap)
     }
 
 
@@ -49,4 +55,4 @@ def healthz():
     f = facts()
     return jsonify({"ok": True, "infra": f["infra"], "sha": f["sha"], "hostname": f["hostname"],
                     "sealed_at_build": bool(f["build"] and f["build"]["sealed"]), "sealed_now": f["now"]["sealed"],
-                    "gitea_ok": f["now"]["gitea_ok"]})
+                    "gitea_ok": f["now"]["gitea_ok"], "proxy_ok": f["proxy"]["ok"] if f["proxy"] else None})

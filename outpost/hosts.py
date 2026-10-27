@@ -3,13 +3,14 @@
   inspect(host)                      run one script: OS, address, uptime, disk, memory, installed versions,
                                      services, seal state, and the workloads running there
   refresh(platform, servers, ...)    inspect every host in servers.yml (or some) and cache the answers
-  roles(servers)                     alias -> ["gitea", "dev: compose", "prod: swarm manager", ...]
+  roles(servers)                     alias -> ["gitea", "dev: compose", "prod: swarm manager", "egress proxy", ...]
   cached(platform)                   the cache, for the dashboard and the report; never talks to a server
 
 The setup and verify commands refresh the hosts they touched, so the dashboard's Machines page is
 current without asking. `outpost hosts` prints the same table; `--refresh` asks every server again.
 """
 
+import base64
 import json
 import time
 from pathlib import Path
@@ -40,7 +41,9 @@ echo "buildx=$(docker buildx version 2>/dev/null | awk '{print $2}' | sed 's/^v/
 echo "k3s=$(k3s --version 2>/dev/null | head -1 | awk '{print $3}')"
 echo "coredns=$(/usr/local/bin/coredns -version 2>/dev/null | head -1 | sed 's/^CoreDNS-//')"
 echo "runner=$(/usr/local/bin/gitea-runner --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)"
-for s in gitea docker k3s k3s-agent outpost-dns outpost-runner; do echo "svc_$s=$(systemctl is-active $s 2>/dev/null)"; done
+echo "tinyproxy=$(tinyproxy -v 2>/dev/null | grep -oE '[0-9]+\.[0-9]+(\.[0-9]+)?' | head -1)"
+if [ -f /var/log/outpost-proxy.log ]; then echo "proxy_log_tail=$(tail -n 20 /var/log/outpost-proxy.log | base64 | tr -d "\\n")"; fi
+for s in gitea docker k3s k3s-agent outpost-dns outpost-runner outpost-proxy; do echo "svc_$s=$(systemctl is-active $s 2>/dev/null)"; done
 echo "containers=$(docker ps -q 2>/dev/null | wc -l | tr -d ' ')"
 echo "compose_projects=$(docker ps --format '{{.Label "com.docker.compose.project"}}' 2>/dev/null | grep -v '^$' | sort -u | tr '\n' ' ')"
 echo "swarm=$(docker info --format '{{.Swarm.LocalNodeState}} {{.Swarm.ControlAvailable}}' 2>/dev/null)"
@@ -52,10 +55,11 @@ echo "gitea_repos=$(ls /var/lib/gitea/data/repositories/*/ 2>/dev/null | grep -c
 echo "gitea_packages_mb=$(du -sm /var/lib/gitea/data/packages 2>/dev/null | cut -f1)"
 """
 
-INSTALLED = ("gitea", "docker", "compose", "buildx", "k3s", "coredns", "runner")
+INSTALLED = ("gitea", "docker", "compose", "buildx", "k3s", "coredns", "runner", "tinyproxy")
 
 
 def expected_versions() -> dict:
+    """Pinned versions. tinyproxy is not pinned: it is the distro's own package, at whatever version Gitea has."""
     return {"gitea": versions.GITEA, "docker": versions.DOCKER, "compose": versions.COMPOSE, "buildx": versions.BUILDX,
             "k3s": versions.K3S, "coredns": versions.COREDNS, "runner": versions.RUNNER}
 
@@ -74,6 +78,11 @@ def inspect(host) -> dict:
             key, value = line.split("=", 1)
             data[key.strip()] = value.strip()
     data["installed"] = {k: data.pop(k, "") for k in INSTALLED}
+    if "proxy_log_tail" in data:   # base64 on the wire, so a log line cannot break the key=value format
+        try:
+            data["proxy_log_tail"] = base64.b64decode(data["proxy_log_tail"]).decode("utf-8", "replace").splitlines()
+        except ValueError:
+            data["proxy_log_tail"] = []
     data["services"] = {k[4:]: data.pop(k) for k in list(data) if k.startswith("svc_")}
     data["workloads"] = {
         "containers": int(data.pop("containers", "0") or 0),
@@ -97,6 +106,8 @@ def roles(servers: Servers) -> dict[str, list[str]]:
             elif len(infra.nodes) > 1:
                 part = " worker" if infra.type == "swarm" else " agent" if infra.type == "k3s" else ""
             out.setdefault(node, []).append(f"{name}: {infra.type}{part}")
+    if servers.egress_proxy:
+        out.setdefault(servers.egress_proxy.host, []).append("egress proxy")
     return out
 
 
@@ -143,7 +154,9 @@ def drift(data: dict) -> list[str]:
     """Installed pieces whose version differs from the pinned one, as 'docker 29.9.1 (pinned 29.9.2)'."""
     out = []
     for name, have in (data.get("installed") or {}).items():
-        want = expected_versions()[name]
+        want = expected_versions().get(name)
+        if not want:
+            continue
         if have and have != want and not (name == "k3s" and have.split("+")[0] == want.split("+")[0]):
             out.append(f"{name} {have} (pinned {want})")
     return out

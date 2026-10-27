@@ -4,7 +4,10 @@ Output is a list of {name, ok, detail}. The checks that matter most:
   - the node reaches Gitea over TLS it trusts
   - the public internet is rejected, and the seal comes back after a reboot
   - every package client is configured to use Gitea only (apt, apk or dnf, whichever the node has)
+  - with an egress proxy: the proxy lets an allowed name through and refuses any other
 """
+
+import shlex
 
 from .. import versions
 from . import clients, common
@@ -41,12 +44,35 @@ def common_checks(ctx: common.NodeContext) -> list[tuple[str, str]]:
         ("node dns for containers running", "systemctl is-active outpost-dns"),
         ("package index updates offline", index_updates),
         ("egress sealed", "test \"$(/usr/local/sbin/outpost-egress status)\" = sealed"),
-        ("public internet rejected", "! curl -sS --max-time 5 https://pypi.org/simple/ >/dev/null 2>&1"),
+        ("public internet rejected", "! curl --noproxy '*' -sS --max-time 5 https://pypi.org/simple/ >/dev/null 2>&1"),
         ("egress seal survives reboot", "systemctl is-enabled outpost-egress.service"),
         ("routed traffic sealed too (containers, pods)", "iptables -C FORWARD -j OUTPOST && iptables -t security -C FORWARD -j OUTPOST"),
         ("egress script is the current one", "grep -q 'build_chain $ipt security DROP' /usr/local/sbin/outpost-egress"),
         (f"coredns at pinned version {versions.COREDNS}", f"/usr/local/bin/coredns -version | grep -q {versions.COREDNS}"),
         ("pip.conf unchanged", f"test \"$(grep -c . /etc/pip.conf)\" = 3 && grep -q '^cert = {clients.PATH_CA}' /etc/pip.conf"),
+    ] + proxy_checks(ctx)
+
+
+def proxy_checks(ctx: common.NodeContext) -> list[tuple[str, str]]:
+    """With an egress proxy: CONNECT to an allowed name is answered 200 by the proxy and the far end then
+    answers over the tunnel (any HTTP status: it was reached), and CONNECT to a name not on the list is
+    answered by the proxy itself with 403. %{http_connect} is the proxy's answer to CONNECT, so the second
+    check passes exactly when the proxy refused, not when the name was merely unreachable."""
+    from . import proxy as proxymod
+    p = ctx.proxy
+    if not p:
+        return []
+    allowed, other = proxymod.probe_name(list(p.allowed)), proxymod.refused_name(list(p.allowed))
+    url = shlex.quote(p.url)
+    return [
+        ("proxy settings for programs that opt in", f"grep -qx {shlex.quote('HTTPS_PROXY=' + p.url)} {clients.PATH_PROXY_ENV}"),
+        ("proxy reachable",
+         f"out=$(curl -x {url} -sS --max-time 15 -o /dev/null -w '%{{http_connect}} %{{http_code}}' https://{allowed}/ 2>/dev/null); "
+         f"case \"$out\" in '200 '[12345]??) echo \"{allowed} through the proxy -> ${{out#* }}\" ;; "
+         f"*) echo \"{allowed} through {p.url} -> CONNECT/HTTP ${{out:-no answer}}\"; false ;; esac"),
+        ("proxy refuses unknown names",
+         f"code=$(curl -x {url} -sS --max-time 15 -o /dev/null -w '%{{http_connect}}' https://{other}/ 2>/dev/null); "
+         f"test \"$code\" = 403 && echo \"CONNECT {other} -> 403\" || {{ echo \"CONNECT {other} -> ${{code:-no answer}}, expected 403 from the proxy\"; false; }}"),
     ]
 
 

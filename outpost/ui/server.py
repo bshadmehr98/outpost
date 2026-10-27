@@ -5,7 +5,7 @@
   GET  /api/file?name=...       read servers.yml, mirrors.yml, needs/*.yml or checks/*.yml
   PUT  /api/file?name=...       write one of those files (must stay valid YAML)
   DELETE /api/file?name=...     remove a needs file
-  POST /api/servers             write servers.yml from a form {gitea: {...}, infrastructures: {...}}
+  POST /api/servers             write servers.yml from a form {gitea: {...}, infrastructures: {...}, egress_proxy: {...}}
   POST /api/ssh-check           {"alias": "dev-1"} -> can we reach it, are we root
   POST /api/project/scan        {"folder": "~/code/my-api"} -> lockfiles, images, apt/apk/rpm packages found
   POST /api/project/save        a proposal -> needs/<name>.yml
@@ -47,7 +47,7 @@ from ..needs import Needs, add_platform_files, load_needs
 from ..paths import Platform
 from . import explain, projects, status
 
-ALLOWED_COMMANDS = {"needs", "fetch", "pack", "gitea", "upload", "infra", "check", "egress", "lab", "demo", "hosts", "report", "pki"}
+ALLOWED_COMMANDS = {"needs", "fetch", "pack", "gitea", "upload", "infra", "check", "egress", "proxy", "lab", "demo", "hosts", "report", "pki"}
 RUNS: dict[str, dict] = {}
 
 
@@ -95,10 +95,17 @@ def needs_files(platform: Platform) -> list[dict]:
     return out
 
 
-def needs_detail(platform: Platform, infra_types: set[str]) -> dict:
-    """The merged list `outpost fetch` will work from, including Gitea, Docker and k3s themselves."""
+def needs_detail(platform: Platform, infra_types: set[str], servers=None) -> dict:
+    """The merged list `outpost fetch` will work from, including Gitea, Docker and k3s themselves, and
+    tinyproxy when servers.yml has an egress proxy (left out while its distro is unknown)."""
     needs = load_needs(platform.needs_dir)
     add_platform_files(needs, versions.platform_files(load_mirrors(platform.mirrors_file), infra_types))
+    if servers and servers.egress_proxy:
+        from ..infra import proxy as proxymod
+        try:
+            proxymod.add_package(needs, servers.egress_proxy, hostsmod.cached(platform).get(servers.egress_proxy.host))
+        except ConfigError:
+            pass
     return {
         "images": needs.images,
         "pypi": {py: specs for py, specs in needs.pypi.items()},
@@ -125,6 +132,7 @@ def overview(platform: Platform) -> dict:
             "ssh_config": str(servers.ssh_config) if servers.ssh_config else None,
             "is_lab": servers.gitea.host == "lab-gitea",
             "arch": servers.arch,
+            "egress_proxy": vars(servers.egress_proxy) if servers.egress_proxy else None,
         }
     except ConfigError as e:
         data["error"] = str(e)
@@ -132,7 +140,7 @@ def overview(platform: Platform) -> dict:
     try:
         needs = load_needs(platform.needs_dir)
         data["needs"] = needs.summary()
-        data["needs_detail"] = needs_detail(platform, infra_types)
+        data["needs_detail"] = needs_detail(platform, infra_types, servers)
     except ConfigError as e:
         data["needs"] = {"error": str(e)}
         data["needs_detail"] = None
@@ -153,7 +161,7 @@ def overview(platform: Platform) -> dict:
     data["files"] = ["servers.yml", "mirrors.yml"] + [f"needs/{p.name}" for p in sorted(platform.needs_dir.glob("*.yml"))] \
         + [f"checks/{p.name}" for p in sorted(platform.checks_dir.glob("*.yml"))]
     try:
-        data["checks"] = [{"name": c.name, "description": c.description, "infra": c.infra} for c in load_checks(platform.checks_dir)]
+        data["checks"] = [{"name": c.name, "description": c.description, "infra": c.infra, "requires": c.requires} for c in load_checks(platform.checks_dir)]
     except ConfigError as e:
         data["checks"] = [{"name": "error", "description": str(e), "infra": []}]
     data["secrets"] = {"gitea-token": (platform.secrets_dir / "gitea-token").exists()}
@@ -227,6 +235,16 @@ def write_servers(platform: Platform, form: dict) -> None:
         if spec.get("allow"):
             entry["allow"] = spec["allow"]
         data["infrastructures"][key] = entry
+    if "egress_proxy" in form:
+        proxy = _proxy_form(form.get("egress_proxy"))
+    else:   # a form without the card keeps what servers.yml has
+        try:
+            current = yaml.safe_load(platform.servers_file.read_text()) if platform.servers_file.exists() else None
+        except yaml.YAMLError:
+            current = None
+        proxy = current.get("egress_proxy") if isinstance(current, dict) else None
+    if proxy:
+        data["egress_proxy"] = proxy
     text = "# Which servers play which role. Hosts are aliases from your ~/.ssh/config.\n" \
            "# The SSH user must be root or have passwordless sudo. Written by the Outpost dashboard.\n" \
            + yaml.safe_dump(data, sort_keys=False, default_flow_style=None)
@@ -238,6 +256,28 @@ def write_servers(platform: Platform, form: dict) -> None:
         tmp.unlink()
         raise
     tmp.replace(platform.servers_file)
+
+
+def _proxy_form(p) -> dict | None:
+    """The egress_proxy card: allow is a textarea (names separated by lines, commas or spaces); an empty
+    allow list means no proxy. Host, port and distro only when they differ from the defaults."""
+    if not isinstance(p, dict):
+        return None
+    allow = p.get("allow") or []
+    if isinstance(allow, str):
+        allow = [a for a in re.split(r"[,\s]+", allow) if a]
+    if not allow:
+        return None
+    out: dict = {}
+    if str(p.get("host") or "").strip():
+        out["host"] = str(p["host"]).strip()
+    port = str(p.get("port") or "").strip()
+    if port and port != "3128":
+        out["port"] = int(port) if port.isdigit() else port   # load_servers explains a bad one
+    out["allow"] = [str(a).strip() for a in allow]
+    if str(p.get("distro") or "").strip():
+        out["distro"] = str(p["distro"]).strip()
+    return out
 
 
 def ssh_check(platform: Platform, alias: str) -> dict:

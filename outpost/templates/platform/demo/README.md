@@ -7,7 +7,7 @@ image on a sealed node and deploys it to every infrastructure in `servers.yml`.
 ```
 demo/
   app/app.py               the site: shows where it runs and proves the internet is blocked
-  app/probe.py             tries to reach the public internet; used at build time and at run time
+  app/probe.py             tries to reach the public internet (and, with an egress proxy, the allowed names through it)
   app/templates/index.html the page
   requirements.txt         pinned pip packages, fetched into the box by needs/demo.yml
   Dockerfile               FROM the Gitea copy of python:3.12-slim, COPY --from=config / /, then apt-get, pip

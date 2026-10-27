@@ -22,7 +22,15 @@ Things Outpost does not do, on purpose or not yet.
   registry mirror on the nodes and nothing rewrites names, so a bare `FROM python:3.12` fails at
   once on a sealed node. One edited line per Dockerfile is the price of knowing where every
   image comes from.
-- **IPv6** outbound is rejected entirely when sealed; Gitea is reached over IPv4.
+- **IPv6** outbound is rejected entirely when sealed; Gitea is reached over IPv4. The egress
+  proxy's exception is IPv4 only too.
+- **Named exceptions are HTTP and HTTPS only, and opt-in.** The [egress proxy](../architecture/proxy.md)
+  lets programs that set `HTTPS_PROXY` reach the names in `egress_proxy.allow` over CONNECT to 443
+  (or plain HTTP on 80). No SMTP, no other ports, no UDP; no transparent interception, so a program
+  that ignores the variables stays sealed. The proxy host runs Debian, Ubuntu or the RHEL family,
+  not Alpine. On Rocky, Alma and CentOS Stream tinyproxy is only in EPEL, which the rpm fetcher does
+  not mirror (it reads BaseOS, AppStream and extras), so `fetch` fails to find it there; Fedora has it,
+  and a Debian or Ubuntu proxy host works anywhere.
 - **Ubuntu and Debian hosts** are what has been run. Node setup configures apk on an Alpine host
   and dnf on a RHEL-family host, and `infra upgrade` and `infra verify` follow the family, but
   neither has been run on a real Alpine or Rocky machine yet: only the generated scripts are

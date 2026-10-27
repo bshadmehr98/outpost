@@ -1,0 +1,29 @@
+name: hello-proxy-k3s
+description: A pod that takes the proxy variables from the outpost-proxy ConfigMap reaches an allowed name through the egress proxy, another name is refused, and without the proxy nothing gets out.
+infra: [k3s]
+requires: [proxy]            # skipped with a message until servers.yml has egress_proxy and `outpost proxy setup` ran
+steps:
+  - run: k3s kubectl -n default get configmap outpost-proxy -o jsonpath='{.data.HTTPS_PROXY}'
+  - run: |
+      k3s kubectl -n default delete pod outpost-proxy-check --ignore-not-found >/dev/null
+      k3s kubectl -n default create configmap outpost-proxy-probe --from-file=probe.py --dry-run=client -o yaml | k3s kubectl apply -f - >/dev/null
+      cat <<EOF | k3s kubectl apply -f -
+      apiVersion: v1
+      kind: Pod
+      metadata: {name: outpost-proxy-check, namespace: default}
+      spec:
+        restartPolicy: Never
+        containers:
+          - name: probe
+            image: $GITEA/$ORG/library--python:3.12-slim
+            command: [python, /probe/probe.py, "$PROXY_ALLOWED", "$PROXY_REFUSED"]
+            envFrom: [{configMapRef: {name: outpost-proxy}}]
+            volumeMounts: [{name: probe, mountPath: /probe}]
+        volumes: [{name: probe, configMap: {name: outpost-proxy-probe}}]
+      EOF
+  - run: for i in $(seq 1 60); do s=$(k3s kubectl -n default get pod outpost-proxy-check -o jsonpath='{.status.phase}'); case "$s" in Succeeded|Failed) break;; esac; sleep 2; done; k3s kubectl -n default logs outpost-proxy-check | tee result.txt
+    expect: allowed-through-proxy=reached
+  - run: cat result.txt
+    expect: other-through-proxy=refused-403
+  - run: cat result.txt; k3s kubectl -n default delete pod outpost-proxy-check --ignore-not-found >/dev/null; k3s kubectl -n default delete configmap outpost-proxy-probe --ignore-not-found >/dev/null
+    expect: allowed-direct=blocked

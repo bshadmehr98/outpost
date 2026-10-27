@@ -15,11 +15,11 @@ from pathlib import Path
 from .. import box as boxmod
 from .. import oci
 from ..infra import clients
-from ..infra.clients import GiteaInfo
+from ..infra.clients import GiteaInfo, ProxyInfo
 from .client import GiteaClient
 
 
-def upload_box(box: Path, client: GiteaClient, gitea: GiteaInfo, ca_pem: str, log=print) -> dict:
+def upload_box(box: Path, client: GiteaClient, gitea: GiteaInfo, ca_pem: str, log=print, proxy: ProxyInfo | None = None) -> dict:
     problems = boxmod.verify_manifest(box)
     if problems:
         raise RuntimeError("The box does not match its manifest:\n  " + "\n  ".join(problems[:10]))
@@ -79,7 +79,8 @@ def upload_box(box: Path, client: GiteaClient, gitea: GiteaInfo, ca_pem: str, lo
             tally("images", "uploaded")
 
     stats["config_image"] = push_config_image(client, gitea, ca_pem, boxmod.distros_in(box),
-                                              apk_branches=boxmod.distros_in(box, "apk"), rpm_distros=boxmod.distros_in(box, "rpm"), log=log)
+                                              apk_branches=boxmod.distros_in(box, "apk"), rpm_distros=boxmod.distros_in(box, "rpm"), log=log,
+                                              proxy=proxy)
 
     for kind, s in stats.items():
         if "uploaded" in s:
@@ -88,21 +89,24 @@ def upload_box(box: Path, client: GiteaClient, gitea: GiteaInfo, ca_pem: str, lo
 
 
 def push_config_image(client: GiteaClient, gitea: GiteaInfo, ca_pem: str, distros: list[str],
-                      apk_branches: list[str] | None = None, rpm_distros: list[str] | None = None, log=print) -> dict:
+                      apk_branches: list[str] | None = None, rpm_distros: list[str] | None = None, log=print,
+                      proxy: ProxyInfo | None = None) -> dict:
     """Build the one-layer `config` image from the client files and push it. Also run on its own
     after the CA is rotated, so builds pick up the new certificate without a full upload.
     `distros` are the apt suites, `apk_branches` the Alpine branches and `rpm_distros` the RPM groups
-    that exist in Gitea; a package source is only written for what exists, and the keys with them."""
+    that exist in Gitea; a package source is only written for what exists, and the keys with them.
+    With an egress `proxy`, the image also carries /etc/outpost/proxy.env and the profile.d exports, for
+    interactive shells and `env_file:`; a RUN step gets the variables from the node's Docker client config."""
     log("==> config image")
     apk_branches, rpm_distros = list(apk_branches or []), list(rpm_distros or [])
     apt_key = client.debian_key() if distros else None
     apk_key = client.alpine_key() if apk_branches else None
     rpm_key = client.rpm_key() if rpm_distros else None
     files = clients.config_image_files(gitea, ca_pem, apt_key, distros, apk_key=apk_key, apk_branches=apk_branches,
-                                       rpm_key=rpm_key, rpm_distros=rpm_distros)
+                                       rpm_key=rpm_key, rpm_distros=rpm_distros, proxy=proxy)
     with tempfile.TemporaryDirectory(prefix="outpost-config-image-") as tmp:
         layout = oci.build_layout(files, Path(tmp), gitea.config_image)
         client.ensure_org(gitea.org)
         client.push_image(layout, gitea.org, "config", "latest")
-    log(f"    {gitea.config_image}  (COPY --from=... / / in your Dockerfiles)")
+    log(f"    {gitea.config_image}  (COPY --from=... / / in your Dockerfiles)" + (f", with the egress proxy {proxy.url}" if proxy else ""))
     return {"distros": distros, "apk_branches": apk_branches, "rpm_distros": rpm_distros}

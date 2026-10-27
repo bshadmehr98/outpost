@@ -52,6 +52,37 @@ Docker-in-Docker, all of which would have to be mirrored and would make the pipe
 special case. Host mode makes a job a shell script on a sealed node, which is exactly what a
 person would type.
 
+**Named exceptions through a proxy, not DNS-synchronised ipsets.** Some applications must call a
+third-party API by name (`api.twilio.com`, an e-mail provider behind a CDN). The seal matches
+addresses, so the obvious extension is an ipset filled from DNS answers and refreshed on a timer.
+It fails in both directions: a CDN hands different clients different addresses and changes them
+between refreshes (a race that breaks the application), and the addresses are shared with thousands
+of other sites (which the ipset then allows). A forward proxy is told the name by the client
+(`CONNECT api.twilio.com:443`) and can decide on exactly that. It costs one process and one opt-in
+variable per workload.
+
+**The proxy on the Gitea host by default.** Every node already resolves the Gitea name and may
+reach Gitea's address, so a proxy there needs no new allow entry, no new name in `/etc/hosts`, and
+no host to prepare; the URL is just `http://<gitea name>:3128`. Gitea is already the one machine
+the platform depends on, and the proxy is small. `egress_proxy.host` moves it elsewhere when that
+is not wanted (the exception in the seal then lives on that host instead).
+
+**A host process, not a container.** The proxy's firewall exception must live on one host and be
+exact. On the host, the owner match (`-m owner --uid-owner outpost-proxy`) in `OUTPUT` names one
+user's locally generated packets and nothing else; it cannot be satisfied by any other process or
+by any container. A containerised proxy's traffic is forwarded, has no owner, and would need an
+exception by source address in `FORWARD`: an address Docker or k3s assigns and may change on
+restart, in the very chain that Docker, kube-router and flannel edit (see "Being first in
+`FORWARD`" below). The exception also needs its own chain (`OUTPOST-OUT`, hooked from `OUTPUT`
+only), because the kernel refuses an owner match in a chain that `FORWARD` jumps to.
+
+**Opt-in, no transparent interception.** Redirecting all outbound 443 to the proxy would catch
+programs that ignore `HTTPS_PROXY`, but HTTPS cannot be transparently proxied by name without
+breaking TLS: the proxy would have to read SNI (which encrypted ClientHello hides) or terminate TLS
+with its own CA, which every client would have to trust and which would let the proxy read every
+request. Opt-in keeps TLS end to end and fails closed: a program that does not opt in has no
+internet, exactly as before.
+
 **The lab is the test rig.** `outpost lab up` and the integration suite share one
 implementation: Ubuntu containers running systemd and sshd, driven over SSH like real
 servers. Whatever passes in CI is what a user sees, and the tutorial can be followed with no

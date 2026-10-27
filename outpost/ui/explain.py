@@ -52,6 +52,22 @@ FAILURES = [
     (r"another command is still running", "Another command is still running.", "Wait for it to finish, or stop it from the Activity page."),
     (r"did not start accepting SSH", "A lab container did not start.",
      "Run `docker logs <name>`. Usually the machine is out of memory or Docker lacks the privileges the lab needs."),
+    (r"registry has no tinyproxy for (\S+)", "Gitea does not have tinyproxy for the proxy host yet.",
+     "With egress_proxy in servers.yml, fetch adds tinyproxy for the proxy host's distro by itself: run Fetch (`outpost fetch --only apt`, or `--only rpm` on the RHEL family), then Push to Gitea (`outpost upload`), then `outpost proxy setup` again."),
+    (r"does not know which system the egress proxy host", "Outpost does not know the proxy host's distro.",
+     "Set `distro:` under egress_proxy in servers.yml (noble, bookworm, rocky9...), or look at the machines once (`outpost hosts --refresh`) so Outpost can ask the host."),
+    (r"does not support as (a|an egress) proxy host", "Alpine cannot run the egress proxy.",
+     "Put the proxy on a Debian, Ubuntu or RHEL-family host: set egress_proxy.host in servers.yml (it defaults to the Gitea host)."),
+    (r"no egress_proxy section", "servers.yml has no egress proxy.",
+     "Add an egress_proxy section with the names to allow (allow: [api.twilio.com]) and run `outpost proxy setup`; see docs/architecture/proxy.md."),
+    (r"error: egress_proxy", "The egress_proxy section of servers.yml is not valid.",
+     "Allow entries are host names (api.twilio.com) or wildcards (*.sendgrid.net): no https://, no port, no path, no IP addresses. The port is a number."),
+    (r"outpost-proxy did not start", "The egress proxy did not start.",
+     "The lines above are its journal. Usual causes: the port in egress_proxy is already taken on that host, or its address is not one of the host's own."),
+    (r"FAIL proxy (reachable|user can reach allowed names)", "The proxy did not get through to an allowed name.",
+     "Check the name is right and answers HTTPS on the internet; on the proxy host, `tail /var/log/outpost-proxy.log` shows the CONNECT and why it failed. `outpost egress <host> status` must say sealed: the seal keeps the proxy's own exception."),
+    (r"FAIL proxy refuses unknown names", "The proxy let through a name that is not on the allow list.",
+     "Run `outpost proxy setup` again: it rewrites /etc/outpost/proxy.allow and the configuration that makes the list an allow list (FilterDefaultDeny)."),
     (r"hello-k3s.*FAIL|LEAK", "A pod could reach the internet.",
      "The seal did not hold for pod traffic. Run Set up again for that infrastructure so the egress script is reinstalled, then Verify."),
     (r"PROBLEMS", "Some verification checks failed.", "The table above names them. Run Set up again for that infrastructure; every step is safe to repeat."),
@@ -122,4 +138,6 @@ def summarize(args: list[str], log: str, exit_code: int | None) -> str:
         return "Rotated the CA and reissued certificates"
     if cmd == "report":
         return "Wrote the proof report"
+    if cmd == "proxy":
+        return "Set up and verified the egress proxy" if len(args) > 1 and args[1] == "setup" else "Verified the egress proxy"
     return "finished"

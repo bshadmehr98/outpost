@@ -4,6 +4,10 @@ services:
     image: ${IMAGE}
     ports:
       - "${PORT:-8000}:8000"
+    # the egress proxy's variables, when the node has them; `required: false` so older nodes still deploy
+    env_file:
+      - path: /etc/outpost/proxy.env
+        required: false
     environment:
       INFRA: ${INFRA:-dev}
       NODE: ${NODE:-}

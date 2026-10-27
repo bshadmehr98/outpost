@@ -11,7 +11,8 @@ outpost hosts --refresh   # one SSH round trip per server, then the same table
 ```
 
 One line per server: OS, address, seal state, and the versions of Gitea, Docker, Compose,
-buildx, k3s, CoreDNS and the Actions runner found there. Anything not at the pinned version is
+buildx, k3s, CoreDNS and the Actions runner found there (and tinyproxy on the egress proxy host,
+with the last 20 lines of its log). Anything not at the pinned version is
 listed as drift. The facts are cached as `state/hosts/<alias>.json`, and `gitea setup`,
 `infra setup` and `infra verify` refresh the hosts they touch, so the dashboard's **Machines**
 page is current without asking.
@@ -106,6 +107,41 @@ runner. Applications keep running. Images that copied the old CA into themselves
 built `FROM config`) keep working against the new Gitea only until they are rebuilt, so
 rebuild them.
 
+## Named exceptions: changing the allow list, reading the log
+
+With an [egress proxy](../architecture/proxy.md), the names sealed workloads may reach are
+`egress_proxy.allow` in `servers.yml` and nothing else. To change them:
+
+```
+# edit servers.yml: egress_proxy.allow
+outpost proxy setup        # rewrites /etc/outpost/proxy.allow, restarts the proxy, verifies
+outpost upload             # optional: refreshes OUTPOST_PROXY_ALLOWED in the config image
+```
+
+`proxy setup` also rewrites `/etc/outpost/proxy.env`, the profile, `/etc/environment`, the Docker
+client config and the k3s ConfigMap on every infrastructure already set up, so the demo's proxy
+card lists the new names after its next deploy. Nothing else has to restart: the proxy reads its
+list at start, and the setup restarts it. Moving the proxy to another host (`egress_proxy.host`) is
+the same command; run `outpost gitea setup` afterwards if it left the Gitea host, so the Gitea
+host's seal drops the exception.
+
+What went through it:
+
+```
+ssh gitea-1 tail -f /var/log/outpost-proxy.log
+```
+
+```
+CONNECT   Oct 28 10:00:02.311 [4211]: Request (file descriptor 7): CONNECT api.twilio.com:443 HTTP/1.1
+NOTICE    Oct 28 10:00:09.802 [4211]: Proxying refused on filtered domain "example.com"
+```
+
+Every request line names the host and port asked for; every refusal names the host. URLs and
+bodies of HTTPS requests are not there, because the proxy never sees them. The log is rotated
+weekly and kept eight weeks (`/etc/logrotate.d/outpost-proxy`). `outpost hosts --refresh` copies the
+last 20 lines into `state/hosts/<alias>.json`, the Machines page and the proof report.
+`outpost proxy verify` re-runs the checks.
+
 ## The evidence: `outpost report`
 
 ```
@@ -115,7 +151,9 @@ outpost report --out proof.html
 
 One standalone HTML page, built from `state/` alone: the Gitea server, every machine with its
 seal state and versions, every verification table with its date, the smoke checks, and what
-the deployed demo reports about itself. The dashboard serves the same page at
+the deployed demo reports about itself, and a *Named exceptions* section: the allowed names, the
+proxy host, when it was set up and verified, and the last lines of its log (or "none" without a
+proxy). The dashboard serves the same page at
 `/report.html`. Run `outpost infra verify`, `outpost check`, `outpost demo status` and
 `outpost hosts --refresh` first if you want the evidence fresh; the page says when each piece
 was recorded.

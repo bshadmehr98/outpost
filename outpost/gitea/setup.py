@@ -24,6 +24,7 @@ import time
 from .. import hosts, pki, versions
 from ..config import Servers
 from ..infra import egress, hostsfile
+from ..infra.common import PROXY_USER
 from ..paths import Platform
 from ..ssh import Host
 from .connect import connect
@@ -209,7 +210,12 @@ def setup(platform: Platform, servers: Servers, log=print) -> dict:
     log(f"[{cfg.host}] gitea {remote_version}, org {cfg.org}")
 
     log("==> [7/7] sealing the server")
-    egress.install(host, ip, cfg.allow)
+    # when the egress proxy runs here (`outpost proxy setup`), its user keeps its one exception
+    proxy_state = platform.read_state("proxy") or {}
+    proxy_here = bool(servers.egress_proxy and servers.egress_proxy.host == cfg.host and proxy_state.get("host") == cfg.host)
+    egress.install(host, ip, cfg.allow, proxy_user=PROXY_USER if proxy_here else None)
+    if proxy_here:
+        log(f"[{cfg.host}] the egress proxy runs here: its user {PROXY_USER} keeps its exception (TCP 443 and 80)")
     log(f"[{cfg.host}] egress: {egress.seal(host, 'gitea setup')}")
     hosts.record(platform, cfg.host, hosts.inspect(host))
     return {"name": cfg.name, "ip": ip, "version": remote_version}

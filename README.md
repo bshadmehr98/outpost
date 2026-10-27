@@ -78,6 +78,11 @@ afternoon:
 - **A real seal.** iptables rejects outbound internet for the host *and* for its containers and
   pods, with a kernel-level backstop in the `security` table that stays effective whatever
   Docker or k3s add to the firewall. Open it on purpose with a logged reason.
+- **Named exceptions, by name.** When an app must call `api.twilio.com` or an e-mail API behind a
+  CDN, list the names under `egress_proxy` in `servers.yml`: one tinyproxy from Gitea, sealed with a
+  single exception for its own user, lets through only those names (TLS stays end to end), logs
+  every request, and workloads opt in with `HTTPS_PROXY`. A program that does not opt in is still
+  sealed. See [named exceptions](docs/architecture/proxy.md).
 - **Dockerfiles change by two lines.** `FROM` names the Gitea copy of the base image
   (`${GITEA}/pkgs/library--python:3.12-slim`), and `COPY --from=config / /` brings pip, npm, apt,
   apk, dnf and CA configuration into the build. Nothing on a node rewrites image names: a bare Docker Hub
@@ -139,6 +144,15 @@ Verifying dev
     ok   docker trusts and reaches gitea registry
     ok   container egress hooked
     ok   actions runner active
+```
+
+With an `egress_proxy` in `servers.yml`, every node's table has three more lines, and
+`outpost proxy setup` prints the proxy host's own:
+
+```
+    ok   proxy settings for programs that opt in
+    ok   proxy reachable               (example.org through the proxy -> 200)
+    ok   proxy refuses unknown names   (CONNECT example.com -> 403)
 ```
 
 Then open `http://172.31.252.21:8000` (Compose), `:8080` (Swarm) or `http://172.31.252.30:30080`
@@ -247,10 +261,12 @@ command shows its steps, and a failed one is explained in a sentence with what t
 | containers and pods are sealed too | the same chains on routed traffic | `hello-python` and `hello-k3s` checks |
 | the seal survives a reboot | a oneshot unit before Docker and k3s | `verify` |
 | every exception is written down and every opening is logged | `allow:` in `servers.yml`; `/var/log/outpost-egress.log` | `iptables -S OUTPOST`; the node page |
+| a named exception reaches only its names, and only for programs that ask | the egress proxy's allow list; one owner match for its user on TCP 443 and 80, on its host only | `outpost proxy verify`; `proxy refuses unknown names` on every node; `hello-proxy` checks; `/var/log/outpost-proxy.log` |
 
 Not covered: root on a node can remove the rule (and it will be logged); Gitea is a single
 server with no HA; content is mirrored as the lockfiles say, not vetted; inbound ports are
-your provider's firewall. [The full list](docs/architecture/security.md).
+your provider's firewall; with an egress proxy, an allowed name is allowed for any workload that
+opts in, and DNS (port 53) stays open to any resolver. [The full list](docs/architecture/security.md).
 
 ## Commands
 
@@ -267,6 +283,7 @@ your provider's firewall. [The full list](docs/architecture/security.md).
 | `outpost check [name] --infra <name>` | smoke checks on the sealed node |
 | `outpost demo push` / `status` | deploy the demo through Gitea Actions; see the runs and what nodes serve |
 | `outpost egress <target> seal\|open\|status [--reason]` | flip the seal on Gitea, an infrastructure or one host |
+| `outpost proxy setup` / `verify` | the egress proxy for `egress_proxy` in `servers.yml`: install, seal, update the nodes, verify |
 | `outpost ui [--port 8484]` | the dashboard |
 | `outpost lab up [--small]` / `down` | throwaway servers in Docker |
 | `outpost hosts [--refresh]` | what every server runs: versions, seal, workloads, drift |

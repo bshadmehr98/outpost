@@ -26,6 +26,15 @@ infrastructures:
     type: k3s                 # first node is the k3s server, others are agents
     nodes: [lab-1, lab-2]
     args: "--disable traefik" # optional; extra flags for `k3s server` (or `docker swarm init`)
+
+egress_proxy:                 # optional; named exceptions to the seal (docs/architecture/proxy.md)
+  allow:                      # host names, or *.domain for a domain and every name under it
+    - api.twilio.com
+    - "*.sendgrid.net"
+  host: gitea-1               # optional; SSH alias of the proxy host; default: the Gitea host
+  port: 3128                  # optional
+  distro: noble               # optional; the proxy host's apt codename or rpm distro, for fetch
+  name: proxy.internal        # optional; the name nodes use when the proxy is not on the Gitea host
 ```
 
 ## Notes
@@ -40,5 +49,16 @@ infrastructures:
 - **The Gitea host needs `git`** (Gitea calls it). Ubuntu server images have it; a minimal Debian
   may not. Setup tries the package manager once and otherwise tells you to install it.
 - **Rerunning setup is safe.** Every step checks before it acts.
+- **`egress_proxy.allow`** takes host names only: no `https://`, no port, no path, no IP addresses
+  (addresses go in an infrastructure's `allow:`), and no bare `*.com`. Entries are lower-cased.
+  `*.sendgrid.net` allows `sendgrid.net` and every name under it. An empty list is an error; leave
+  the section out for no proxy.
+- **`egress_proxy.distro`** tells `outpost needs` and `fetch` which tinyproxy to download (`noble`,
+  `bookworm`, `rocky9`...). Without it, Outpost uses what `outpost hosts` cached about the proxy
+  host (`state/hosts/<alias>.json`) and otherwise asks you to set it or run `outpost hosts --refresh`.
+  Alpine is not supported as a proxy host.
+- **The proxy host** defaults to the Gitea host, where nodes need nothing new. On another host its
+  address joins every node's allow list and `name` goes into every node's `/etc/hosts`. After a
+  change, run `outpost proxy setup` (and `outpost upload`, so the config image carries the new values).
 - **Changing `gitea.name`** needs a new certificate; run `outpost gitea setup` again, then
   `outpost upload` (the config image embeds the name) and `outpost infra setup` for each infrastructure.

@@ -27,6 +27,48 @@ flowchart LR
   needs to be convinced.
 
 The [day-two reference](../reference/maintenance.md) has the details of each, and a routine.
+
+## Named exceptions
+
+Sooner or later an application must call something outside: an SMS API, an e-mail provider. The
+seal matches addresses, and those services live behind CDNs whose addresses change, so Outpost
+does it by name instead, through one proxy:
+
+```yaml
+# servers.yml
+egress_proxy:
+  allow: [example.org]          # in the lab; api.twilio.com, "*.sendgrid.net" in real life
+  distro: noble                 # the lab's Gitea host is Ubuntu 24.04
+```
+
+```
+outpost fetch --only apt        # tinyproxy for noble joins the box
+outpost upload
+outpost proxy setup             # on lab-gitea: tinyproxy as user outpost-proxy, sealed with one exception
+outpost check hello-proxy --infra dev
+```
+
+`proxy setup` installs tinyproxy from Gitea on the Gitea host, lets it reach only the names in the
+list, and seals that host again with one exception: the proxy's own user may open ports 443 and 80.
+Every node gets the proxy's address in `/etc/outpost/proxy.env`, its shell profile and its Docker
+client config. Then, on `lab-node-1`:
+
+```
+docker run --rm gitea.lab/pkgs/library--python:3.12-slim python -c \
+  "import urllib.request as u; print(u.urlopen('https://example.org/', timeout=20).status)"
+# 200: docker run passed HTTPS_PROXY from the Docker client config; the request went through the proxy
+
+docker run --rm -e HTTPS_PROXY= -e https_proxy= gitea.lab/pkgs/library--python:3.12-slim python -c "..."
+# fails: without the variables a container is sealed exactly as before
+
+ssh -F lab/ssh_config lab-gitea tail -3 /var/log/outpost-proxy.log
+# ... CONNECT example.org:443 HTTP/1.1
+```
+
+Opt-in fails closed: a program that does not use the proxy cannot reach anything. Compose and
+Swarm services add `env_file: /etc/outpost/proxy.env`, pods `envFrom` the ConfigMap
+`outpost-proxy`; the demo does both, and its page gets a "through the proxy" card. The whole story,
+including what the proxy does not cover, is in [named exceptions](../architecture/proxy.md).
 The dashboard's Home page answers the three questions (downloaded? on the server? sealed and
 working?) and its *Keep it healthy* page has a card for each of these.
 

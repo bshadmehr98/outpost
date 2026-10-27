@@ -1,0 +1,13 @@
+name: hello-proxy
+description: Through the egress proxy a container reaches an allowed name, another name is refused, and without the proxy the allowed name is still unreachable.
+infra: [compose, swarm]
+requires: [proxy]            # skipped with a message until servers.yml has egress_proxy and `outpost proxy setup` ran
+# python rather than alpine: busybox wget sends https:// URLs to a proxy as plain GETs instead of CONNECT,
+# which tinyproxy rejects, so it cannot show a TLS connection through the proxy.
+steps:
+  - run: docker run --rm -e HTTPS_PROXY=$PROXY_URL -e https_proxy=$PROXY_URL -v "$PWD/probe.py:/probe.py:ro" $GITEA/$ORG/library--python:3.12-slim python /probe.py "$PROXY_ALLOWED" "$PROXY_REFUSED" | tee result.txt
+    expect: allowed-through-proxy=reached
+  - run: cat result.txt
+    expect: other-through-proxy=refused-403
+  - run: cat result.txt
+    expect: allowed-direct=blocked

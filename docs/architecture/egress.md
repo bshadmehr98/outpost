@@ -98,3 +98,8 @@ It does not touch inbound traffic: open or close ports with your provider's fire
 not inspect content: a private address in the allow list is reachable for anything. It does
 not stop a process with `CAP_NET_ADMIN` on the host from removing it, which is to say, root on
 a node can open the internet, and the log will show it.
+
+It does not match names. When an application must reach a third-party service by name, that goes
+through the egress proxy, whose host alone gets one exception in this script (user
+`outpost-proxy`, TCP 443 and 80, in a chain `OUTPOST-OUT` hooked from `OUTPUT` only): see
+[named exceptions](proxy.md). Every other host's script is the one described here.

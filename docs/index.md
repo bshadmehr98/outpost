@@ -45,6 +45,7 @@ flowchart LR
 - [Gitea](architecture/gitea.md): how it is installed and why it can replace five services
 - [Nodes](architecture/nodes.md): every file and service a node gets, per infrastructure type
 - [The seal](architecture/egress.md): the firewall, the two tables, the holes we found
+- [Named exceptions](architecture/proxy.md): the egress proxy, for the few third-party APIs a sealed app may call by name
 - [CI on sealed nodes](architecture/ci.md): the runners and the demo workflow
 - [What it proves](architecture/security.md): the guarantees, and what is out of scope
 

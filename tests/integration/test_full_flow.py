@@ -151,6 +151,44 @@ def test_6_egress_toggle(rig):
     assert "open test" in ssh("lab-node-1", "cat /var/log/outpost-egress.log").stdout
 
 
+def test_6b_proxy(rig):
+    """The named exceptions: a tinyproxy on lab-gitea lets sealed workloads reach example.org, and only that,
+    and only when they ask for it with HTTPS_PROXY. From here on every infrastructure has the proxy settings."""
+    servers = rig / "servers.yml"
+    servers.write_text(servers.read_text() + "\negress_proxy:\n  allow: [example.org]\n  distro: noble\n")
+    assert main(["--dir", str(rig), "fetch", "--only", "apt"]) == 0                  # adds tinyproxy for noble by itself
+    assert list((rig / "box" / "apt" / "noble").glob("tinyproxy*.deb"))
+    assert main(["--dir", str(rig), "upload"]) == 0
+    assert "noble" in json.loads((rig / "state" / "upload.json").read_text())["distros"]
+    assert main(["--dir", str(rig), "proxy", "setup"]) == 0
+    assert main(["--dir", str(rig), "proxy", "verify"]) == 0
+    state = json.loads((rig / "state" / "proxy.json").read_text())
+    assert state["url"] == f"http://{GITEA_NAME}:3128" and state["ip"] == GITEA_IP and state["tinyproxy"] and state["verify"]["result"] == "ok"
+    # the Gitea host is still sealed for everyone but the proxy's own user
+    assert "sealed" in ssh("lab-gitea", "/usr/local/sbin/outpost-egress status").stdout
+    assert ssh("lab-gitea", "curl --noproxy '*' -sS --max-time 5 https://example.org/", check=False).returncode != 0
+    # the node set up before the proxy existed got its settings
+    assert f"HTTPS_PROXY=http://{GITEA_NAME}:3128" in ssh("lab-node-1", "cat /etc/outpost/proxy.env").stdout
+    # a container with HTTPS_PROXY reaches example.org through it; without the variables it does not, and
+    # through it a name that is not on the list is refused by the proxy (403)
+    image = f"{GITEA_NAME}/pkgs/library--python:3.12-slim"
+    fetch = "import sys, urllib.request as u; print(u.urlopen('https://' + sys.argv[1] + '/', timeout=20).status)"
+    via = f"-e HTTPS_PROXY=http://{GITEA_NAME}:3128 -e https_proxy=http://{GITEA_NAME}:3128"
+    unset = "-e HTTPS_PROXY= -e https_proxy= -e HTTP_PROXY= -e http_proxy="   # also overrides the Docker client config
+    reached = ssh("lab-node-1", f'docker run --rm {via} {image} python -c "{fetch}" example.org', check=False)
+    assert reached.returncode == 0 and "200" in reached.stdout, reached.stderr
+    direct = ssh("lab-node-1", f'docker run --rm {unset} {image} python -c "{fetch}" example.org', check=False)
+    assert direct.returncode != 0, direct.stdout
+    refused = ssh("lab-node-1", f'docker run --rm {via} {image} python -c "{fetch}" example.com', check=False)
+    assert refused.returncode != 0 and "403" in refused.stderr, refused.stderr
+    # every CONNECT and every refusal is in the proxy's log
+    log = ssh("lab-gitea", "cat /var/log/outpost-proxy.log").stdout
+    assert "CONNECT example.org:443" in log and 'filtered domain "example.com"' in log
+    # and the smoke check that says the same
+    assert main(["--dir", str(rig), "check", "hello-proxy", "--infra", "dev"]) == 0
+    results = json.loads((rig / "state" / "check-dev.json").read_text())["results"]
+    assert [r["name"] for r in results] == ["hello-proxy"] and results[0]["ok"], json.dumps(results, indent=1)
+
 def test_7_swarm(rig):
     """Two nodes: the compose node from before becomes the manager, lab-node-2 joins as a worker."""
     assert main(["--dir", str(rig), "infra", "setup", "prod"]) == 0

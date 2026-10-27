@@ -10,7 +10,8 @@ TEMPLATE_CHECKS = Path(__file__).resolve().parents[1] / "outpost" / "templates" 
 def test_load_template_checks():
     checks = load_checks(TEMPLATE_CHECKS)
     names = {c.name: c for c in checks}
-    assert set(names) == {"hello-python", "hello-k3s", "hello-alpine"}
+    assert set(names) == {"hello-python", "hello-k3s", "hello-alpine", "hello-proxy", "hello-proxy-k3s"}
+    assert names["hello-proxy"].requires == ["proxy"] and names["hello-python"].requires == []
     hello = names["hello-python"]
     assert hello.context == TEMPLATE_CHECKS / "hello-python" and hello.applies_to("compose") and not hello.applies_to("k3s")
     assert hello.steps[1]["expect"] == "Hello from Outpost"
