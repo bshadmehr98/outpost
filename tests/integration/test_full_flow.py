@@ -132,7 +132,7 @@ def test_4_infra_setup_and_verify(rig):
     assert {"public internet rejected", "docker trusts and reaches gitea registry", "container egress hooked", "apt sources are gitea only", "node dns for containers running"} <= names
     # nothing rewrites image names: a bare Docker Hub name is rejected, the Gitea name of the same image works
     assert ssh("lab-node-1", "docker pull alpine:3.20", check=False).returncode != 0
-    assert ssh("lab-node-1", f"docker pull {GITEA_NAME}/pkgs/library--alpine:3.20", check=False).returncode == 0
+    assert ssh("lab-node-1", f"docker pull {GITEA_NAME}/pkgs/library/alpine:3.20", check=False).returncode == 0
     assert main(["--dir", str(rig), "infra", "verify", "dev"]) == 0
 
 
@@ -171,7 +171,7 @@ def test_6b_proxy(rig):
     assert f"HTTPS_PROXY=http://{GITEA_NAME}:3128" in ssh("lab-node-1", "cat /etc/outpost/proxy.env").stdout
     # a container with HTTPS_PROXY reaches example.org through it; without the variables it does not, and
     # through it a name that is not on the list is refused by the proxy (403)
-    image = f"{GITEA_NAME}/pkgs/library--python:3.12-slim"
+    image = f"{GITEA_NAME}/pkgs/library/python:3.12-slim"
     fetch = "import sys, urllib.request as u; print(u.urlopen('https://' + sys.argv[1] + '/', timeout=20).status)"
     via = f"-e HTTPS_PROXY=http://{GITEA_NAME}:3128 -e https_proxy=http://{GITEA_NAME}:3128"
     unset = "-e HTTPS_PROXY= -e https_proxy= -e HTTP_PROXY= -e http_proxy="   # also overrides the Docker client config
@@ -195,7 +195,7 @@ def test_7_swarm(rig):
     nodes = ssh("lab-node-1", "docker node ls --format '{{.Hostname}} {{.Status}} {{.ManagerStatus}}'").stdout
     assert "lab-node-1 Ready Leader" in nodes and "lab-node-2 Ready" in nodes
     # a service pulls its image from Gitea, by its Gitea name, on whichever node runs it
-    ssh("lab-node-1", f"docker service rm hello >/dev/null 2>&1; docker service create -q --name hello --replicas 2 --constraint node.role==worker {GITEA_NAME}/pkgs/library--alpine:3.20 sleep 300")
+    ssh("lab-node-1", f"docker service rm hello >/dev/null 2>&1; docker service create -q --name hello --replicas 2 --constraint node.role==worker {GITEA_NAME}/pkgs/library/alpine:3.20 sleep 300")
     for _ in range(60):
         if "2/2" in ssh("lab-node-1", "docker service ls --format '{{.Replicas}}' --filter name=hello").stdout:
             break

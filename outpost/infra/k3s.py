@@ -2,7 +2,7 @@
 
 k3s ships an "airgap images" tarball with everything the cluster itself needs; we place it
 where k3s looks and tell containerd to trust Gitea's certificate. Application images are
-referenced by their Gitea name (`gitea.internal/pkgs/library--alpine:3.20`); there is no
+referenced by their Gitea name (`gitea.internal/pkgs/library/alpine:3.20`); there is no
 `docker.io` mirror, so a bare Docker Hub name fails at once on a sealed node.
 
 The egress proxy never touches the k3s unit: proxy variables there would make containerd pull images

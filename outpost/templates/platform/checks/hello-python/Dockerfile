@@ -3,7 +3,7 @@
 ARG GITEA
 ARG ORG=pkgs
 FROM ${GITEA}/${ORG}/config:latest AS config
-FROM ${GITEA}/${ORG}/library--python:3.12-slim
+FROM ${GITEA}/${ORG}/library/python:3.12-slim
 COPY --from=config / /
 RUN apt-get update && apt-get install -y --no-install-recommends curl && rm -rf /var/lib/apt/lists/*
 RUN pip install --no-cache-dir flask

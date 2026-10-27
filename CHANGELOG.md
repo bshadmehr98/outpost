@@ -21,10 +21,13 @@ All notable changes to Outpost. The format follows Keep a Changelog; versions fo
 
 ### Changed
 - The verification check `public internet rejected` runs `curl --noproxy '*'`, so it tests the direct path even where a session carries proxy variables.
-- Container images now live under the one Gitea organisation like every other kind of package, as `<owner>--<image>`: `python:3.12-slim` is uploaded to `<gitea>/pkgs/library--python:3.12-slim`, `bitnami/redis:7` to `<gitea>/pkgs/bitnami--redis:7`, `ghcr.io/org/app:1.4` to `<gitea>/pkgs/org--app:1.4`. No organisation per image owner is created any more.
-- Dockerfiles, Compose, stack and Kubernetes files reference the Gitea copy explicitly (`FROM ${GITEA}/${ORG}/library--python:3.12-slim`). Nothing on a node rewrites image names: `daemon.json` no longer sets `registry-mirrors` and k3s's `registries.yaml` no longer mirrors `docker.io`. A bare Docker Hub name on a sealed node fails at once, like any other reach for the internet. The verification check `docker uses gitea mirror` is replaced by `docker trusts and reaches gitea registry`.
-- The demo and the `hello-python` and `hello-k3s` checks use the explicit names; the dashboard's project scan reads a Gitea name back into the need that produces it (`library--python:3.12-slim` is proposed as `python:3.12-slim`).
+- Container images now live under the one Gitea organisation like every other kind of package, with their original path nested below it: `python:3.12-slim` is uploaded to `<gitea>/pkgs/library/python:3.12-slim`, `bitnami/redis:7` to `<gitea>/pkgs/bitnami/redis:7`, `ghcr.io/org/app:1.4` to `<gitea>/pkgs/org/app:1.4`. No organisation per image owner is created any more.
+- Dockerfiles, Compose, stack and Kubernetes files reference the Gitea copy explicitly (`FROM ${GITEA}/${ORG}/library/python:3.12-slim`). Nothing on a node rewrites image names: `daemon.json` no longer sets `registry-mirrors` and k3s's `registries.yaml` no longer mirrors `docker.io`. A bare Docker Hub name on a sealed node fails at once, like any other reach for the internet. The verification check `docker uses gitea mirror` is replaced by `docker trusts and reaches gitea registry`.
+- The demo and the `hello-python` and `hello-k3s` checks use the explicit names; the dashboard's project scan reads a Gitea name back into the need that produces it (`${GITEA}/${ORG}/library/python:3.12-slim` is proposed as `python:3.12-slim`; a literal `gitea.internal/pkgs/...` name is read back when `servers.yml` names that Gitea).
 - Migration: re-run `outpost upload` so images land under `pkgs`, re-run `outpost infra setup <name>` so `daemon.json` and `registries.yaml` are rewritten, and change the `FROM` and `image:` lines of your projects to the Gitea names (`outpost init` templates and `demo/` are updated; an existing `demo/` folder is yours to edit).
+
+### Fixed
+- `outpost upload` failed at the first image with `NAME_INVALID`: the first version of the one-organisation layout joined owner and image as `library--python`, which the OCI spec allows but Gitea's own name rule (one `.`, `_` or `-` between alphanumerics) rejects. Images now use the nested path `pkgs/library/python`, checked against a real Gitea in the integration suite.
 
 ## 0.1.0 - 2026-10-26
 

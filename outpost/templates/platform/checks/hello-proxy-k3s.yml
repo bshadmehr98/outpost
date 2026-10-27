@@ -15,7 +15,7 @@ steps:
         restartPolicy: Never
         containers:
           - name: probe
-            image: $GITEA/$ORG/library--python:3.12-slim
+            image: $GITEA/$ORG/library/python:3.12-slim
             command: [python, /probe/probe.py, "$PROXY_ALLOWED", "$PROXY_REFUSED"]
             envFrom: [{configMapRef: {name: outpost-proxy}}]
             volumeMounts: [{name: probe, mountPath: /probe}]

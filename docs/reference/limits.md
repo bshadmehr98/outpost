@@ -18,7 +18,7 @@ Things Outpost does not do, on purpose or not yet.
   `stream9`). SUSE, Arch and the rest have no kind yet, so `zypper` or `pacman` in a build is
   rejected by the seal with nothing to answer it.
 - **Every image is referenced by its Gitea name** in Dockerfiles and manifests:
-  `gitea.internal/pkgs/library--python:3.12-slim`, `gitea.internal/pkgs/org--app:1.4`. There is no
+  `gitea.internal/pkgs/library/python:3.12-slim`, `gitea.internal/pkgs/org/app:1.4`. There is no
   registry mirror on the nodes and nothing rewrites names, so a bare `FROM python:3.12` fails at
   once on a sealed node. One edited line per Dockerfile is the price of knowing where every
   image comes from.

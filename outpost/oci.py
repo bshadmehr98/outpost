@@ -34,7 +34,9 @@ INDEX_TYPES = (
 )
 ACCEPT = ", ".join(MANIFEST_TYPES + INDEX_TYPES)
 REF_ANNOTATION = "org.opencontainers.image.ref.name"
-OWNER_SEP = "--"   # joins the original owner and the image name inside Gitea: library--python, bitnami--redis
+# Gitea's own check on a container image name, below the owner (routers/api/packages/container/container.go,
+# go-gitea/gitea v28.2.0). Stricter than the OCI spec: one separator between alphanumerics, so `--` and `__` fail.
+GITEA_IMAGE_NAME = re.compile(r"\A[a-z0-9]+([._-][a-z0-9]+)*(/[a-z0-9]+([._-][a-z0-9]+)*)*\Z")
 
 
 @dataclass(frozen=True)
@@ -55,27 +57,22 @@ class Ref:
         return f"{self.registry}/{repo}:{self.tag}"
 
     @property
-    def owner(self) -> str:
-        return self.repo.split("/", 1)[0]
-
-    @property
-    def image(self) -> str:
-        return self.repo.split("/", 1)[1] if "/" in self.repo else self.repo
-
-    @property
     def safe_name(self) -> str:
         return re.sub(r"[^A-Za-z0-9_.-]+", "_", self.short)
 
     @property
     def mirror_name(self) -> str:
-        """The repository name inside the Gitea organisation: `library--python`, `bitnami--redis`, `org--app`.
+        """The repository path inside the Gitea organisation: the original one, `library/python`, `bitnami/redis`.
 
         Every image lives under the one organisation next to pip, npm and apt, so the original owner has
-        to stay inside the name: `library/redis` (the official image) and `bitnami/redis` are different
-        images and must not collide as `pkgs/redis`. A run of hyphens is valid in an OCI name component,
-        and no registry allows `--` at the start or end of a component, so the split is unambiguous.
+        to stay in the name: `library/redis` (the official image) and `bitnami/redis` are different
+        images and must not collide as `pkgs/redis`. Gitea accepts a nested path below the organisation
+        (`pkgs/library/python`) and shows it as one package, so the original path is kept as it is and
+        reading it back needs no separator: `ghcr.io/org/team/app` lands as `pkgs/org/team/app`.
+        A joined name was tried first: `library--python` is valid OCI but Gitea rejects it (NAME_INVALID),
+        and `library_python` is ambiguous because quay.io, GitLab and Harbor owners may contain `_`.
         """
-        return f"{self.owner}{OWNER_SEP}{self.image}"
+        return self.repo
 
 
 def parse_ref(ref: str) -> Ref:
@@ -94,23 +91,19 @@ def parse_ref(ref: str) -> Ref:
 
 
 def gitea_ref(gitea, ref: Ref) -> str:
-    """Where `ref` lives once uploaded: python:3.12-slim -> gitea.internal/pkgs/library--python:3.12-slim.
+    """Where `ref` lives once uploaded: python:3.12-slim -> gitea.internal/pkgs/library/python:3.12-slim.
 
     `gitea` is a GiteaInfo (name and org). This is the name Dockerfiles, compose, stack and k8s files
     write; nothing on a node rewrites a plain Docker Hub name, and a sealed node rejects Docker Hub."""
     return f"{gitea.name}/{gitea.org}/{ref.mirror_name}:{ref.tag}"
 
 
-def original_ref(name: str) -> str | None:
-    """The inverse of `Ref.mirror_name`: library--python -> python, bitnami--redis -> bitnami/redis.
+def original_ref(name: str) -> str:
+    """The inverse of `Ref.mirror_name`: library/python -> python, bitnami/redis -> bitnami/redis.
 
-    `name` is the last path component without the tag. None when it carries no owner separator."""
-    if OWNER_SEP not in name:
-        return None
-    owner, image = name.split(OWNER_SEP, 1)
-    if not owner or not image:
-        return None
-    return image if owner == "library" else f"{owner}/{image}"
+    `name` is the path below the organisation, without the tag. The registry is not kept in Gitea, so
+    `org/app` reads back as the Docker Hub name; a need for another registry names it in full."""
+    return name[len("library/"):] if name.startswith("library/") and name.count("/") == 1 else name
 
 
 def digest_of(data: bytes) -> str:

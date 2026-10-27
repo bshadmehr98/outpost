@@ -3,8 +3,8 @@ name: demo
 python: "3.12"
 
 images:
-  - python:3.12-slim          # lands as <gitea>/pkgs/library--python:3.12-slim; the Dockerfile names that
-  - alpine:3.20               # used by the hello-k3s and hello-alpine smoke checks, as pkgs/library--alpine:3.20
+  - python:3.12-slim          # lands as <gitea>/pkgs/library/python:3.12-slim; the Dockerfile names that
+  - alpine:3.20               # used by the hello-k3s and hello-alpine smoke checks, as pkgs/library/alpine:3.20
 
 pypi:
   - file: ../demo/requirements.txt

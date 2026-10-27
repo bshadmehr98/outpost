@@ -21,7 +21,7 @@ from outpost import oci, versions
 from outpost.config import Mirrors
 from outpost.fetch import apk as apkmod
 from outpost.gitea.client import GiteaClient
-from outpost.http import Http
+from outpost.http import Http, HttpError
 from outpost.infra import clients
 from outpost.infra.clients import GiteaInfo
 
@@ -142,21 +142,43 @@ def test_alpine(gitea, apk_files):
     assert index[:2] == b"\x1f\x8b"
 
 
+@pytest.mark.parametrize("ref", ["python:3.12-slim", "bitnami/redis:7", "ghcr.io/my-org/team/app:1.4",
+                                 "quay.io/my_org/my.app:1"])
+def test_generated_image_names_are_accepted_by_gitea(gitea, tmp_path, ref):
+    """Every name Outpost generates must be one real Gitea accepts. The OCI spec is not enough: `library--python`
+    is valid OCI and Gitea answers NAME_INVALID. Push a tiny image under the generated name, pull it back, and
+    find it listed as one container package of the organisation."""
+    r = oci.parse_ref(ref)
+    layout = oci.build_layout({"/hello": (ref.encode(), 0o644)}, tmp_path / "img", r.short)
+    gitea.push_image(layout, "pkgs", r.mirror_name, r.tag)
+    pulled = gitea.registry().pull(oci.Ref(registry="gitea", repo=f"pkgs/{r.mirror_name}", tag=r.tag), tmp_path / "back")
+    assert json.loads((pulled / "index.json").read_text())["manifests"]
+    packages = gitea.http.get("/api/v1/packages/pkgs?type=container&limit=50").json()
+    assert r.mirror_name in {p["name"] for p in packages}
+
+
+def test_gitea_rejects_a_double_hyphen(gitea, tmp_path):
+    """The name of the first cut, kept as a record of why the nested path was chosen."""
+    layout = oci.build_layout({"/hello": (b"x", 0o644)}, tmp_path / "img", "x:1")
+    with pytest.raises(HttpError, match="NAME_INVALID"):
+        gitea.push_image(layout, "pkgs", "library--python", "1")
+
+
 def test_pull_from_docker_hub_and_push_to_gitea(gitea, tmp_path):
-    """`alpine:3.20` from Docker Hub lands under the one organisation as `pkgs/library--alpine`, like every image."""
+    """`alpine:3.20` from Docker Hub lands under the one organisation as `pkgs/library/alpine`, like every image."""
     ref = oci.parse_ref("alpine:3.20")
     layout = oci.Registry(Http("https://registry-1.docker.io")).pull(ref, tmp_path / "alpine")
     assert oci.layout_ref(layout) == "alpine:3.20"
-    assert ref.mirror_name == "library--alpine"
+    assert ref.mirror_name == "library/alpine"
     gitea.push_image(layout, "pkgs", ref.mirror_name, "3.20")
     gitea.push_image(layout, "pkgs", ref.mirror_name, "outpost-only")  # a tag Docker Hub does not have
-    listed = gitea.registry().call("GET", "/v2/pkgs/library--alpine/tags/list", "pkgs/library--alpine")
+    listed = gitea.registry().call("GET", "/v2/pkgs/library/alpine/tags/list", "pkgs/library/alpine")
     assert listed.status == 200 and {"3.20", "outpost-only"} <= set(listed.json()["tags"])
     assert gitea.http.get("/api/v1/orgs/library").status == 404  # no organisation per image owner any more
 
 
 def test_docker_daemon_pulls_by_gitea_name(gitea):
-    """A Docker daemon with no registry mirror pulls `<gitea>/pkgs/library--alpine:outpost-only` by its explicit
+    """A Docker daemon with no registry mirror pulls `<gitea>/pkgs/library/alpine:outpost-only` by its explicit
     name, a tag that only exists in Gitea. A bare `alpine:outpost-only` is not rewritten and must fail."""
     host = URL.split("//")[1]
     sh("docker", "rm", "-f", DIND, check=False)
@@ -167,9 +189,9 @@ def test_docker_daemon_pulls_by_gitea_name(gitea):
             break
         time.sleep(2)
     assert "Registry Mirrors" not in sh("docker", "exec", DIND, "docker", "info").stdout
-    pulled = sh("docker", "exec", DIND, "docker", "pull", f"{host}/pkgs/library--alpine:outpost-only", check=False)
+    pulled = sh("docker", "exec", DIND, "docker", "pull", f"{host}/pkgs/library/alpine:outpost-only", check=False)
     assert pulled.returncode == 0, pulled.stderr
-    out = sh("docker", "exec", DIND, "docker", "run", "--rm", f"{host}/pkgs/library--alpine:outpost-only", "cat", "/etc/alpine-release").stdout
+    out = sh("docker", "exec", DIND, "docker", "run", "--rm", f"{host}/pkgs/library/alpine:outpost-only", "cat", "/etc/alpine-release").stdout
     assert out.startswith("3.20")
     assert sh("docker", "exec", DIND, "docker", "pull", "alpine:outpost-only", check=False).returncode != 0
 
@@ -182,7 +204,7 @@ def test_config_image_is_usable_in_a_build(gitea, tmp_path):
     gitea.push_image(layout, "pkgs", "config", "latest")
     (tmp_path / "ctx").mkdir()
     (tmp_path / "ctx" / "Dockerfile").write_text(
-        f"FROM {host}/pkgs/config:latest AS config\nFROM {host}/pkgs/library--alpine:3.20\nCOPY --from=config / /\n"
+        f"FROM {host}/pkgs/config:latest AS config\nFROM {host}/pkgs/library/alpine:3.20\nCOPY --from=config / /\n"
         "CMD cat /etc/pip.conf /etc/apt/sources.list.d/outpost.list\n")
     # build inside dind, whose daemon trusts the plain-http Gitea; both images are named by their Gitea copy
     sh("docker", "cp", str(tmp_path / "ctx"), f"{DIND}:/ctx")
@@ -206,7 +228,7 @@ def test_apk_add_from_gitea_with_the_config_image_key(gitea, apk_files):
     ctx = Path(tempfile_dir) / "ctx"
     ctx.mkdir()
     (ctx / "Dockerfile").write_text(
-        f"FROM {host}/pkgs/config:apk-test AS config\nFROM {host}/pkgs/library--alpine:3.20\nCOPY --from=config / /\n"
+        f"FROM {host}/pkgs/config:apk-test AS config\nFROM {host}/pkgs/library/alpine:3.20\nCOPY --from=config / /\n"
         f"RUN echo http://{host}/api/packages/pkgs/alpine/v3.20/main > /etc/apk/repositories && apk update && apk add zlib\n"
         "CMD apk info zlib && ls /etc/apk/keys\n")
     sh("docker", "cp", str(ctx), f"{DIND}:/ctx-apk")

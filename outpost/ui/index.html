@@ -977,7 +977,7 @@ function pageUpload() {
   const u = o.state.upload, st = u?.stats || {}, stale = o.sync.arrows.upload.state === 'stale';
   let html = head('Upload', 'Push the box into Gitea\'s package registries through an SSH tunnel.', u ? `last upload ${esc(ago(o.sync.times.upload))}` : '', 4);
   html += explain(`<p>Wheels go into Gitea's PyPI registry, npm tarballs into its npm registry, <code>.deb</code> files into a Debian registry per distro, plain files into the generic registry,
-    and container images into its container registry as <code>&lt;owner&gt;--&lt;image&gt;</code> under the same organisation: <code>python:3.12-slim</code> becomes <code>gitea.internal/pkgs/library--python:3.12-slim</code>, and Dockerfiles name it that way.</p>`,
+    and container images into its container registry as <code>&lt;owner&gt;/&lt;image&gt;</code> under the same organisation: <code>python:3.12-slim</code> becomes <code>gitea.internal/pkgs/library/python:3.12-slim</code>, and Dockerfiles name it that way.</p>`,
     `<p>At the end a tiny <b>config image</b> is built and pushed: one <code>COPY --from=config / /</code> line in a Dockerfile points apt, pip and npm at Gitea.
     Files that are already there are skipped, so after a fetch only the new things move.</p>`);
   html += need(o.state.gitea, '<b>Gitea is not installed yet.</b>Do step 4 first.');

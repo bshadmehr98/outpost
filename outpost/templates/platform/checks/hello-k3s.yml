@@ -3,10 +3,10 @@ description: Run a pod from an image named by its Gitea copy, read its output, a
 infra: [k3s]
 steps:
   - run: k3s kubectl get nodes --no-headers | grep ' Ready' && k3s kubectl -n default get serviceaccount default
-  - run: k3s kubectl delete pod outpost-check --ignore-not-found >/dev/null; k3s kubectl run outpost-check --image=$GITEA/$ORG/library--alpine:3.20 --restart=Never --command -- sh -c 'echo Hello from Outpost on k3s'
+  - run: k3s kubectl delete pod outpost-check --ignore-not-found >/dev/null; k3s kubectl run outpost-check --image=$GITEA/$ORG/library/alpine:3.20 --restart=Never --command -- sh -c 'echo Hello from Outpost on k3s'
   - run: for i in $(seq 1 30); do s=$(k3s kubectl get pod outpost-check -o jsonpath='{.status.phase}'); [ "$s" = Succeeded ] && break; sleep 2; done; k3s kubectl logs outpost-check
     expect: Hello from Outpost on k3s
   - run: k3s kubectl delete pod outpost-check --ignore-not-found
-  - run: k3s kubectl delete pod outpost-leak --ignore-not-found >/dev/null; k3s kubectl run outpost-leak --image=$GITEA/$ORG/library--alpine:3.20 --restart=Never --command -- sh -c 'wget -q -T 5 -O /dev/null https://pypi.org/simple/ && echo LEAK || echo SEALED'
+  - run: k3s kubectl delete pod outpost-leak --ignore-not-found >/dev/null; k3s kubectl run outpost-leak --image=$GITEA/$ORG/library/alpine:3.20 --restart=Never --command -- sh -c 'wget -q -T 5 -O /dev/null https://pypi.org/simple/ && echo LEAK || echo SEALED'
   - run: for i in $(seq 1 30); do s=$(k3s kubectl get pod outpost-leak -o jsonpath='{.status.phase}'); [ "$s" = Succeeded ] && break; sleep 2; done; k3s kubectl logs outpost-leak; k3s kubectl delete pod outpost-leak --ignore-not-found >/dev/null
     expect: SEALED

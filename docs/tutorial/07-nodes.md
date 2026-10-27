@@ -111,9 +111,9 @@ goes to `state/verify-<name>.json`; the dashboard shows it per node.
 ssh -F lab/ssh_config lab-node-1
 cat /etc/pip.conf /etc/docker/daemon.json /etc/apt/sources.list.d/outpost.list
 iptables -S OUTPOST                           # the chain
-docker pull gitea.lab/pkgs/library--alpine:3.20     # works: the Gitea copy of alpine:3.20
+docker pull gitea.lab/pkgs/library/alpine:3.20     # works: the Gitea copy of alpine:3.20
 docker pull alpine:3.20                             # fails at once: Docker Hub is rejected, nothing rewrites the name
-docker run --rm gitea.lab/pkgs/library--alpine:3.20 wget -T 3 https://pypi.org   # fails at once
+docker run --rm gitea.lab/pkgs/library/alpine:3.20 wget -T 3 https://pypi.org   # fails at once
 exit
 ```
 

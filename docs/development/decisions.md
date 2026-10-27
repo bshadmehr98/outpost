@@ -168,11 +168,24 @@ so `ghcr.io/org/app` was already a special case that had to be written with the 
 each owner became a Gitea organisation of its own, unlike every other kind of package. And a
 mirror hides where an image really comes from: a Dockerfile that says `python:3.12-slim` looks
 like it reaches Docker Hub, and whether it does depends on a daemon setting nobody reads. Now
-every image lives next to the wheels and packages as `pkgs/<owner>--<image>` (the owner stays in
+every image lives next to the wheels and packages as `pkgs/<owner>/<image>` (the owner stays in
 the name so `library/redis` and `bitnami/redis` cannot collide), every image is written the same
-way, `gitea.internal/pkgs/library--python:3.12-slim`, and a bare Docker Hub name fails at once
+way, `gitea.internal/pkgs/library/python:3.12-slim`, and a bare Docker Hub name fails at once
 on a sealed node like every other reach for the internet. The cost is one extra edited line per
 Dockerfile, and it is the line that tells the truth.
+
+The first cut of this joined owner and image as `pkgs/library--python`, because `--` is valid in
+the OCI distribution spec and the unit tests checked names against the spec. Real Gitea rejected
+it with `NAME_INVALID` at the first push: its rule (`routers/api/packages/container/container.go`,
+v28.2.0) is `[a-z0-9]+([._-][a-z0-9]+)*(/[a-z0-9]+([._-][a-z0-9]+)*)*`, one separator between
+alphanumerics. Pushed against Gitea 28.2.0: `library--python` and `library__python` are rejected;
+`library_python`, `library.python`, `library-python` and `library/python` are accepted, pull back,
+and list as one package each. A joined `_` would split cleanly for Docker Hub (owners are
+lowercase letters and digits) and GitHub (letters, digits, hyphens), but not for quay.io, GitLab or
+Harbor, whose namespaces may contain `_` and `.`. The nested path needs no separator at all: the
+path below `pkgs` is the original one, deeper paths included, and reads back unchanged. The
+lesson: check a name against the registry that will store it, not the spec it claims to follow;
+the integration suite now pushes the generated names into a real Gitea.
 
 **A token with `--scopes all` is a root password.** The first version kept an all-scope admin
 token in `secrets/gitea-token` because it was convenient. It could create users and change the

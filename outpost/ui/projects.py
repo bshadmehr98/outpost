@@ -87,23 +87,27 @@ def distro_for_image(image: str) -> str | None:
     return None
 
 
-def needed_image(image: str) -> str | None:
+def needed_image(image: str, gitea: str | None = None) -> str | None:
     """The needs entry behind a FROM line, or None when it cannot be known.
 
-    `${GITEA}/${ORG}/library--python:3.12-slim` and `gitea.internal/pkgs/library--python:3.12-slim` are what a
-    converted Dockerfile says; the need that put them there is `python:3.12-slim`. `bitnami--redis:7` is
-    `bitnami/redis:7`. A `${BASE}` whose tail is not a name on its own is skipped."""
+    `${GITEA}/${ORG}/library/python:3.12-slim` and `gitea.internal/pkgs/library/python:3.12-slim` are what a
+    converted Dockerfile says; the need that put them there is `python:3.12-slim`. `bitnami/redis:7` below the
+    organisation is `bitnami/redis:7`. `gitea` is `<name>/<org>` (gitea.internal/pkgs) when the platform knows
+    it; without it only the `${GITEA}/${ORG}/...` form is read back. A `${BASE}` that hides the name is skipped."""
     tail = image.rsplit("/", 1)[-1]
-    name, sep, tag = tail.partition(":")
+    name = tail.partition(":")[0]
     if name == "config" and "/" in image:  # Outpost's own config image, not something to fetch
         return None
-    if "$" in image:  # ${REGISTRY}/${ORG}/python:3.12-slim -> python:3.12-slim, if the tail stands on its own
-        if "$" in tail or not re.fullmatch(r"[a-z0-9][a-z0-9._-]*:[A-Za-z0-9._-]+", tail):
+    if gitea and image.startswith(gitea.rstrip("/") + "/"):
+        return oci.original_ref(image[len(gitea.rstrip("/")) + 1:])
+    if "$" in image:  # ${GITEA}/${ORG}/library/python:3.12-slim -> python:3.12-slim, if the rest stands on its own
+        parts = image.split("/")
+        while parts and "$" in parts[0]:
+            parts.pop(0)
+        rest = "/".join(parts)
+        if not re.fullmatch(r"[a-z0-9][a-z0-9._-]*(/[a-z0-9][a-z0-9._-]*)*:[A-Za-z0-9._-]+", rest):
             return None
-        image = tail
-    original = oci.original_ref(name)
-    if original:
-        return f"{original}{sep}{tag}"
+        return oci.original_ref(rest)
     return image
 
 
@@ -115,8 +119,9 @@ _INSTALLS = (
 )
 
 
-def read_dockerfile(path: Path) -> dict:
-    """Images and OS packages (apt, apk, rpm) a Dockerfile asks for. Build stages and ${ARGS} are left out."""
+def read_dockerfile(path: Path, gitea: str | None = None) -> dict:
+    """Images and OS packages (apt, apk, rpm) a Dockerfile asks for. Build stages and ${ARGS} are left out.
+    `gitea` (`<name>/<org>`) lets a literal Gitea name be read back into its need, see needed_image."""
     text = path.read_text(errors="replace")
     stages: set[str] = set()
     images: list[str] = []
@@ -126,7 +131,7 @@ def read_dockerfile(path: Path) -> dict:
             stages.add(stage.lower())
         if image.lower() in stages or image.lower() == "scratch":
             continue
-        image = needed_image(image)
+        image = needed_image(image, gitea)
         if image and image not in images:
             images.append(image)
     joined = re.sub(r"\\\s*\n", " ", text)
@@ -166,8 +171,9 @@ def python_version(folder: Path, images: list[str]) -> str | None:
     return None
 
 
-def scan(folder: str | Path) -> dict:
-    """Everything a needs file could be made of, found in a folder. The user picks what to keep."""
+def scan(folder: str | Path, gitea: str | None = None) -> dict:
+    """Everything a needs file could be made of, found in a folder. The user picks what to keep.
+    `gitea` is `<name>/<org>` of this platform's Gitea, when known (see needed_image)."""
     root = Path(os.path.expanduser(str(folder))).resolve()
     if not root.is_dir():
         raise ConfigError(f"{root} is not a folder on this computer")
@@ -181,7 +187,7 @@ def scan(folder: str | Path) -> dict:
             if name in PYTHON_LOCKFILES or name in JS_LOCKFILES or re.fullmatch(r"requirements[-_\w]*\.txt", name):
                 lockfiles.append(describe_lockfile(path))
             elif name == "Dockerfile" or name.startswith("Dockerfile.") or name.endswith(".Dockerfile"):
-                dockerfiles.append(read_dockerfile(path))
+                dockerfiles.append(read_dockerfile(path, gitea))
     images = [i for d in dockerfiles for i in d["images"]]
     images = list(dict.fromkeys(images))
     distros = {}

@@ -54,11 +54,11 @@ Every node gets the proxy's address in `/etc/outpost/proxy.env`, its shell profi
 client config. Then, on `lab-node-1`:
 
 ```
-docker run --rm gitea.lab/pkgs/library--python:3.12-slim python -c \
+docker run --rm gitea.lab/pkgs/library/python:3.12-slim python -c \
   "import urllib.request as u; print(u.urlopen('https://example.org/', timeout=20).status)"
 # 200: docker run passed HTTPS_PROXY from the Docker client config; the request went through the proxy
 
-docker run --rm -e HTTPS_PROXY= -e https_proxy= gitea.lab/pkgs/library--python:3.12-slim python -c "..."
+docker run --rm -e HTTPS_PROXY= -e https_proxy= gitea.lab/pkgs/library/python:3.12-slim python -c "..."
 # fails: without the variables a container is sealed exactly as before
 
 ssh -F lab/ssh_config lab-gitea tail -3 /var/log/outpost-proxy.log

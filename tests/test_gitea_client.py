@@ -122,7 +122,7 @@ def test_upload_box_sends_apk_and_rpm_and_records_them_for_the_config_image(clie
 
 
 def test_upload_puts_every_image_under_the_organisation(client, fake_gitea, tmp_path):
-    """python:3.12-slim lands as pkgs/library--python, bitnami/redis as pkgs/bitnami--redis; no other org is made."""
+    """python:3.12-slim lands as pkgs/library/python, bitnami/redis as pkgs/bitnami/redis; no other org is made."""
     from outpost import box as boxmod
     from outpost import oci
     from outpost.gitea.upload import upload_box
@@ -137,12 +137,12 @@ def test_upload_puts_every_image_under_the_organisation(client, fake_gitea, tmp_
     stats = upload_box(box, client, gitea, "CA PEM", log=lines.append)
     assert stats["images"] == {"uploaded": 3, "exists": 0}
     stored = {repo for repo, _tag in fake_gitea.manifests}
-    assert stored == {"pkgs/library--python", "pkgs/bitnami--redis", "pkgs/org--app", "pkgs/config"}
-    assert ("pkgs/library--python", "3.12-slim") in fake_gitea.manifests and ("pkgs/org--app", "1.4") in fake_gitea.manifests
+    assert stored == {"pkgs/library/python", "pkgs/bitnami/redis", "pkgs/org/app", "pkgs/config"}
+    assert ("pkgs/library/python", "3.12-slim") in fake_gitea.manifests and ("pkgs/org/app", "1.4") in fake_gitea.manifests
     assert fake_gitea.orgs == {"pkgs"}, "no organisation per image owner"
     assert not any(path.startswith("/v2/library/") for _m, path in fake_gitea.requests)
-    assert "    python:3.12-slim  ->  gitea.internal/pkgs/library--python:3.12-slim" in lines
-    assert "    bitnami/redis:7  ->  gitea.internal/pkgs/bitnami--redis:7" in lines
+    assert "    python:3.12-slim  ->  gitea.internal/pkgs/library/python:3.12-slim" in lines
+    assert "    bitnami/redis:7  ->  gitea.internal/pkgs/bitnami/redis:7" in lines
 
 
 def test_error_surfaces_server_text(fake_gitea, tmp_path):

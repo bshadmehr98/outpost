@@ -88,7 +88,7 @@ Docker as above on every node. The first node runs `docker swarm init --advertis
 (plus `args:` from `servers.yml`); the others join as workers with the worker token. Each
 node's IP is added to the others' allow lists so the overlay network (2377, 7946, 4789) is not
 sealed. A service scheduled on any node pulls its image from Gitea by its Gitea name
-(`gitea.lab/pkgs/library--alpine:3.20`); every node trusts the same CA.
+(`gitea.lab/pkgs/library/alpine:3.20`); every node trusts the same CA.
 
 Extra checks: swarm active, plus the Compose ones.
 
@@ -104,7 +104,7 @@ Extra checks: swarm active, plus the Compose ones.
 The first node is the server; setup waits until the node is `Ready` and the default service
 account exists. Further nodes are agents joined with `K3S_URL` and the server's node token.
 Application images are pulled by containerd from Gitea by their Gitea name, so a manifest says
-`image: gitea.lab/pkgs/library--alpine:3.20`; a bare `alpine:3.20` would ask Docker Hub and be
+`image: gitea.lab/pkgs/library/alpine:3.20`; a bare `alpine:3.20` would ask Docker Hub and be
 rejected by the seal. The lab passes `--kubelet-arg=eviction-hard=...` through `args:`
 because the kubelet's default of "evict below 10 % free disk" is often true on a laptop.
 

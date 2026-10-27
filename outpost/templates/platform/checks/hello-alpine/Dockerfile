@@ -3,7 +3,7 @@
 ARG GITEA
 ARG ORG=pkgs
 FROM ${GITEA}/${ORG}/config:latest AS config
-FROM ${GITEA}/${ORG}/library--alpine:3.20
+FROM ${GITEA}/${ORG}/library/alpine:3.20
 COPY --from=config / /
 RUN apk add --no-cache curl
 CMD ["curl", "--version"]

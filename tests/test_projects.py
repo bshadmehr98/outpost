@@ -110,11 +110,17 @@ def test_read_dockerfile_maps_gitea_names_back_to_needs(tmp_path):
     """A converted Dockerfile names the Gitea copy; a scan must propose the need that produces it."""
     df = tmp_path / "Dockerfile"
     df.write_text("ARG GITEA=gitea.internal\nARG ORG=pkgs\nFROM ${GITEA}/${ORG}/config:latest AS config\n"
-                  "FROM ${GITEA}/${ORG}/library--python:3.12-slim\nCOPY --from=config / /\n"
-                  "FROM gitea.internal/pkgs/bitnami--redis:7\nFROM gitea.internal/pkgs/org--app:1.4\n"
-                  "FROM gitea.internal/pkgs/library--python:3.12-slim\n")
-    assert projects.read_dockerfile(df)["images"] == ["python:3.12-slim", "bitnami/redis:7", "org/app:1.4"]
-    assert projects.needed_image("${GITEA}/${ORG}/library--alpine:3.20") == "alpine:3.20"
-    assert projects.needed_image("postgres:16") == "postgres:16"
+                  "FROM ${GITEA}/${ORG}/library/python:3.12-slim\nCOPY --from=config / /\n"
+                  "FROM gitea.internal/pkgs/bitnami/redis:7\nFROM gitea.internal/pkgs/org/team/app:1.4\n"
+                  "FROM gitea.internal/pkgs/library/python:3.12-slim\n")
+    gitea = "gitea.internal/pkgs"
+    assert projects.read_dockerfile(df, gitea)["images"] == ["python:3.12-slim", "bitnami/redis:7", "org/team/app:1.4"]
+    assert projects.needed_image("${GITEA}/${ORG}/library/alpine:3.20") == "alpine:3.20"
+    assert projects.needed_image("${GITEA}/${ORG}/bitnami/redis:7") == "bitnami/redis:7"
+    assert projects.needed_image("${REG}/x/${IMG}") is None
+    assert projects.needed_image("postgres:16", gitea) == "postgres:16"
+    assert projects.needed_image("ghcr.io/org/app:1", gitea) == "ghcr.io/org/app:1"   # another registry stays as it is
     assert projects.needed_image("${BASE}") is None
-    assert projects.scan(tmp_path)["images"] == ["python:3.12-slim", "bitnami/redis:7", "org/app:1.4"]
+    assert projects.scan(tmp_path, gitea)["images"] == ["python:3.12-slim", "bitnami/redis:7", "org/team/app:1.4"]
+    # without the platform's Gitea name a literal Gitea name cannot be told from another registry
+    assert projects.needed_image("gitea.internal/pkgs/bitnami/redis:7") == "gitea.internal/pkgs/bitnami/redis:7"

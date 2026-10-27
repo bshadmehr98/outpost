@@ -31,7 +31,7 @@ then `apk add --no-cache curl` answered by Gitea's Alpine registry, runs `curl -
 expects `curl `, then a container that `wget`s pypi.org and must print *SEALED*. It exists so that
 a platform with Alpine images proves apk works offline, not only apt and pip.
 
-**hello-k3s** (for `k3s`) runs a pod from `gitea.lab/pkgs/library--alpine:3.20`, the Gitea copy
+**hello-k3s** (for `k3s`) runs a pod from `gitea.lab/pkgs/library/alpine:3.20`, the Gitea copy
 of `alpine:3.20`, reads its
 log, then runs a second pod that must *fail* to reach pypi.org. That second pod exists because
 of a hole we found and fixed; the [decisions page](../development/decisions.md) tells the story.
@@ -60,7 +60,7 @@ The most convincing proof is a failure. On the node, try to install something th
 Gitea:
 
 ```
-ssh -F lab/ssh_config lab-node-1 'docker run --rm gitea.lab/pkgs/library--python:3.12-slim pip install requests'
+ssh -F lab/ssh_config lab-node-1 'docker run --rm gitea.lab/pkgs/library/python:3.12-slim pip install requests'
 ```
 
 It fails within a second with pip naming Gitea's index as the only place it looked. Nothing

@@ -502,7 +502,12 @@ class Handler(BaseHTTPRequestHandler):
                 ssh.use_config(servers.ssh_config)
                 self._json(demo.status(self.platform, servers))
             elif path == "/api/project/scan":
-                self._json(projects.scan(self._body().get("folder", "")))
+                try:   # the Gitea name and org let a literal gitea.internal/pkgs/... FROM be read back into its need
+                    g = load_servers(self.platform.servers_file).gitea
+                    gitea = f"{g.name}/{g.org}"
+                except (ConfigError, yaml.YAMLError):
+                    gitea = None
+                self._json(projects.scan(self._body().get("folder", ""), gitea))
             elif path == "/api/project/save":
                 saved = projects.write_needs(self.platform, self._body())
                 self._json({"saved": f"needs/{saved.name}"})

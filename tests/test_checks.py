@@ -19,7 +19,7 @@ def test_load_template_checks():
     alpine = names["hello-alpine"]
     assert alpine.context == TEMPLATE_CHECKS / "hello-alpine" and alpine.applies_to("swarm") and not alpine.applies_to("k3s")
     assert alpine.steps[1]["expect"] == "curl " and "apk add --no-cache curl" in (alpine.context / "Dockerfile").read_text()
-    assert "library--alpine:3.20" in (alpine.context / "Dockerfile").read_text()
+    assert "library/alpine:3.20" in (alpine.context / "Dockerfile").read_text()
 
 
 def hello_python():

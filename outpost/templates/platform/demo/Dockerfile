@@ -1,12 +1,12 @@
 # The Outpost-specific lines are the first five: the config image carries pip.conf, apt sources,
 # npm config and the CA, so every install below is answered by Gitea; and the base image is named
-# by its Gitea copy (python:3.12-slim lives under ${ORG} as library--python). A bare
+# by its Gitea copy (python:3.12-slim lives under ${ORG} as library/python). A bare
 # `FROM python:3.12-slim` would ask Docker Hub, which a sealed node rejects at once.
 ARG GITEA=gitea.internal
 ARG ORG=pkgs
 FROM ${GITEA}/${ORG}/config:latest AS config
 
-FROM ${GITEA}/${ORG}/library--python:3.12-slim
+FROM ${GITEA}/${ORG}/library/python:3.12-slim
 COPY --from=config / /
 RUN apt-get update && apt-get install -y --no-install-recommends curl && rm -rf /var/lib/apt/lists/*
 WORKDIR /app

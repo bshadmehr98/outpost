@@ -42,7 +42,7 @@ def test_init_ships_the_demo_and_ensure_local_fills_an_old_platform(tmp_path):
     assert {"Dockerfile", "requirements.txt", "app/app.py", "app/probe.py", "app/templates/index.html", "compose.yml", "stack.yml", "k8s.yml"} <= set(files)
     dockerfile = files["Dockerfile"].decode()
     assert "COPY --from=config / /" in dockerfile and "--fail-if-reachable" in dockerfile
-    assert "FROM ${GITEA}/${ORG}/library--python:3.12-slim" in dockerfile and "\nFROM python:" not in dockerfile  # named by its Gitea copy
+    assert "FROM ${GITEA}/${ORG}/library/python:3.12-slim" in dockerfile and "\nFROM python:" not in dockerfile  # named by its Gitea copy
     old = tmp_path / "old"
     old.mkdir()
     (old / "servers.yml").write_text(SERVERS)

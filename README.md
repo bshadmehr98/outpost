@@ -84,7 +84,7 @@ afternoon:
   every request, and workloads opt in with `HTTPS_PROXY`. A program that does not opt in is still
   sealed. See [named exceptions](docs/architecture/proxy.md).
 - **Dockerfiles change by two lines.** `FROM` names the Gitea copy of the base image
-  (`${GITEA}/pkgs/library--python:3.12-slim`), and `COPY --from=config / /` brings pip, npm, apt,
+  (`${GITEA}/pkgs/library/python:3.12-slim`), and `COPY --from=config / /` brings pip, npm, apt,
   apk, dnf and CA configuration into the build. Nothing on a node rewrites image names: a bare Docker Hub
   name fails at once, like every other reach for the internet.
 - **CI that cannot cheat.** Gitea Actions runners on the nodes, in host mode: a job is a shell
@@ -195,7 +195,7 @@ And two lines in each Dockerfile: the base image by its Gitea name, and the conf
 ```dockerfile
 ARG GITEA
 FROM ${GITEA}/pkgs/config:latest AS config
-FROM ${GITEA}/pkgs/library--python:3.12-slim     # the Gitea copy of python:3.12-slim
+FROM ${GITEA}/pkgs/library/python:3.12-slim     # the Gitea copy of python:3.12-slim
 COPY --from=config / /
 # apt-get, pip and npm now use Gitea (apk add on an Alpine base, dnf install on a RHEL one). Nothing else changes.
 ```
@@ -214,7 +214,7 @@ Five ideas carry the design:
 
 1. **Gitea is the local internet.** Every client speaks its native protocol to Gitea, and
    everything lives under one organisation: wheels, tarballs, packages, files, and images as
-   `pkgs/<owner>--<image>` (`library--python`, `bitnami--redis`, `org--app` for `ghcr.io/org/app`).
+   `pkgs/<owner>/<image>` (`library/python`, `bitnami/redis`, `org/app` for `ghcr.io/org/app`).
    Dockerfiles and manifests name that copy explicitly; nothing on a node rewrites names.
 2. **The box is a folder.** A manifest with a SHA-256 per file, optionally packed into signed
    `tar.xz` files for USB sticks or GitHub releases.
@@ -317,8 +317,8 @@ Gitea's API is reached through an SSH tunnel, so wherever `ssh gitea-1` works, e
 `app.ini` and certificate so that every later step can assume the layout.
 
 **What about images from ghcr.io or quay.io?** Fetched, uploaded and referenced like any
-other: `ghcr.io/org/app:1.4` becomes `gitea.internal/pkgs/org--app:1.4`, exactly as
-`python:3.12-slim` becomes `gitea.internal/pkgs/library--python:3.12-slim`. Docker Hub is not a
+other: `ghcr.io/org/app:1.4` becomes `gitea.internal/pkgs/org/app:1.4`, exactly as
+`python:3.12-slim` becomes `gitea.internal/pkgs/library/python:3.12-slim`. Docker Hub is not a
 special case; a bare `FROM python:3.12-slim` on a sealed node fails at once, on purpose.
 
 **Security updates for the OS?** Not mirrored unless you list the packages. Open egress for a

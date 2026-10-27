@@ -8,7 +8,7 @@ ARG GITEA
 ARG ORG=pkgs
 FROM ${GITEA}/${ORG}/config:latest AS config
 
-FROM ${GITEA}/${ORG}/library--python:3.12-slim     # the Gitea copy of python:3.12-slim
+FROM ${GITEA}/${ORG}/library/python:3.12-slim     # the Gitea copy of python:3.12-slim
 COPY --from=config / /
 
 RUN apt-get update && apt-get install -y --no-install-recommends libpq-dev
@@ -26,7 +26,7 @@ services:
       context: .
       args: {GITEA: gitea.internal}
   db:
-    image: gitea.internal/pkgs/library--postgres:16     # the Gitea copy of postgres:16
+    image: gitea.internal/pkgs/library/postgres:16     # the Gitea copy of postgres:16
 ```
 
 The same two lines work on an Alpine base, where `apk add` is answered by Gitea's Alpine registry
@@ -36,7 +36,7 @@ The same two lines work on an Alpine base, where `apk add` is answered by Gitea'
 ARG GITEA
 ARG ORG=pkgs
 FROM ${GITEA}/${ORG}/config:latest AS config
-FROM ${GITEA}/${ORG}/library--alpine:3.20                 # needs: images [alpine:3.20], apk {branch: v3.20, packages: [curl]}
+FROM ${GITEA}/${ORG}/library/alpine:3.20                 # needs: images [alpine:3.20], apk {branch: v3.20, packages: [curl]}
 COPY --from=config / /
 RUN apk add --no-cache curl
 ```
@@ -49,7 +49,7 @@ comment in the config image, so a build cannot even try the public mirrors):
 ARG GITEA
 ARG ORG=pkgs
 FROM ${GITEA}/${ORG}/config:latest AS config
-FROM ${GITEA}/${ORG}/library--rockylinux:9                # needs: images [rockylinux:9], rpm {distro: rocky9, packages: [git]}
+FROM ${GITEA}/${ORG}/library/rockylinux:9                # needs: images [rockylinux:9], rpm {distro: rocky9, packages: [git]}
 COPY --from=config / /
 RUN dnf install -y git && dnf clean all
 ```
@@ -57,22 +57,23 @@ RUN dnf install -y git && dnf clean all
 ## Where an image lives in Gitea
 
 `outpost upload` pushes every image into the one organisation, next to the wheels and packages,
-under the name `<owner>--<image>`, where the owner is the original registry owner and `library`
+under the name `<owner>/<image>`, where the owner is the original registry owner and `library`
 for official Docker Hub images:
 
 | in `needs/` | in Gitea, and in your Dockerfile |
 |---|---|
-| `python:3.12-slim` | `gitea.internal/pkgs/library--python:3.12-slim` |
-| `bitnami/redis:7` | `gitea.internal/pkgs/bitnami--redis:7` |
-| `ghcr.io/org/app:1.4` | `gitea.internal/pkgs/org--app:1.4` |
+| `python:3.12-slim` | `gitea.internal/pkgs/library/python:3.12-slim` |
+| `bitnami/redis:7` | `gitea.internal/pkgs/bitnami/redis:7` |
+| `ghcr.io/org/app:1.4` | `gitea.internal/pkgs/org/app:1.4` |
 
-The owner stays inside the name because `library/redis` and `bitnami/redis` are different images
-and must not collide. `--` is valid in an OCI name and never appears at the edge of a component,
-so the two halves are always clear.
+The owner stays in the path because `library/redis` and `bitnami/redis` are different images
+and must not collide. The path below `pkgs` is the original one, unchanged (`ghcr.io/org/team/app`
+becomes `pkgs/org/team/app`); Gitea accepts nested names and lists each as one package. Only the
+registry is not kept, so two images with the same path on different registries share one name.
 
 ## Why this works
 
-- `FROM gitea.internal/pkgs/library--python:3.12-slim` is an ordinary pull from a registry Docker
+- `FROM gitea.internal/pkgs/library/python:3.12-slim` is an ordinary pull from a registry Docker
   trusts: setup put the CA in `/etc/docker/certs.d/gitea.internal/` (and gave containerd the same
   CA in `registries.yaml` on k3s). There is no registry mirror and nothing rewrites names, so what
   the file says is what gets pulled.
@@ -86,13 +87,13 @@ so the two halves are always clear.
 ## Images from other registries
 
 No special case. `ghcr.io/org/app:1.4` is listed in `needs/` under that name, fetched from
-ghcr.io, and referenced as `gitea.internal/pkgs/org--app:1.4`, exactly like a Docker Hub image.
+ghcr.io, and referenced as `gitea.internal/pkgs/org/app:1.4`, exactly like a Docker Hub image.
 
 ## Things that will not work, and what to do
 
 | Pattern | Why it fails | Do this instead |
 |---|---|---|
-| `FROM python:3.12` or `image: postgres:16` | that is Docker Hub, which a sealed node rejects; nothing rewrites it | `FROM ${GITEA}/pkgs/library--python:3.12`, `image: gitea.internal/pkgs/library--postgres:16` |
+| `FROM python:3.12` or `image: postgres:16` | that is Docker Hub, which a sealed node rejects; nothing rewrites it | `FROM ${GITEA}/pkgs/library/python:3.12`, `image: gitea.internal/pkgs/library/postgres:16` |
 | `curl https://github.com/.../tool` in a `RUN` | internet is rejected | list it under `files:`, then `curl https://gitea.internal/api/packages/pkgs/generic/tool/1.0/tool` |
 | `pip install git+https://...` | same | build a wheel, list it, or vendor it |
 | `apk add` on an Alpine base with no `apk:` block in needs | the config image blanks `/etc/apk/repositories` when Gitea has no Alpine branch | add `apk: {branch: v3.20, packages: [...]}`, fetch, upload |
@@ -103,5 +104,5 @@ ghcr.io, and referenced as `gitea.internal/pkgs/org--app:1.4`, exactly like a Do
 | a `RUN` step that must call a third-party API (a licence check, a webhook) | the seal rejects it | add the name to `egress_proxy.allow` and run `outpost proxy setup`: on a node with the proxy, `docker build` passes `HTTPS_PROXY`, `HTTP_PROXY` and `NO_PROXY` as build arguments (the Docker client config), so a step that uses them (`curl`, pip, Python's urllib, requests) goes through the proxy. Prefer doing it at run time; a build that depends on the internet is less reproducible |
 
 The failure is always immediate and names the host it tried to reach. That is your to-do list.
-The dashboard's project scan reads the Gitea names back into needs (`library--python:3.12-slim`
+The dashboard's project scan reads the Gitea names back into needs (`library/python:3.12-slim`
 is proposed as `python:3.12-slim`), so a converted Dockerfile still produces the right needs file.

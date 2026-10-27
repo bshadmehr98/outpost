@@ -34,14 +34,14 @@ outpost check hello-python --infra dev # one check
 Results are kept in `state/check-<infra>.json` and shown in `outpost ui`.
 
 `outpost init` ships three: `hello-python` for Docker-based infrastructures, `hello-alpine`
-(also Docker-based), which builds `$GITEA/$ORG/library--alpine:3.20` with `COPY --from=config / /`
+(also Docker-based), which builds `$GITEA/$ORG/library/alpine:3.20` with `COPY --from=config / /`
 and `apk add --no-cache curl` answered by Gitea's Alpine registry, runs `curl --version` and
 confirms a container cannot reach pypi.org, and `hello-k3s`, which runs a pod from
-`$GITEA/$ORG/library--alpine:3.20`, the Gitea copy of `alpine:3.20`, then a second pod that must fail to reach pypi.org.
+`$GITEA/$ORG/library/alpine:3.20`, the Gitea copy of `alpine:3.20`, then a second pod that must fail to reach pypi.org.
 The demo needs file lists `apk: {branch: v3.20, packages: [curl]}` for `hello-alpine`.
 
 Two more need the [egress proxy](../architecture/proxy.md) (`requires: [proxy]`) and are skipped
-without one: `hello-proxy` (Compose, Swarm) runs a `library--python:3.12-slim` container with
+without one: `hello-proxy` (Compose, Swarm) runs a `library/python:3.12-slim` container with
 `HTTPS_PROXY=$PROXY_URL` that must reach `https://$PROXY_ALLOWED/`, be refused `$PROXY_REFUSED`
 (normally `example.com`) with 403, and fail to reach the allowed name without the proxy;
 `hello-proxy-k3s` does the same in a pod that takes the variables from the `outpost-proxy`

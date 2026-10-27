@@ -30,7 +30,7 @@ base image named by its Gitea copy.
 ARG GITEA=gitea.internal
 ARG ORG=pkgs
 FROM ${GITEA}/${ORG}/config:latest AS config
-FROM ${GITEA}/${ORG}/library--python:3.12-slim
+FROM ${GITEA}/${ORG}/library/python:3.12-slim
 COPY --from=config / /
 RUN apt-get update && apt-get install -y --no-install-recommends curl
 COPY requirements.txt .

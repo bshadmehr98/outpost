@@ -36,8 +36,9 @@ What the unit suite covers, by file:
 
 `tests/integration/test_real_gitea.py` starts `gitea/gitea:<pinned version>` in Docker and a
 Docker-in-Docker daemon on a private network, and checks the real registry behaviour: generic,
-PyPI, npm and Debian uploads, pulling `alpine` from Docker Hub and pushing it into Gitea as
-`pkgs/library--alpine`, a Docker daemon with no mirror pulling it by that name (and failing on the
+PyPI, npm and Debian uploads, pushing a tiny image under every kind of name Outpost generates
+(Gitea's name rule is stricter than the OCI spec, so names are checked against Gitea itself), pulling `alpine` from Docker Hub and pushing it into Gitea as
+`pkgs/library/alpine`, a Docker daemon with no mirror pulling it by that name (and failing on the
 bare name), and a build that uses the config image.
 
 `tests/integration/test_full_flow.py` is the tutorial as code. It runs `outpost lab up` in

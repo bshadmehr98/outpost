@@ -12,6 +12,9 @@ import pytest
 
 from outpost.ssh import Result
 
+# Gitea's image name rule below the owner, from go-gitea/gitea v28.2.0 routers/api/packages/container/container.go
+GITEA_IMAGE_NAME = re.compile(r"\A[a-z0-9]+([._-][a-z0-9]+)*(/[a-z0-9]+([._-][a-z0-9]+)*)*\Z")
+
 
 class FakeHost:
     """Records every script and file instead of touching a server. Answers come from `responses`:
@@ -198,6 +201,9 @@ class _Handler(BaseHTTPRequestHandler):
             return None
         m = re.match(r"^/v2/(.+)/blobs/uploads/$", self.path)
         if m:
+            owner, _, image = m[1].partition("/")
+            if not GITEA_IMAGE_NAME.match(image):   # what real Gitea answers for library--python
+                return self._send(400, b'{"errors":[{"code":"NAME_INVALID","message":""}]}')
             uid = str(len(g.uploads) + 1)
             g.uploads[uid] = m[1]
             return self._send(202, b"", {"Location": f"/v2/{m[1]}/blobs/uploads/{uid}"})
