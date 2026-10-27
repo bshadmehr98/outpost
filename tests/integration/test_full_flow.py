@@ -129,7 +129,7 @@ def test_4_infra_setup_and_verify(rig):
     report = json.loads((rig / "state" / "verify-dev.json").read_text())
     assert report["result"] == "ok", json.dumps(report, indent=1)
     names = {r["name"] for r in report["nodes"]["lab-node-1"]}
-    assert {"public internet rejected", "docker trusts and reaches gitea registry", "container egress hooked", "apt sources are gitea only", "node dns for containers running"} <= names
+    assert {"public internet rejected", "docker trusts and reaches gitea registry", "container egress hooked", "package sources are gitea only", "package index updates offline", "node dns for containers running"} <= names
     # nothing rewrites image names: a bare Docker Hub name is rejected, the Gitea name of the same image works
     assert ssh("lab-node-1", "docker pull alpine:3.20", check=False).returncode != 0
     assert ssh("lab-node-1", f"docker pull {GITEA_NAME}/pkgs/library/alpine:3.20", check=False).returncode == 0
