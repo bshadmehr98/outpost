@@ -1,0 +1,9 @@
+name: hello-alpine
+description: Build an Alpine image that installs an apk package from Gitea, run it, and confirm the internet is blocked.
+infra: [compose, swarm]
+steps:
+  - run: docker build --build-arg GITEA=$GITEA --build-arg ORG=$ORG -t outpost-check-alpine .
+  - run: docker run --rm outpost-check-alpine
+    expect: "curl "
+  - run: docker run --rm outpost-check-alpine wget -q -T 5 -O /dev/null https://pypi.org/simple/ && echo LEAK || echo SEALED
+    expect: SEALED

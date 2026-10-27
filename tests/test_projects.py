@@ -8,8 +8,20 @@ def test_distro_for_image():
     assert projects.distro_for_image("python:3.12-slim-bullseye") == "bullseye"
     assert projects.distro_for_image("ubuntu:24.04") == "noble"
     assert projects.distro_for_image("ubuntu:jammy") == "jammy"
-    assert projects.distro_for_image("alpine:3.20") is None
     assert projects.distro_for_image("ghcr.io/org/debian:trixie-slim") == "trixie"
+    # apk branches: a versioned alpine tag names its branch, a bare `-alpine` tag gets the branch the demo pins
+    assert projects.distro_for_image("alpine:3.20") == "v3.20"
+    assert projects.distro_for_image("python:3.12-alpine3.20") == "v3.20"
+    assert projects.distro_for_image("node:20-alpine") == projects.ALPINE_CURRENT == "v3.20"
+    assert projects.distro_for_image("alpine:latest") == "v3.20"
+    # rpm distros
+    assert projects.distro_for_image("rockylinux:9") == "rocky9"
+    assert projects.distro_for_image("rockylinux:9.3-minimal") == "rocky9"
+    assert projects.distro_for_image("almalinux:9") == "alma9"
+    assert projects.distro_for_image("fedora:40") == "fedora40"
+    assert projects.distro_for_image("quay.io/centos/centos:stream9") == "stream9"
+    assert projects.distro_for_image("fedora:latest") is None
+    assert [projects.kind_for_distro(d) for d in ("bookworm", "v3.20", "rocky9", None)] == ["apt", "apk", "rpm", None]
 
 
 def test_read_dockerfile_skips_stages_and_args(tmp_path):
@@ -19,6 +31,41 @@ def test_read_dockerfile_skips_stages_and_args(tmp_path):
                   "FROM build\nFROM web\nFROM scratch\n")
     d = projects.read_dockerfile(df)
     assert d["images"] == ["node:22-slim"] and d["apt"] == ["git", "ca-certificates=20230311".split("=")[0]]
+    assert d["apk"] == [] and d["rpm"] == []
+
+
+def test_read_dockerfile_collects_apk_and_rpm_packages_separately(tmp_path):
+    df = tmp_path / "Dockerfile"
+    df.write_text("FROM alpine:3.20\nRUN apk add --no-cache curl \\\n    jq=1.7.1-r0 && rm -rf /var/cache/apk/*\n"
+                  "FROM rockylinux:9\nRUN dnf install -y --setopt=install_weak_deps=False git python3-pip && dnf clean all\n"
+                  "RUN microdnf install -y tar; yum install -y gzip\n"
+                  "RUN apt-get install -y curl\n")
+    d = projects.read_dockerfile(df)
+    assert d["images"] == ["alpine:3.20", "rockylinux:9"]
+    assert d["apk"] == ["curl", "jq"] and d["rpm"] == ["git", "python3-pip", "tar", "gzip"] and d["apt"] == ["curl"]
+
+
+def test_scan_and_write_needs_emit_apk_and_rpm(tmp_path, platform_dir):
+    from outpost.needs import load_needs
+    from outpost.paths import Platform
+    project = tmp_path / "mixed"
+    project.mkdir()
+    (project / "Dockerfile").write_text("FROM python:3.12-alpine3.20\nRUN apk add --no-cache libpq\n")
+    (project / "Dockerfile.el").write_text("FROM almalinux:9\nRUN dnf install -y postgresql-libs\n")
+    s = projects.scan(project)
+    assert s["apt"] == {"distro": "bookworm", "packages": []}
+    assert s["apk"] == {"branch": "v3.20", "packages": ["libpq"]} and s["rpm"] == {"distro": "alma9", "packages": ["postgresql-libs"]}
+    plain = tmp_path / "plain"
+    plain.mkdir()
+    (plain / "Dockerfile").write_text("FROM python:3.12-slim\n")
+    assert "apk" not in projects.scan(plain) and "rpm" not in projects.scan(plain)   # no Alpine or RHEL image: no block proposed
+    path = projects.write_needs(Platform(platform_dir), {**s, "name": "mixed"})
+    assert path.name == "mixed.yml" and "apt:" not in path.read_text()   # no apt packages, so no apt block
+    alone = tmp_path / "only-mixed"
+    alone.mkdir()
+    (alone / "mixed.yml").write_text(path.read_text())
+    needs = load_needs(alone)
+    assert needs.apk == {"v3.20": ["libpq"]} and needs.rpm == {"alma9": ["postgresql-libs"]}
 
 
 def test_python_version_sources(tmp_path):

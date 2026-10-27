@@ -3,15 +3,33 @@
 Output is a list of {name, ok, detail}. The checks that matter most:
   - the node reaches Gitea over TLS it trusts
   - the public internet is rejected, and the seal comes back after a reboot
-  - every package client is configured to use Gitea only
+  - every package client is configured to use Gitea only (apt, apk or dnf, whichever the node has)
 """
 
 from .. import versions
 from . import clients, common
 
 
+def by_family(apt: str, apk: str, rpm: str) -> str:
+    """One shell snippet that runs the right command for the node's family, read from /etc/os-release,
+    so the same script (and the same check names) works on Debian, Ubuntu, Alpine and the RHEL family.
+    The case's exit status is that of the branch taken."""
+    return (". /etc/os-release 2>/dev/null; case \" $ID $ID_LIKE \" in "
+            f"*alpine*) {apk} ;; *rhel*|*fedora*|*centos*|*rocky*|*almalinux*) {rpm} ;; *) {apt} ;; esac")
+
+
 def common_checks(ctx: common.NodeContext) -> list[tuple[str, str]]:
     g = ctx.gitea
+    sources_only_gitea = by_family(
+        apt=f"! grep -rhs '^deb ' /etc/apt/sources.list /etc/apt/sources.list.d/ | grep -v {g.url}; ! grep -rhs '^URIs:' /etc/apt/sources.list.d/ | grep -v {g.url}",
+        apk=f"! grep -v '^#' {clients.PATH_APK_REPOS} | grep -v '^$' | grep -v {g.url}",
+        rpm="! grep -lsE '^enabled *= *1' /etc/yum.repos.d/*.repo | grep -v outpost.repo",
+    )
+    index_updates = by_family(
+        apt="apt-get update -qq 2>&1 | tail -3",
+        apk="apk update 2>&1 | tail -3",
+        rpm="dnf makecache -q 2>&1 | tail -3",
+    )
     return [
         ("gitea in /etc/hosts", f"getent hosts {g.name} | grep -q {g.ip}"),
         ("gitea name restored at boot", "systemctl is-enabled outpost-hosts.service"),
@@ -19,9 +37,9 @@ def common_checks(ctx: common.NodeContext) -> list[tuple[str, str]]:
         ("system trust store has the CA", f"curl -fsS --max-time 10 {g.url}/api/v1/version"),
         ("pip points at gitea", f"grep -q {g.url} /etc/pip.conf && ! grep -rqs extra-index-url /etc/pip.conf /root/.pip /root/.config/pip"),
         ("npm points at gitea", f"grep -q {g.url} /etc/npmrc"),
-        ("apt sources are gitea only", f"! grep -rhs '^deb ' /etc/apt/sources.list /etc/apt/sources.list.d/ | grep -v {g.url}; ! grep -rhs '^URIs:' /etc/apt/sources.list.d/ | grep -v {g.url}"),
+        ("package sources are gitea only", sources_only_gitea),
         ("node dns for containers running", "systemctl is-active outpost-dns"),
-        ("apt update works offline", "apt-get update -qq 2>&1 | tail -3"),
+        ("package index updates offline", index_updates),
         ("egress sealed", "test \"$(/usr/local/sbin/outpost-egress status)\" = sealed"),
         ("public internet rejected", "! curl -sS --max-time 5 https://pypi.org/simple/ >/dev/null 2>&1"),
         ("egress seal survives reboot", "systemctl is-enabled outpost-egress.service"),

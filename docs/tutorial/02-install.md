@@ -7,7 +7,7 @@
 | Python 3.11+ | Outpost is a Python package with one dependency, PyYAML | everything |
 | `ssh` and `scp` | every server step goes over SSH, using your `~/.ssh/config` aliases | servers |
 | `openssl` | creates the private CA, Gitea's certificate and box signatures | `gitea setup`, `pack` |
-| Docker | resolves apt packages inside a container of the right distro, and runs the lab | `fetch` (apt), `lab` |
+| Docker | resolves apt, apk and rpm packages inside a container of the right distro, and runs the lab | `fetch` (apt, apk, rpm), `lab` |
 | `pip` | downloads wheels for the server's Python version | `fetch` (pypi) |
 
 Servers need nothing but SSH as root, or as a user with passwordless sudo. Outpost never
@@ -39,7 +39,7 @@ The dashboard has a preflight card for this, but you can also just run the tools
 ssh -V && openssl version && docker --version && python3 -m pip --version
 ```
 
-If Docker is not available, `fetch` still works for everything except apt packages, and you
+If Docker is not available, `fetch` still works for everything except OS packages (apt, apk, rpm), and you
 will need real servers instead of the lab.
 
 ## A platform folder

@@ -77,7 +77,7 @@ Point step 2 at a folder on your computer. Outpost looks three levels deep, skip
 `node_modules`, virtualenvs and the like, for:
 
 - lockfiles: `requirements*.txt`, `poetry.lock`, `uv.lock`, `Pipfile.lock`, `package-lock.json`, `pnpm-lock.yaml`, `yarn.lock`
-- Dockerfiles: their `FROM` images (build stages and the config image are skipped; a Gitea name is read back into the need that produces it: `${GITEA}/${ORG}/library--python:3.12` becomes `python:3.12`, `gitea.internal/pkgs/bitnami--redis:7` becomes `bitnami/redis:7`) and `apt-get install` packages
+- Dockerfiles: their `FROM` images (build stages and the config image are skipped; a Gitea name is read back into the need that produces it: `${GITEA}/${ORG}/library--python:3.12` becomes `python:3.12`, `gitea.internal/pkgs/bitnami--redis:7` becomes `bitnami/redis:7`) and `apt-get install`, `apk add` and `dnf install` packages, each proposed under its own kind with the distro or branch read from the base image
 - the Python version, from `.python-version`, `pyproject.toml` or the `python:` base image
 
 It proposes a needs file; you tick the lockfiles, fix the lists, and save. Lockfile paths are

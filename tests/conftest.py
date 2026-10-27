@@ -69,6 +69,9 @@ class FakeGitea:
         self.pypi: list[dict] = []
         self.npm: dict[str, dict] = {}
         self.debian: dict[str, list[str]] = {}
+        self.alpine: dict[str, list[str]] = {}      # "branch/repository" -> uploaded files
+        self.rpm: dict[str, list[str]] = {}         # group ("" for none) -> uploaded files
+        self.alpine_key_name = "pkgs@6f2a9c1e.rsa.pub"   # Gitea names the key <owner>@<fingerprint>.rsa.pub
         self.blobs: dict[tuple[str, str], bytes] = {}
         self.manifests: dict[tuple[str, str], tuple[bytes, str]] = {}
         self.uploads: dict[str, str] = {}
@@ -139,6 +142,19 @@ class _Handler(BaseHTTPRequestHandler):
         m = re.match(r"^/api/packages/([^/]+)/debian/dists/([^/]+)/Release$", self.path)
         if m:
             return self._send(200 if m[2] in g.debian else 404, b"Release")
+        m = re.match(r"^/api/packages/([^/]+)/alpine/key$", self.path)
+        if m:
+            return self._send(200, b"-----BEGIN PUBLIC KEY-----\nfake-rsa\n-----END PUBLIC KEY-----\n",
+                              {"Content-Type": "application/x-pem-file", "Content-Disposition": f'attachment; filename="{g.alpine_key_name}"'})
+        m = re.match(r"^/api/packages/([^/]+)/alpine/([^/]+)/([^/]+)/([^/]+)/APKINDEX.tar.gz$", self.path)
+        if m:
+            return self._send(200 if f"{m[2]}/{m[3]}" in g.alpine else 404, b"APKINDEX")
+        m = re.match(r"^/api/packages/([^/]+)/rpm(?:/(.+?))?/repository.key$", self.path)
+        if m:
+            return self._send(200, b"-----BEGIN PGP PUBLIC KEY BLOCK-----\nfake-rpm\n-----END PGP PUBLIC KEY BLOCK-----\n")
+        m = re.match(r"^/api/packages/([^/]+)/rpm(?:/(.+?))?/repodata/repomd.xml$", self.path)
+        if m:
+            return self._send(200 if (m[2] or "") in g.rpm else 404, b"<repomd/>")
         if not self._authed():
             return None
         m = re.match(r"^/v2/(.+)/manifests/([^/]+)$", self.path)
@@ -213,6 +229,20 @@ class _Handler(BaseHTTPRequestHandler):
             if name in g.debian.setdefault(m[2], []):
                 return self._send(409, b"exists")
             g.debian[m[2]].append(name)
+            return self._send(201, b"")
+        m = re.match(r"^/api/packages/([^/]+)/alpine/([^/]+)/([^/]+)$", self.path)
+        if m:
+            name = str(len(body)) + ":" + body[:40].hex()
+            if name in g.alpine.setdefault(f"{m[2]}/{m[3]}", []):
+                return self._send(409, b"exists")
+            g.alpine[f"{m[2]}/{m[3]}"].append(name)
+            return self._send(201, b"")
+        m = re.match(r"^/api/packages/([^/]+)/rpm(?:/(.+?))?/upload$", self.path)
+        if m:
+            name = str(len(body)) + ":" + body[:40].hex()
+            if name in g.rpm.setdefault(m[2] or "", []):
+                return self._send(409, b"exists")
+            g.rpm[m[2] or ""].append(name)
             return self._send(201, b"")
         if not self._authed():
             return None

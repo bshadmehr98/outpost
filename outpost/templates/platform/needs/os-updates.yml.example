@@ -4,6 +4,8 @@
 #   outpost fetch --only apt      (the current versions and their dependency trees are downloaded)
 #   outpost upload                (they go into Gitea's Debian registry)
 #   outpost infra upgrade <name>  (apt-get upgrade on every node, with the internet still off)
+# RHEL-family servers use an `rpm:` block instead (distro: rocky9, alma9, fedora40 or stream9) and
+# `fetch --only rpm`; the upgrade command then runs dnf. Alpine servers use `apk:` (branch: v3.20).
 # A full distro mirror is tens of gigabytes; a short list of what matters is a few hundred megabytes.
 name: os-updates
 apt:

@@ -21,7 +21,7 @@ from .ssh import Host, SshError
 
 SCRIPT = r"""
 . /etc/os-release 2>/dev/null
-echo "id=$ID"; echo "codename=${VERSION_CODENAME:-}"; echo "pretty=$PRETTY_NAME"
+echo "id=$ID"; echo "id_like=${ID_LIKE:-}"; echo "version_id=${VERSION_ID:-}"; echo "codename=${VERSION_CODENAME:-}"; echo "pretty=$PRETTY_NAME"
 echo "hostname=$(hostname)"; echo "ip=$(hostname -I 2>/dev/null | awk '{print $1}')"; echo "arch=$(uname -m)"
 echo "kernel=$(uname -r)"
 echo "uptime=$(uptime -p 2>/dev/null | sed 's/^up //')"

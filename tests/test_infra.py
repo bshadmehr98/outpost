@@ -1,7 +1,8 @@
 import json
 
 from outpost import versions
-from outpost.infra import clients, compose, egress, k3s, swarm, verify
+from outpost.gitea.client import AlpineKey
+from outpost.infra import clients, common, compose, egress, k3s, swarm, verify
 from outpost.infra.clients import GiteaInfo
 from outpost.infra.common import NodeContext
 from tests.conftest import FakeHost
@@ -36,6 +37,97 @@ def test_client_files_point_everything_at_gitea():
     assert host["/etc/outpost/resolv.conf"] == "nameserver 10.0.0.11\n"
     assert G.config_image == "gitea.internal/pkgs/config:latest"
     assert G.generic("docker", "1", "d.tgz") == "https://gitea.internal/api/packages/pkgs/generic/docker/1/d.tgz"
+
+
+APK_KEY = AlpineKey(name="pkgs@6f2a9c1e.rsa.pub", content="RSA KEY")
+
+
+def test_client_files_for_apk_and_rpm_point_at_gitea_only():
+    files = clients.client_files(G, "CA", None, [], apk_key=APK_KEY, apk_branches=["v3.20", "v3.19"], rpm_key="RPM KEY", rpm_distros=["rocky9", "fedora40"])
+    assert files["/etc/apk/repositories"] == "https://gitea.internal/api/packages/pkgs/alpine/v3.20/main\nhttps://gitea.internal/api/packages/pkgs/alpine/v3.19/main\n"
+    assert files["/etc/apk/keys/pkgs@6f2a9c1e.rsa.pub"] == "RSA KEY"   # the name Gitea signs with, or apk ignores the index
+    repo = files["/etc/yum.repos.d/outpost.repo"]
+    assert repo.startswith("[outpost-rocky9]\n") and "[outpost-fedora40]\n" in repo
+    assert "baseurl=https://gitea.internal/api/packages/pkgs/rpm/rocky9\n" in repo and "baseurl=https://gitea.internal/api/packages/pkgs/rpm/fedora40\n" in repo
+    assert repo.count("gpgkey=file:///etc/outpost/gitea-rpm.asc\n") == 2 and repo.count("sslcacert=/etc/outpost/ca.crt\n") == 2 and "gpgcheck=1" in repo
+    assert files["/etc/outpost/gitea-rpm.asc"] == "RPM KEY"
+    assert "/etc/apt/sources.list.d/outpost.list" not in files and "/etc/outpost/gitea-apt.asc" not in files
+    # without branches or distros nothing of theirs is written, in particular no key under /etc/apk/keys
+    none = clients.client_files(G, "CA", "KEY", ["bookworm"], apk_key=APK_KEY, rpm_key="RPM KEY")
+    assert not any(p.startswith(("/etc/apk/", "/etc/yum.repos.d/")) or p == clients.PATH_RPM_KEY for p in none)
+    assert G.apk_repo == "https://gitea.internal/api/packages/pkgs/alpine" and G.rpm_repo == "https://gitea.internal/api/packages/pkgs/rpm"
+
+
+def test_config_image_blanks_stock_os_sources_and_stays_text_only():
+    image = clients.config_image_files(G, "CA", "KEY", ["bookworm"], apk_key=APK_KEY, apk_branches=["v3.20"], rpm_key="RPM KEY", rpm_distros=["rocky9"])
+    assert image["/etc/apk/repositories"][0] == b"https://gitea.internal/api/packages/pkgs/alpine/v3.20/main\n"   # Gitea lines, not blanked
+    assert image["/etc/apk/keys/pkgs@6f2a9c1e.rsa.pub"][0] == b"RSA KEY"
+    for stock in ("rocky.repo", "rocky-extras.repo", "almalinux-baseos.repo", "almalinux-appstream.repo", "fedora.repo", "fedora-updates.repo", "centos.repo"):
+        assert image[f"/etc/yum.repos.d/{stock}"][0].startswith(b"# Disabled by Outpost"), stock
+    assert image["/etc/yum.repos.d/outpost.repo"][0].startswith(b"[outpost-rocky9]")
+    assert image["/etc/apt/sources.list.d/debian.sources"][0].startswith(b"# Disabled by Outpost")
+    assert all(mode == 0o644 and b"\x00" not in content for content, mode in image.values())   # text files only, no binaries
+    # with no Alpine branches the stock /etc/apk/repositories is blanked and no key dir entry is made
+    bare = clients.config_image_files(G, "CA", None, [])
+    assert bare["/etc/apk/repositories"][0].startswith(b"# Disabled by Outpost") and not any(p.startswith("/etc/apk/keys/") for p in bare)
+    assert bare["/etc/yum.repos.d/rocky.repo"][0].startswith(b"# Disabled by Outpost") and "/etc/yum.repos.d/outpost.repo" not in bare
+    assert "/etc/apk/repositories" not in clients.disabled_os_sources(["v3.20"]) and "/etc/apk/repositories" in clients.disabled_os_sources()
+
+
+def test_os_family_from_os_release_facts():
+    assert common.os_family({"id": "ubuntu", "id_like": "debian"}) == "apt" and common.os_family({"id": "debian"}) == "apt"
+    assert common.os_family({"id": "alpine"}) == "apk"
+    assert common.os_family({"id": "rocky", "id_like": "rhel centos fedora"}) == "rpm" and common.os_family({"id": "fedora"}) == "rpm"
+    assert common.os_family({"id": "almalinux", "id_like": "rhel centos fedora"}) == "rpm" and common.os_family({"id": "centos", "id_like": "rhel fedora"}) == "rpm"
+    assert common.os_family({"codename": "noble"}) == "apt" and common.os_family({}) == "apt"   # unknown: what every node was before
+    assert common.apk_branch_of({"version_id": "3.20.3"}) == "v3.20" and common.apk_branch_of({"version_id": ""}) is None
+
+
+def test_prepare_node_on_alpine_configures_apk_and_parks_the_stock_repositories():
+    ctx = NodeContext(gitea=G, ca_pem="CA", distros=["bookworm"], apk_branches=["v3.19"], infra_name="dev")
+    host = FakeHost("alp-1", facts={"id": "alpine", "id_like": "", "version_id": "3.20.3", "codename": "", "arch": "x86_64", "ip": "10.0.0.41"},
+                    responses=[(r"api/v1/version", "ok")])
+    common.prepare_node(host, ctx, log=lambda *_: None)
+    joined = "\n".join(host.scripts)
+    step = next(s for s in host.scripts if "/etc/apk/keys" in s)
+    assert "find /etc/apk/keys -name 'pkgs@*.rsa.pub' -delete" in step
+    assert "cd /etc/apk/keys && curl --cacert /etc/outpost/ca.crt -fsSL -J -O https://gitea.internal/api/packages/pkgs/alpine/key" in step  # -J keeps Gitea's file name
+    assert "[ ! -f key ] || mv key pkgs.rsa.pub" in step   # the documented fallback when Gitea sends no Content-Disposition
+    assert "mv /etc/apk/repositories /etc/apk/repositories.disabled" in step and "> /etc/apk/repositories" in step
+    assert "alpine/v3.19/main/x86_64/APKINDEX.tar.gz" in step and "alpine/v3.20/main/x86_64/APKINDEX.tar.gz" in step   # uploaded branch + the host's own
+    assert "echo https://gitea.internal/api/packages/pkgs/alpine/v3.20/main" in step
+    assert "sources.disabled" not in joined and "yum.repos.d" not in joined and "dists/bookworm/Release" not in joined
+    assert "update-ca-certificates" in joined   # Alpine's ca-certificates package reads /usr/local/share/ca-certificates too
+    assert host.files["/etc/pip.conf"].startswith("[global]") and "/etc/apk/repositories" not in host.files   # written by the step, not as a file
+
+
+def test_prepare_node_on_rocky_configures_dnf_and_parks_the_stock_repo_files():
+    ctx = NodeContext(gitea=G, ca_pem="CA", distros=["bookworm"], rpm_distros=["fedora40"], infra_name="dev")
+    host = FakeHost("rocky-1", facts={"id": "rocky", "id_like": "rhel centos fedora", "version_id": "9.4", "codename": "", "arch": "x86_64", "ip": "10.0.0.51"},
+                    responses=[(r"api/v1/version", "ok")])
+    common.prepare_node(host, ctx, log=lambda *_: None)
+    joined = "\n".join(host.scripts)
+    step = next(s for s in host.scripts if "/etc/yum.repos.d" in s)
+    assert "curl --cacert /etc/outpost/ca.crt -fsSL https://gitea.internal/api/packages/pkgs/rpm/repository.key -o /etc/outpost/gitea-rpm.asc" in step
+    assert 'mkdir -p /etc/yum.repos.d.disabled' in step and '!= outpost.repo ] && mv "$f" /etc/yum.repos.d.disabled/' in step
+    assert "rpm/fedora40/repodata/repomd.xml" in step and "rpm/rocky9/repodata/repomd.xml" in step   # uploaded distro + the host's own
+    assert "baseurl=https://gitea.internal/api/packages/pkgs/rpm/rocky9" in step and "> /etc/yum.repos.d/outpost.repo" in step
+    assert "sources.disabled" not in joined and "/etc/apk/" not in joined
+    assert "update-ca-trust" in joined
+
+
+def test_verify_checks_pick_the_command_by_family_on_the_node():
+    checks = dict(verify.common_checks(CTX))
+    assert "apt sources are gitea only" not in checks and "apt update works offline" not in checks
+    sources, index = checks["package sources are gitea only"], checks["package index updates offline"]
+    for cmd in (sources, index):
+        assert cmd.startswith(". /etc/os-release 2>/dev/null; case \" $ID $ID_LIKE \" in *alpine*)") and "*rhel*|*fedora*|*centos*" in cmd and cmd.endswith("esac")
+    assert "grep -v '^#' /etc/apk/repositories" in sources and "grep -v https://gitea.internal" in sources
+    assert "grep -lsE '^enabled *= *1' /etc/yum.repos.d/*.repo | grep -v outpost.repo" in sources
+    assert "grep -rhs '^deb ' /etc/apt/sources.list" in sources
+    assert "apk update" in index and "dnf makecache" in index and "apt-get update -qq" in index
+    script = verify.script(verify.common_checks(CTX))
+    assert "CHECK|package sources are gitea only|" in script and "CHECK|package index updates offline|" in script
 
 
 def test_egress_script():

@@ -13,7 +13,7 @@ outpost check --infra k8s
 A check is a YAML file in `checks/` with a list of shell steps, optionally with a folder of
 the same name that is copied to the node. Steps run on the first node of the infrastructure,
 as root, with `GITEA` and `ORG` set. A step passes when its command exits 0 and, if given, its
-output contains the `expect` text. `outpost init` ships two:
+output contains the `expect` text. `outpost init` ships three:
 
 **hello-python** (for `compose` and `swarm`) builds an image whose Dockerfile does
 `COPY --from=config / /`, then `apt-get install` and `pip install`, runs it and expects
@@ -25,6 +25,11 @@ ok   docker build --build-arg GITEA=$GITEA --build-arg ORG=$ORG -t outpost-check
 ok   docker run --rm outpost-check-hello                 → Hello from Outpost
 ok   docker run --rm outpost-check-hello python -c "...urlopen('https://pypi.org')..." && echo LEAK || echo SEALED   → SEALED
 ```
+
+**hello-alpine** (for `compose` and `swarm`) does the same on an Alpine base: `COPY --from=config / /`,
+then `apk add --no-cache curl` answered by Gitea's Alpine registry, runs `curl --version` and
+expects `curl `, then a container that `wget`s pypi.org and must print *SEALED*. It exists so that
+a platform with Alpine images proves apk works offline, not only apt and pip.
 
 **hello-k3s** (for `k3s`) runs a pod from `gitea.lab/pkgs/library--alpine:3.20`, the Gitea copy
 of `alpine:3.20`, reads its

@@ -36,7 +36,7 @@ def test_page_and_overview(ui):
     data = json.loads(body)
     assert data["servers"]["gitea"]["name"] == "gitea.internal"
     assert data["needs"]["images"] == 2 and data["box"] is None
-    assert "needs/demo.yml" in data["files"] and data["checks"][0]["name"] == "hello-k3s"
+    assert "needs/demo.yml" in data["files"] and [c["name"] for c in data["checks"]] == ["hello-alpine", "hello-k3s", "hello-python"]
 
 
 def test_file_edit_is_restricted_and_validated(ui):
@@ -105,7 +105,7 @@ def test_project_scan_and_save(ui, platform_dir, tmp_path):
     assert "file: ../../" in text or "file: ../" in text  # relative to needs/
     data = json.loads(call(ui + "/api/overview")[1])
     mine = next(f for f in data["needs_files"] if f["name"] == "my-api")
-    assert mine["error"] is None and mine["summary"] == {"images": 1, "pypi": 3, "npm": 1, "apt": 2, "files": 0}
+    assert mine["error"] is None and mine["summary"] == {"images": 1, "pypi": 3, "npm": 1, "apt": 2, "apk": 0, "rpm": 0, "files": 0}
     assert "python:3.11-slim" in data["needs_detail"]["images"] and "3.11" in data["needs_detail"]["pypi"]
     assert call(ui + "/api/file?name=needs/my-api.yml", "DELETE")[0] == 200
     assert call(ui + "/api/file?name=servers.yml", "DELETE")[0] == 400

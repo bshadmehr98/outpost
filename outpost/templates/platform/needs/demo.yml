@@ -4,11 +4,15 @@ python: "3.12"
 
 images:
   - python:3.12-slim          # lands as <gitea>/pkgs/library--python:3.12-slim; the Dockerfile names that
-  - alpine:3.20               # used by the hello-k3s smoke check, as pkgs/library--alpine:3.20
+  - alpine:3.20               # used by the hello-k3s and hello-alpine smoke checks, as pkgs/library--alpine:3.20
 
 pypi:
   - file: ../demo/requirements.txt
 
 apt:
   distro: bookworm            # python:3.12-slim is Debian bookworm
+  packages: [curl]
+
+apk:
+  branch: v3.20               # alpine:3.20; the hello-alpine check does `apk add curl` from Gitea
   packages: [curl]

@@ -3,7 +3,8 @@
   1. know the Gitea server by name              /etc/hosts
   2. trust the private CA                       system trust store + explicit paths for pip/npm/apt/docker
   3. point pip, npm, apt and Docker at Gitea    small config files from clients.py
-  4. park the stock apt sources                 /etc/apt/sources.disabled/
+  4. OS packages from Gitea, by family          apt (Debian/Ubuntu), apk (Alpine) or dnf (RHEL family):
+                                                fetch the key, park the stock sources, write the Gitea one
   5. seal egress                                outpost-egress seal
   6. install CoreDNS from Gitea                 so containers can resolve the Gitea name
   7. install Docker from Gitea                  compose and swarm only
@@ -16,6 +17,7 @@ import shlex
 from dataclasses import dataclass, field
 
 from .. import versions
+from ..fetch import rpm as rpmmod
 from . import clients, egress, hostsfile
 from .clients import GiteaInfo
 
@@ -62,6 +64,8 @@ class NodeContext:
     gitea: GiteaInfo
     ca_pem: str
     distros: list[str] = field(default_factory=list)   # apt distros that exist in Gitea
+    apk_branches: list[str] = field(default_factory=list)   # Alpine branches that exist in Gitea
+    rpm_distros: list[str] = field(default_factory=list)    # rpm distros (Gitea groups) that exist in Gitea
     allow: list[str] = field(default_factory=list)     # extra reachable addresses (other nodes, user list)
     infra_name: str = ""
     args: str = ""                                     # extra flags for the runtime (k3s server, swarm init)
@@ -69,6 +73,23 @@ class NodeContext:
 
 def curl(ctx: NodeContext, url: str, out: str) -> str:
     return f"curl --cacert {clients.PATH_CA} -fsSL {shlex.quote(url)} -o {shlex.quote(out)}"
+
+
+def os_family(facts: dict) -> str:
+    """apt, apk or rpm, from /etc/os-release's ID and ID_LIKE. Anything unrecognised is treated as apt,
+    which is what every node was assumed to be before Alpine and the RHEL family were supported."""
+    ids = f"{facts.get('id', '')} {facts.get('id_like', '')}".lower().split()
+    if "alpine" in ids:
+        return "apk"
+    if any(i in ("rhel", "fedora", "centos", "rocky", "almalinux") for i in ids):
+        return "rpm"
+    return "apt"
+
+
+def apk_branch_of(facts: dict) -> str | None:
+    """An Alpine host's own branch: VERSION_ID 3.20.3 -> v3.20."""
+    parts = str(facts.get("version_id", "")).split(".")
+    return f"v{parts[0]}.{parts[1]}" if len(parts) >= 2 and all(x.isdigit() for x in parts[:2]) else None
 
 
 def registry_check(ctx: NodeContext) -> str:
@@ -98,6 +119,8 @@ def prepare_node(host, ctx: NodeContext, log=print) -> dict:
     node_ip = facts.get("ip") or host.ip()
     for path, content in {**clients.client_files(g, ctx.ca_pem, apt_key=None, distros=[]), **clients.host_files(g, ctx.ca_pem, node_ip)}.items():
         host.write(path, content)
+    # Debian and Alpine both ship update-ca-certificates reading /usr/local/share/ca-certificates (Alpine's
+    # comes with the ca-certificates package); the RHEL family has update-ca-trust and its anchors folder.
     host.run(
         "if command -v update-ca-certificates >/dev/null; then "
         f"  cp {clients.PATH_CA} /usr/local/share/ca-certificates/outpost-ca.crt && update-ca-certificates >/dev/null; "
@@ -109,7 +132,24 @@ def prepare_node(host, ctx: NodeContext, log=print) -> dict:
         raise RuntimeError(f"[{host.alias}] cannot reach {g.url}: {reach.stderr.strip()}. Check servers.yml gitea.ip and firewalls (port 443).")
     log(f"  [{host.alias}] reaches Gitea {reach.stdout.strip()}")
 
-    # 4. apt: fetch the repo key, keep only distros Gitea actually has, park the stock sources
+    # 4. OS packages from Gitea: fetch the repo key, keep only what Gitea actually has, park the stock sources
+    family = os_family(facts)
+    log(f"  [{host.alias}] os packages: {family}")
+    {"apt": _configure_apt, "apk": _configure_apk, "rpm": _configure_rpm}[family](host, ctx, facts)
+
+    # 5. seal
+    log(f"==> {host.alias}: switching the internet off")
+    egress.install(host, g.ip, ctx.allow)
+    log(f"  [{host.alias}] egress: {egress.seal(host, f'setup {ctx.infra_name}'.strip())}")
+
+    # 6. DNS for containers, from Gitea, with the internet already blocked
+    log(f"==> {host.alias}: installing node DNS from Gitea")
+    install_dns(host, ctx, log)
+    return facts
+
+
+def _configure_apt(host, ctx: NodeContext, facts: dict) -> None:
+    g = ctx.gitea
     distros = list(dict.fromkeys(ctx.distros + ([facts["codename"]] if facts.get("codename") else [])))
     lines = "\n".join(
         f"if curl --cacert {clients.PATH_CA} -fsI --max-time 10 {g.apt_repo}/dists/{d}/Release >/dev/null 2>&1; then echo {shlex.quote(clients.apt_source_line(g, d))}; fi"
@@ -123,15 +163,45 @@ def prepare_node(host, ctx: NodeContext, log=print) -> dict:
         f"{{ {lines}\n}} > /etc/apt/sources.list.d/outpost.list\n"
     )
 
-    # 5. seal
-    log(f"==> {host.alias}: switching the internet off")
-    egress.install(host, g.ip, ctx.allow)
-    log(f"  [{host.alias}] egress: {egress.seal(host, f'setup {ctx.infra_name}'.strip())}")
 
-    # 6. DNS for containers, from Gitea, with the internet already blocked
-    log(f"==> {host.alias}: installing node DNS from Gitea")
-    install_dns(host, ctx, log)
-    return facts
+def _configure_apk(host, ctx: NodeContext, facts: dict) -> None:
+    """Alpine: the key goes to /etc/apk/keys under the name Gitea sends (curl -J keeps it), the stock
+    /etc/apk/repositories is parked as repositories.disabled, and only branches Gitea serves are written."""
+    g = ctx.gitea
+    arch = versions.names()["uname"]
+    own = apk_branch_of(facts)
+    branches = list(dict.fromkeys(ctx.apk_branches + ([own] if own else [])))
+    lines = "\n".join(
+        f"if curl --cacert {clients.PATH_CA} -fsI --max-time 10 {g.apk_repo}/{b}/main/{arch}/APKINDEX.tar.gz >/dev/null 2>&1; then echo {shlex.quote(clients.apk_repository_line(g, b))}; fi"
+        for b in branches
+    )
+    host.run(
+        f"mkdir -p {clients.PATH_APK_KEYS}\n"
+        f"find {clients.PATH_APK_KEYS} -name {shlex.quote(g.org + '@*.rsa.pub')} -delete\n"
+        # -J saves under the name in Content-Disposition, the one Gitea signed with; `key` means the header was missing
+        f"(cd {clients.PATH_APK_KEYS} && curl --cacert {clients.PATH_CA} -fsSL -J -O {shlex.quote(g.apk_repo + '/key')} && "
+        f"{{ [ ! -f key ] || mv key {shlex.quote(g.org + '.rsa.pub')}; }}) || true\n"
+        f"if [ -e {clients.PATH_APK_REPOS} ] && ! grep -q {shlex.quote(g.apk_repo)} {clients.PATH_APK_REPOS}; then mv {clients.PATH_APK_REPOS} {clients.PATH_APK_REPOS}.disabled; fi\n"
+        f"{{ {lines}\n}} > {clients.PATH_APK_REPOS}\n"
+    )
+
+
+def _configure_rpm(host, ctx: NodeContext, facts: dict) -> None:
+    """RHEL family: Gitea's key to /etc/outpost/gitea-rpm.asc, the stock *.repo files parked in
+    /etc/yum.repos.d.disabled/, and outpost.repo with one section per distro (Gitea group) that exists."""
+    g = ctx.gitea
+    own = rpmmod.distro_for_host(facts.get("id", ""), facts.get("version_id", ""))
+    distros = list(dict.fromkeys(ctx.rpm_distros + ([own] if own else [])))
+    lines = "\n".join(
+        f"if curl --cacert {clients.PATH_CA} -fsI --max-time 10 {g.rpm_repo}/{d}/repodata/repomd.xml >/dev/null 2>&1; then printf '%s\\n' {shlex.quote(clients.rpm_repo_section(g, d))}; fi"
+        for d in distros
+    )
+    host.run(
+        f"{curl(ctx, g.rpm_repo + '/repository.key', clients.PATH_RPM_KEY)} || true\n"
+        f"mkdir -p /etc/yum.repos.d.disabled /etc/yum.repos.d\n"
+        f"for f in /etc/yum.repos.d/*.repo; do [ -e \"$f\" ] && [ \"$(basename $f)\" != outpost.repo ] && mv \"$f\" /etc/yum.repos.d.disabled/; done; true\n"
+        f"{{ {lines}\n}} > {clients.PATH_RPM_REPO}\n"
+    )
 
 
 def install_dns(host, ctx: NodeContext, log=print) -> None:

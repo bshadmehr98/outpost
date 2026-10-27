@@ -1,5 +1,6 @@
 """Backup and restore, the host facts cache, upgrades, error translation, the report, and architectures."""
 
+import json
 import urllib.error
 
 import pytest
@@ -124,6 +125,24 @@ def test_infra_upgrade_runs_apt_from_gitea_and_reports_failures(platform_dir, mo
     assert any("reboot is required" in m for m in messages) and (platform.state_dir / "hosts" / "dev-1.json").exists()
     bad = FakeHost("dev-1", responses=[(r"apt-get upgrade", "E: Unable to locate package foo")])
     assert cli._infra_upgrade(platform, servers, infra, [bad]) == 1
+
+
+def test_infra_upgrade_runs_apk_or_dnf_on_other_families(platform_dir, monkeypatch):
+    """One script decides on the node from /etc/os-release, so the same command works on Alpine and Rocky nodes."""
+    from outpost import cli
+    platform, servers = Platform(platform_dir), load_servers(platform_dir / "servers.yml")
+    infra = servers.infra("dev")
+    monkeypatch.setattr(cli, "log", lambda *_: None)
+    alpine_facts = HOST_FACTS.replace("id=ubuntu", "id=alpine\nid_like=\nversion_id=3.20.3")
+    host = FakeHost("alp-1", responses=[(r"apk upgrade", "OK: 12 MiB in 20 packages"), (r"egress_boot", alpine_facts)])
+    assert cli._infra_upgrade(platform, servers, infra, [host]) == 0
+    script = host.scripts[0]
+    assert script.startswith(". /etc/os-release") and "*alpine*)" in script and "apk update" in script and "apk upgrade" in script
+    assert "dnf makecache" in script and "dnf upgrade -y" in script and "needs-restarting -r" in script
+    assert "apt-get update -qq" in script and "apt-get upgrade -y" in script   # the Debian branch is still there
+    assert json.loads((platform.state_dir / "hosts" / "alp-1.json").read_text())["id_like"] == ""
+    rocky = FakeHost("rocky-1", responses=[(r"dnf upgrade", "Error: Unable to find a match: foo")])
+    assert cli._infra_upgrade(platform, servers, infra, [rocky]) == 1
 
 
 def test_docker_install_restarts_the_daemon_on_a_version_change():

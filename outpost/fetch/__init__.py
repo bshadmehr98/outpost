@@ -8,7 +8,7 @@ from pathlib import Path
 
 from ..config import Mirrors
 from ..needs import Needs
-from . import apt, files, images, npm, pypi
+from . import apk, apt, files, images, npm, pypi, rpm
 from .. import box as boxmod
 
 
@@ -20,6 +20,8 @@ def fetch_all(needs: Needs, box: Path, mirrors: Mirrors, only: set[str] | None =
         "pypi": lambda: pypi.fetch(needs.pypi, box, mirrors, log=log),
         "npm": lambda: npm.fetch(needs.npm, box, mirrors, log=log),
         "apt": lambda: apt.fetch(needs.apt, box, mirrors, log=log),
+        "apk": lambda: apk.fetch(needs.apk, box, mirrors, log=log),
+        "rpm": lambda: rpm.fetch(needs.rpm, box, mirrors, log=log),
     }
     results: dict[str, dict] = {}
     for kind, step in plan.items():

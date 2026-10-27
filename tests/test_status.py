@@ -26,8 +26,21 @@ def test_box_status_finds_what_is_there(tmp_path):
     (box / "apt" / "bookworm").mkdir(parents=True)
     (box / "apt" / "bookworm" / "curl_7.88_amd64.deb").write_bytes(b"x")
     s = status.box_status(p, needs())
-    assert s["missing"] == {"images": ["python:3.12-slim"], "pypi": [], "npm": [], "apt": ["libpq-dev (bookworm)"], "files": ["gitea 28.2.0"]}
+    assert s["missing"] == {"images": ["python:3.12-slim"], "pypi": [], "npm": [], "apt": ["libpq-dev (bookworm)"], "apk": [], "rpm": [], "files": ["gitea 28.2.0"]}
     assert s["missing_total"] == 3 and s["kinds"]["pypi"]["files"] == 2 and s["bytes"] == 15
+
+
+def test_box_status_apk_and_rpm_files_are_matched_by_name(tmp_path):
+    p = Platform(tmp_path)
+    (p.box_dir / "apk" / "v3.20").mkdir(parents=True)
+    (p.box_dir / "apk" / "v3.20" / "curl-8.9.1-r1.apk").write_bytes(b"x")
+    (p.box_dir / "rpm" / "rocky9").mkdir(parents=True)
+    (p.box_dir / "rpm" / "rocky9" / "curl-7.76.1-29.el9.x86_64.rpm").write_bytes(b"x")
+    n = Needs(apk={"v3.20": ["curl", "jq"]}, rpm={"rocky9": ["curl"], "fedora40": ["git"]})
+    s = status.box_status(p, n)
+    assert s["missing"]["apk"] == ["jq (v3.20)"] and s["missing"]["rpm"] == ["git (fedora40)"]
+    assert s["kinds"]["apk"]["files"] == 1 and s["kinds"]["rpm"]["files"] == 1
+    assert status.search(p, n, "curl")["needs"] == [{"kind": "apk (v3.20)", "text": "curl"}, {"kind": "rpm (rocky9)", "text": "curl"}]
 
 
 def test_sync_arrows_follow_file_times(tmp_path):

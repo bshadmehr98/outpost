@@ -7,7 +7,7 @@ another one. `outpost <command> --help` prints the options.
 |---|---|---|
 | `outpost init [folder]` | create a platform folder: `servers.yml`, `needs/demo.yml`, `checks/`, `demo/`, `mirrors.yml`, `.gitignore` | nothing |
 | `outpost needs` | print the merged needs, including the pinned platform files | nothing |
-| `outpost fetch [--only kinds]` | download everything into `box/`; incremental; failures listed at the end | internet; Docker for apt; pip for pypi |
+| `outpost fetch [--only kinds]` | download everything into `box/`; incremental; failures listed at the end | internet; Docker for apt, apk and rpm; pip for pypi |
 | `outpost pack [--out dist]` | one `tar.xz` per kind plus a signed manifest, for releases or USB | openssl |
 | `outpost gitea setup` | install or upgrade Gitea on its server (a backup is taken before an upgrade), make certificates, admin, token, org; seal it | ssh, openssl |
 | `outpost gitea info` | print the Gitea address, organisation, version and seal status | ssh |
@@ -16,7 +16,7 @@ another one. `outpost <command> --help` prints the options.
 | `outpost upload [source ...]` | push a box folder or `tar.xz` files into Gitea; build the config image | ssh |
 | `outpost infra setup <name>` | prepare, seal, install the runtime and the runner on the nodes; verify | ssh |
 | `outpost infra verify <name>` | re-run the checks only, print the table | ssh |
-| `outpost infra upgrade <name>` | `apt-get upgrade` on every node, answered by Gitea; see [maintenance](maintenance.md) | ssh |
+| `outpost infra upgrade <name>` | `apt-get upgrade`, `apk upgrade` or `dnf upgrade` on every node (by its family), answered by Gitea; see [maintenance](maintenance.md) | ssh |
 | `outpost infra list` | infrastructures in `servers.yml` and whether they are set up | nothing |
 | `outpost check [name] --infra <name>` | run the smoke checks (or one) on the infrastructure's first node | ssh |
 | `outpost demo push` | write the workflow, create the repo and secret, commit `demo/`; Actions deploys | ssh |

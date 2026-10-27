@@ -2,9 +2,9 @@
 
 Gitea is a git forge, like a self-hosted GitHub. Three of its features make it enough on its own:
 
-1. **Package registries.** Gitea serves PyPI, npm, Debian, container (OCI) and generic
-   registries, each with the protocol the normal client speaks. `pip`, `npm`, `apt`, `docker`
-   and `curl` do not know they are talking to Gitea.
+1. **Package registries.** Gitea serves PyPI, npm, Debian, Alpine, RPM, container (OCI) and
+   generic registries, each with the protocol the normal client speaks. `pip`, `npm`, `apt`,
+   `apk`, `dnf`, `docker` and `curl` do not know they are talking to Gitea.
 2. **Git hosting with HTTPS and SSH.** Your code lives next to its dependencies.
 3. **Actions.** A GitHub-Actions-compatible CI with external runners, which Outpost installs on
    the nodes.
@@ -49,6 +49,8 @@ With the organisation `pkgs` and the name `gitea.lab`:
 | pip | `/etc/pip.conf` `index-url` | `https://gitea.lab/api/packages/pkgs/pypi/simple` |
 | npm | `/etc/npmrc` `registry` | `https://gitea.lab/api/packages/pkgs/npm/` |
 | apt | `sources.list.d/outpost.list` | `deb [signed-by=/etc/outpost/gitea-apt.asc] https://gitea.lab/api/packages/pkgs/debian bookworm main` |
+| apk | `/etc/apk/repositories`; key in `/etc/apk/keys/pkgs@<fingerprint>.rsa.pub` | `https://gitea.lab/api/packages/pkgs/alpine/v3.20/main` |
+| dnf / yum | `/etc/yum.repos.d/outpost.repo`, one `[outpost-<distro>]` per distro; key `/etc/outpost/gitea-rpm.asc` | `baseurl=https://gitea.lab/api/packages/pkgs/rpm/rocky9` |
 | docker | `certs.d/gitea.lab/ca.crt`; the image name itself | `gitea.lab/pkgs/<owner>--<image>:<tag>`, e.g. `gitea.lab/pkgs/library--python:3.12-slim` |
 | k3s / containerd | `registries.yaml` with the CA for `gitea.lab`; the image name itself | the same `gitea.lab/pkgs/<owner>--<image>:<tag>` |
 | curl, scripts | generic registry | `https://gitea.lab/api/packages/pkgs/generic/<name>/<version>/<file>` |
@@ -74,11 +76,28 @@ Only one organisation exists in Gitea.
 Both stored tokens are checked against the server when used: if Gitea does not know them
 (reinstalled server, recreated lab), new ones are made and the files replaced.
 
+## Signing keys
+
+Gitea signs what it serves with keys it makes per owner, and the clients need the public half:
+
+| registry | key URL | where it goes | detail |
+|---|---|---|---|
+| Debian | `/api/packages/pkgs/debian/repository.key` | `/etc/outpost/gitea-apt.asc`, named in the `deb [signed-by=...]` line | PGP |
+| Alpine | `/api/packages/pkgs/alpine/key` | `/etc/apk/keys/pkgs@<fingerprint>.rsa.pub` | RSA; apk only trusts an `APKINDEX` whose signature is named after a file in `/etc/apk/keys/`, and Gitea signs with `<owner>@<fingerprint>.rsa.pub`. The name comes in the `Content-Disposition` of the key URL; Outpost keeps it with the key content, and nodes fetch it with `curl -J -O` |
+| RPM | `/api/packages/pkgs/rpm/repository.key` | `/etc/outpost/gitea-rpm.asc`, named as `gpgkey=file://...` in `outpost.repo` | PGP; Gitea signs the repository metadata and the packages it serves, so `gpgcheck=1` holds |
+
+The upload step fetches each key only when Gitea holds packages of that kind, and the config
+image carries only those keys: an Alpine image with an unknown file in `/etc/apk/keys/` would
+otherwise warn on every `apk` call.
+
 ## Reaching the API from the laptop
 
 `outpost/gitea/connect.py` opens an SSH tunnel to the Gitea host's port 443 and sends HTTPS
 requests to `localhost:<port>` with `Host: gitea.lab` and the CA from `pki/`. Nothing on the
 laptop needs to resolve or route to the Gitea name; wherever `ssh gitea-1` works, the API works.
 The client (`outpost/gitea/client.py`) is a thin wrapper over `urllib`: one method per API call,
-plus the registry uploads (`upload_pypi`, `upload_npm`, `upload_debian`, `upload_generic`,
-`push_image`), each returning whether the file was uploaded or already existed.
+plus the registry uploads (`upload_pypi`, `upload_npm`, `upload_debian`, `upload_alpine`,
+`upload_rpm`, `upload_generic`, `push_image`), each returning whether the file was uploaded or
+already existed. The Alpine and RPM endpoints are the ones in Gitea's documentation
+(`PUT /api/packages/{owner}/alpine/{branch}/{repository}` and
+`PUT /api/packages/{owner}/rpm/{group}/upload`), with 409 meaning "already there".

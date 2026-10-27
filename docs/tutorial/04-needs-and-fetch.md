@@ -8,7 +8,7 @@ Outpost that list is `needs/*.yml`, one file per project, and the answer to the 
 flowchart LR
     lock["your lockfiles<br/>uv.lock, package-lock.json, ..."] --> needs["needs/*.yml"]
     needs -- "outpost needs" --> list["merged list<br/>+ Gitea, Docker, k3s, CoreDNS, runner"]
-    list -- "outpost fetch" --> box["box/<br/>images/ pypi/ npm/ apt/ files/<br/>manifest.json"]
+    list -- "outpost fetch" --> box["box/<br/>images/ pypi/ npm/ apt/ apk/ rpm/ files/<br/>manifest.json"]
 ```
 
 ## The needs file
@@ -24,17 +24,21 @@ pypi:
 apt:
   distro: bookworm                       # python:3.12-slim is Debian bookworm
   packages: [curl]
+apk:
+  branch: v3.20                          # alpine:3.20, for the hello-alpine smoke check
+  packages: [curl]
 ```
 
-Each key is one *kind*: container `images`, `pypi` packages, `npm` packages, `apt` packages per
-distro, and plain `files` with a URL. For pypi and npm you point at lockfiles you already have
+Each key is one *kind*: container `images`, `pypi` packages, `npm` packages, OS packages per
+distro (`apt` for Debian and Ubuntu, `apk` for Alpine, `rpm` for Rocky, Alma, Fedora and CentOS
+Stream), and plain `files` with a URL. For pypi and npm you point at lockfiles you already have
 (`requirements*.txt`, `poetry.lock`, `uv.lock`, `Pipfile.lock`, `package-lock.json`,
 `pnpm-lock.yaml`, `yarn.lock`); Outpost reads the exact versions from them. The
 [needs reference](../reference/needs.md) covers every form.
 
 The dashboard can write this file for you: point it at a project folder and it reads the
-lockfiles, the `FROM` lines and `apt-get install` lines of the Dockerfiles, and the Python
-version, then proposes a needs file to review.
+lockfiles, the `FROM` lines and `apt-get install`, `apk add` and `dnf install` lines of the
+Dockerfiles, and the Python version, then proposes a needs file to review.
 
 ## What Outpost adds on its own
 
@@ -62,6 +66,8 @@ How each kind is downloaded, and what it needs on the laptop:
 | pypi | `pip download` with `--only-binary` for the Python version in the needs file and Linux wheel tags; sdist as a fallback | pip |
 | npm | the exact tarball URL from the lockfile, or the registry's metadata for a `name@version` | nothing |
 | apt | inside a `debian:<distro>` or `ubuntu:<distro>` container: `apt-cache depends` for the full tree, then `apt-get download`, so the packages install on a slim image, a full image or a host alike | Docker |
+| apk | inside an `alpine:<version>` container of the branch: `apk fetch --recursive`, the full tree | Docker |
+| rpm | inside a `rockylinux:9`, `almalinux:9`, `fedora:40` or `quay.io/centos/centos:stream9` container: `dnf download --resolve --alldeps`, the full tree | Docker |
 | files | a plain download into `files/<name>/<version>/<filename>` | nothing |
 
 Fetch is incremental: whatever is already in the box is skipped, so re-running it after adding

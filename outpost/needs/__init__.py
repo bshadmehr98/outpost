@@ -12,6 +12,12 @@
     apt:
       distro: bookworm             # must match the image or host that will install them
       packages: [libpq-dev, curl]
+    apk:
+      branch: v3.20                # Alpine branch of the image or host (alpine:3.20 -> v3.20)
+      packages: [curl]
+    rpm:
+      distro: rocky9               # rocky9 | alma9 | fedora40 | stream9
+      packages: [curl]
     files:
       - url: https://github.com/x/y/releases/download/v1.0/tool
         name: tool
@@ -49,6 +55,8 @@ class Needs:
     pypi: dict[str, list[str]] = field(default_factory=dict)      # python version -> pip specs
     npm: list[NpmNeed] = field(default_factory=list)
     apt: dict[str, list[str]] = field(default_factory=dict)       # distro -> packages
+    apk: dict[str, list[str]] = field(default_factory=dict)       # alpine branch (v3.20) -> packages
+    rpm: dict[str, list[str]] = field(default_factory=dict)       # rpm distro (rocky9) -> packages
     files: list[FileNeed] = field(default_factory=list)
     sources: list[str] = field(default_factory=list)              # which needs files contributed
 
@@ -58,6 +66,8 @@ class Needs:
             "pypi": sum(len(v) for v in self.pypi.values()),
             "npm": len(self.npm),
             "apt": sum(len(v) for v in self.apt.values()),
+            "apk": sum(len(v) for v in self.apk.values()),
+            "rpm": sum(len(v) for v in self.rpm.values()),
             "files": len(self.files),
         }
 
@@ -103,12 +113,14 @@ def _parse_one(path: Path, needs: Needs) -> None:
         else:
             raise ConfigError(f"{path}: npm entries are name@version or {{file: ...}} (got {entry!r})")
 
-    apt = data.get("apt") or []
-    for block in apt if isinstance(apt, list) else [apt]:
-        if not isinstance(block, dict) or not block.get("distro"):
-            raise ConfigError(f"{path}: apt needs `distro:` and `packages:`")
-        pkgs = needs.apt.setdefault(str(block["distro"]), [])
-        _add_unique(pkgs, [str(p) for p in block.get("packages") or []])
+    # OS packages: one block or a list of blocks, keyed by the distro (apt, rpm) or the branch (apk)
+    for kind, key, target in (("apt", "distro", needs.apt), ("apk", "branch", needs.apk), ("rpm", "distro", needs.rpm)):
+        blocks = data.get(kind) or []
+        for block in blocks if isinstance(blocks, list) else [blocks]:
+            if not isinstance(block, dict) or not block.get(key):
+                raise ConfigError(f"{path}: {kind} needs `{key}:` and `packages:`")
+            pkgs = target.setdefault(str(block[key]), [])
+            _add_unique(pkgs, [str(p) for p in block.get("packages") or []])
 
     for entry in data.get("files") or []:
         if not isinstance(entry, dict) or not entry.get("url") or not entry.get("name"):

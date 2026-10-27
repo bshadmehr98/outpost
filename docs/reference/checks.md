@@ -30,14 +30,19 @@ outpost check hello-python --infra dev # one check
 
 Results are kept in `state/check-<infra>.json` and shown in `outpost ui`.
 
-`outpost init` ships two: `hello-python` for Docker-based infrastructures and `hello-k3s`,
-which runs a pod from `$GITEA/$ORG/library--alpine:3.20`, the Gitea copy of `alpine:3.20`, then a second pod that must fail to reach pypi.org.
+`outpost init` ships three: `hello-python` for Docker-based infrastructures, `hello-alpine`
+(also Docker-based), which builds `$GITEA/$ORG/library--alpine:3.20` with `COPY --from=config / /`
+and `apk add --no-cache curl` answered by Gitea's Alpine registry, runs `curl --version` and
+confirms a container cannot reach pypi.org, and `hello-k3s`, which runs a pod from
+`$GITEA/$ORG/library--alpine:3.20`, the Gitea copy of `alpine:3.20`, then a second pod that must fail to reach pypi.org.
+The demo needs file lists `apk: {branch: v3.20, packages: [curl]}` for `hello-alpine`.
 
 ## The verification table
 
 `outpost infra verify` is different from a smoke check: it is a fixed list of one-line commands
 run on every node, each of which must exit 0. Besides the configuration and seal checks (Gitea in
-`/etc/hosts` and the unit that restores it at boot, trusted TLS, pip, npm and apt pointing at Gitea, `egress sealed`, `public internet
+`/etc/hosts` and the unit that restores it at boot, trusted TLS, pip and npm pointing at Gitea, `package sources are gitea only` and
+`package index updates offline` for whichever of apt, apk or dnf the node has, `egress sealed`, `public internet
 rejected`, `routed traffic sealed too`, `egress seal survives reboot`) it checks for drift:
 Docker, Compose, k3s, CoreDNS and the runner at the pinned versions, the egress script being the
 current one, and `/etc/pip.conf` unchanged. A verified node is therefore also an unchanged node.

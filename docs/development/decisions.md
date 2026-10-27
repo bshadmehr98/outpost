@@ -100,6 +100,35 @@ Mac. Packages without wheels fall back to an sdist, fetched without dependencies
 reliably; running the real one in a throwaway container of the right distro is simpler and
 exact. Download the full tree, because a slim image lacks what a full image has.
 
+**Alpine and RPM packages, the same way.** When `apk` and `rpm` were added the temptation was to
+parse `APKINDEX` and `repomd.xml` on the laptop and walk the dependencies in Python. It would
+have been three resolvers to keep right (virtual packages, provides, `so:` dependencies, weak
+dependencies, modularity) instead of none. So `fetch` runs `apk fetch --recursive` inside
+`alpine:<branch>` and `dnf download --resolve --alldeps` inside `rockylinux:9`, `almalinux:9`,
+`fedora:40` or `quay.io/centos/centos:stream9`, exactly as it runs `apt-get download` inside
+`debian:bookworm`: one fetcher module, one upload method, one client file, one needs key per kind,
+and the distro's own tool decides what the tree is. The price is the same as for apt, Docker on
+the laptop. Gitea has a native registry for each (Debian, Alpine, RPM), so the clients on the
+nodes stay stock.
+
+**apk's key file must carry the signer's name.** apk does not look for *a* trusted key; it looks
+for the key *named in the index's signature*, `.SIGN.RSA.<name>`, as a file `/etc/apk/keys/<name>`.
+Gitea signs with `<owner>@<fingerprint>.rsa.pub` and tells you the name only in the
+`Content-Disposition` of the key endpoint; stored under any other name, the key is simply not
+consulted and `apk update` answers `UNTRUSTED signature`. The client therefore keeps the file
+name with the key content (`AlpineKey(name, content)`), the config image writes it under that
+name, and nodes fetch it with `curl -J -O`, which saves under the server's name (falling back
+to `<owner>.rsa.pub` if the header is ever missing, in both places). The same reasoning
+decided that the key is only written when Gitea actually holds an Alpine branch: apk warns about
+every unknown file in its key directory, and a warning on every call in every build is noise
+nobody should learn to ignore.
+
+**One RPM group per distro.** Gitea's RPM registry keeps one repository per owner, or per
+*group* below it. Packages for Rocky 9 and Fedora 40 in one repository would offer each other's
+`glibc`; with the distro as the group (`rpm/rocky9`, `rpm/fedora40`) each `[outpost-<distro>]`
+section of `outpost.repo` sees only its own, and the stock `rocky.repo` and friends are
+overwritten in the config image because a single-layer image cannot move a file aside.
+
 **All images under one organisation, referenced explicitly.** The first version kept images
 under their original owner (`library/python`, `grafana/grafana`) and pointed Docker's
 `registry-mirrors` and containerd's `docker.io` mirror at Gitea, so that `FROM python:3.12-slim`

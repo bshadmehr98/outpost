@@ -7,7 +7,7 @@
   DELETE /api/file?name=...     remove a needs file
   POST /api/servers             write servers.yml from a form {gitea: {...}, infrastructures: {...}}
   POST /api/ssh-check           {"alias": "dev-1"} -> can we reach it, are we root
-  POST /api/project/scan        {"folder": "~/code/my-api"} -> lockfiles, images, apt packages found
+  POST /api/project/scan        {"folder": "~/code/my-api"} -> lockfiles, images, apt/apk/rpm packages found
   POST /api/project/save        a proposal -> needs/<name>.yml
   PUT  /api/lockfile?project=&filename=   upload one lockfile into needs/<project>/
   GET  /api/search?q=flask      find a package or image in the needs and in the box
@@ -104,6 +104,8 @@ def needs_detail(platform: Platform, infra_types: set[str]) -> dict:
         "pypi": {py: specs for py, specs in needs.pypi.items()},
         "npm": [f"{n.name}@{n.version}" for n in needs.npm],
         "apt": needs.apt,
+        "apk": needs.apk,
+        "rpm": needs.rpm,
         "files": [{"name": f.name, "version": f.version} for f in needs.files],
         "summary": needs.summary(),
     }

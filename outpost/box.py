@@ -7,6 +7,8 @@
       pypi/              wheels and sdists
       npm/               tarballs
       apt/<distro>/      .deb files
+      apk/<branch>/      .apk files (Alpine, branch v3.20)
+      rpm/<distro>/      .rpm files (rocky9, alma9, fedora40, stream9)
       files/<name>/<version>/<filename>
 
 `outpost pack` turns the folder into one tar.xz per kind so each file stays under
@@ -22,7 +24,7 @@ from pathlib import Path
 from . import __version__
 from .http import sha256_file
 
-KINDS = ("images", "pypi", "npm", "apt", "files")
+KINDS = ("images", "pypi", "npm", "apt", "apk", "rpm", "files")
 
 
 def write_manifest(box: Path) -> dict:
@@ -104,6 +106,7 @@ def open_box(source: Path | list[Path]) -> tuple[Path, tempfile.TemporaryDirecto
     return unpack(archives, Path(tmp.name)), tmp
 
 
-def distros_in(box: Path) -> list[str]:
-    apt = box / "apt"
-    return sorted(p.name for p in apt.iterdir() if p.is_dir()) if apt.exists() else []
+def distros_in(box: Path, kind: str = "apt") -> list[str]:
+    """The distro (apt, rpm) or branch (apk) folders present for one OS package kind."""
+    root = box / kind
+    return sorted(p.name for p in root.iterdir() if p.is_dir()) if root.exists() else []

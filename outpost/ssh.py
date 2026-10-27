@@ -103,8 +103,9 @@ class Host:
         return out.split()[0]
 
     def facts(self) -> dict:
-        """OS codename, architecture and the first IP, in one round trip."""
-        out = self.run(". /etc/os-release; echo \"id=$ID\"; echo \"codename=${VERSION_CODENAME:-}\"; echo \"arch=$(uname -m)\"; "
+        """OS id, family (ID_LIKE), version, codename, architecture and the first IP, in one round trip."""
+        out = self.run(". /etc/os-release; echo \"id=$ID\"; echo \"id_like=${ID_LIKE:-}\"; echo \"version_id=${VERSION_ID:-}\"; "
+                       "echo \"codename=${VERSION_CODENAME:-}\"; echo \"arch=$(uname -m)\"; "
                        "echo \"ip=$(hostname -I 2>/dev/null | awk '{print $1}')\"; echo \"hostname=$(hostname)\"").stdout
         return dict(line.split("=", 1) for line in out.strip().splitlines() if "=" in line)
 

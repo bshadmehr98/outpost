@@ -11,15 +11,24 @@ Things Outpost does not do, on purpose or not yet.
   puts it back, and an upgrade backs up first; scheduling the backup is yours (cron on the laptop,
   or a CI job).
 - **OS security updates** are mirrored only for the packages you list in `needs/os-updates.yml`;
-  `outpost infra upgrade` installs them. A full distro mirror is tens of gigabytes and out of scope.
+  `outpost infra upgrade` installs them (apt, apk or dnf, by the node's family). A full distro
+  mirror is tens of gigabytes and out of scope.
+- **Three OS package families.** apt for Debian and Ubuntu, apk for Alpine (`v3.x` branches, not
+  `edge`), rpm for Rocky, Alma, Fedora and CentOS Stream (`rocky9`, `alma9`, `fedora40`,
+  `stream9`). SUSE, Arch and the rest have no kind yet, so `zypper` or `pacman` in a build is
+  rejected by the seal with nothing to answer it.
 - **Every image is referenced by its Gitea name** in Dockerfiles and manifests:
   `gitea.internal/pkgs/library--python:3.12-slim`, `gitea.internal/pkgs/org--app:1.4`. There is no
   registry mirror on the nodes and nothing rewrites names, so a bare `FROM python:3.12` fails at
   once on a sealed node. One edited line per Dockerfile is the price of knowing where every
   image comes from.
 - **IPv6** outbound is rejected entirely when sealed; Gitea is reached over IPv4.
-- **Ubuntu and Debian hosts** are what the setup is written for. Other systemd distributions
-  mostly work (the trust-store step knows RHEL too) but are untested.
+- **Ubuntu and Debian hosts** are what has been run. Node setup configures apk on an Alpine host
+  and dnf on a RHEL-family host, and `infra upgrade` and `infra verify` follow the family, but
+  neither has been run on a real Alpine or Rocky machine yet: only the generated scripts are
+  tested. Alpine hosts have a further catch: Outpost's units (egress, DNS, Docker, the runner)
+  are systemd units, and Alpine runs OpenRC, so an Alpine *host* is not a node yet; Alpine is
+  supported as a *base image* for builds. RHEL-family hosts run systemd and should work.
 - **Tested in containers, not yet on real virtual machines.** The lab and the integration suite
   run systemd in privileged Docker containers, including a container restart as the reboot test.
   A run on cloud VMs with a real kernel and a real reboot is the next step before calling it 1.0.

@@ -6,7 +6,7 @@
   <img alt="version 0.1" src="https://img.shields.io/badge/version-0.1-blue">
   <img alt="python 3.11+" src="https://img.shields.io/badge/python-3.11%2B-3776ab">
   <img alt="dependencies: PyYAML only" src="https://img.shields.io/badge/dependencies-PyYAML%20only-success">
-  <img alt="tests: 134 unit, 20 integration" src="https://img.shields.io/badge/tests-134%20unit%20%C2%B7%2020%20integration-success">
+  <img alt="tests: 153 unit, 23 integration" src="https://img.shields.io/badge/tests-153%20unit%20%C2%B7%2023%20integration-success">
   <img alt="license MIT" src="https://img.shields.io/badge/license-MIT-lightgrey">
 </p>
 
@@ -19,7 +19,7 @@ a firewall rule you can read and a verification table you can show.
 ```mermaid
 flowchart LR
     I(("internet")) -- "outpost fetch" --> L["laptop<br/>needs/*.yml → box/"]
-    L -- "outpost upload (ssh)" --> G["Gitea server · sealed<br/>PyPI · npm · apt · images · git · CI"]
+    L -- "outpost upload (ssh)" --> G["Gitea server · sealed<br/>PyPI · npm · apt · apk · rpm · images · git · CI"]
     L -- "outpost infra setup (ssh)" --> N["nodes · sealed<br/>Compose · Swarm · k3s"]
     N -- "https: everything they need" --> G
 ```
@@ -69,15 +69,18 @@ afternoon:
 - **One command per step**, in the order you use them: `init`, `fetch`, `gitea setup`,
   `upload`, `infra setup`, `check`, `demo push`. Every step is idempotent and logged.
 - **Lockfiles as input.** `uv.lock`, `poetry.lock`, `Pipfile.lock`, `requirements*.txt`,
-  `package-lock.json`, `pnpm-lock.yaml`, `yarn.lock`, plus images, apt packages and files with a URL.
+  `package-lock.json`, `pnpm-lock.yaml`, `yarn.lock`, plus images, OS packages and files with a URL.
+- **Three OS package families.** apt for Debian and Ubuntu, apk for Alpine, rpm for Rocky, Alma,
+  Fedora and CentOS Stream, each resolved with the real package manager inside a container of the
+  real distro, so the full dependency tree lands in Gitea's Debian, Alpine or RPM registry.
 - **Three runtimes from one Gitea.** Docker Compose nodes, a Docker Swarm, or a k3s cluster,
   declared in a 15-line `servers.yml`. One node can serve several infrastructures.
 - **A real seal.** iptables rejects outbound internet for the host *and* for its containers and
   pods, with a kernel-level backstop in the `security` table that stays effective whatever
   Docker or k3s add to the firewall. Open it on purpose with a logged reason.
 - **Dockerfiles change by two lines.** `FROM` names the Gitea copy of the base image
-  (`${GITEA}/pkgs/library--python:3.12-slim`), and `COPY --from=config / /` brings pip, npm, apt
-  and CA configuration into the build. Nothing on a node rewrites image names: a bare Docker Hub
+  (`${GITEA}/pkgs/library--python:3.12-slim`), and `COPY --from=config / /` brings pip, npm, apt,
+  apk, dnf and CA configuration into the build. Nothing on a node rewrites image names: a bare Docker Hub
   name fails at once, like every other reach for the internet.
 - **CI that cannot cheat.** Gitea Actions runners on the nodes, in host mode: a job is a shell
   script on a sealed node, under the same rules as everything else.
@@ -123,9 +126,9 @@ Verifying dev
     ok   system trust store has the CA
     ok   pip points at gitea
     ok   npm points at gitea
-    ok   apt sources are gitea only
+    ok   package sources are gitea only
     ok   node dns for containers running
-    ok   apt update works offline
+    ok   package index updates offline
     ok   egress sealed
     ok   public internet rejected
     ok   egress seal survives reboot
@@ -168,6 +171,8 @@ images: [python:3.12-slim, postgres:16]
 pypi:  [{file: ../../my-api/uv.lock}]
 npm:   [{file: ../../my-web/package-lock.json}]
 apt:   {distro: bookworm, packages: [libpq-dev]}
+apk:   {branch: v3.20, packages: [curl]}          # for an alpine:3.20 base
+rpm:   {distro: rocky9, packages: [git]}          # for a rockylinux:9 base
 files: [{url: https://github.com/jqlang/jq/releases/download/jq-1.7.1/jq-linux-amd64, name: jq, version: "1.7.1"}]
 ```
 
@@ -178,17 +183,17 @@ ARG GITEA
 FROM ${GITEA}/pkgs/config:latest AS config
 FROM ${GITEA}/pkgs/library--python:3.12-slim     # the Gitea copy of python:3.12-slim
 COPY --from=config / /
-# apt-get, pip and npm now use Gitea. Nothing else changes.
+# apt-get, pip and npm now use Gitea (apk add on an Alpine base, dnf install on a RHEL one). Nothing else changes.
 ```
 
 ## How it works
 
 | step | on the laptop | on the servers |
 |---|---|---|
-| `fetch` | reads needs and lockfiles; pulls images with a small OCI client, wheels with `pip download` for the server's platform, Debian packages with apt inside a container of the right distro; writes `box/manifest.json` | nothing |
+| `fetch` | reads needs and lockfiles; pulls images with a small OCI client, wheels with `pip download` for the server's platform, OS packages with apt, apk or dnf inside a container of the right distro; writes `box/manifest.json` | nothing |
 | `gitea setup` | creates a private CA and a server certificate with `openssl` | copies the Gitea binary from the box over `scp`; writes `app.ini` (HTTPS 443, SQLite, registries and Actions on); creates the admin user, token and organisation; seals the host |
 | `upload` | verifies the box against its manifest; opens an SSH tunnel to port 443 | receives every file into the matching registry (409 for files it has); the `config` image is built on the laptop and pushed |
-| `infra setup` | | writes `/etc/hosts`, the CA, `pip.conf`, `npmrc`, an apt source, `daemon.json` or `registries.yaml`; **seals**; then downloads CoreDNS, Docker or k3s and the Actions runner **from Gitea**; verifies |
+| `infra setup` | | writes `/etc/hosts`, the CA, `pip.conf`, `npmrc`, an apt, apk or dnf source (by the node's family), `daemon.json` or `registries.yaml`; **seals**; then downloads CoreDNS, Docker or k3s and the Actions runner **from Gitea**; verifies |
 | `check`, `demo push` | runs smoke checks over SSH; commits the demo through Gitea's API | the runner builds the image on the node; the deploy jobs run `compose up`, `stack deploy` or `kubectl apply` and wait until the node serves the new commit |
 
 Five ideas carry the design:
@@ -329,7 +334,7 @@ publishes them as a site: `uvx --with mkdocs-material mkdocs serve`.
 ```
 outpost/
   cli.py          the commands, in the order you use them
-  needs/ fetch/   lockfile parsers; one fetcher per kind (images, pypi, npm, apt, files)
+  needs/ fetch/   lockfile parsers; one fetcher per kind (images, pypi, npm, apt, apk, rpm, files)
   box.py oci.py   manifest, pack, sign; pull and push images over HTTP
   ssh.py http.py  Host.run / write / put, the Tunnel; urllib with a private CA
   pki.py          CA, server certificate, box signing, with the openssl CLI

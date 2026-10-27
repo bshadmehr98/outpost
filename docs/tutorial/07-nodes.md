@@ -16,7 +16,7 @@ installs the runtime, and ends with a verification table in which every line sho
 flowchart TD
     A["1. /etc/hosts: gitea.lab → 172.31.252.10"] --> B["2. trust pki/ca.crt (system store + explicit paths)"]
     B --> C["3. pip.conf, npmrc, apt list, docker daemon.json → Gitea"]
-    C --> D["4. park the stock apt sources"]
+    C --> D["4. OS packages from Gitea: apt, apk or dnf, by family"]
     D --> E["5. seal egress (iptables)"]
     E --> F["6. CoreDNS, downloaded from Gitea"]
     F --> G["7. Docker + Compose + buildx, or k3s, downloaded from Gitea"]
@@ -41,9 +41,13 @@ What each step does on the server:
    `/etc/docker/daemon.json` with the node's own DNS server (no registry mirror: images are
    named by their Gitea copy, and Docker trusts it through `certs.d`), and
    `/etc/profile.d/outpost.sh` with `PIP_INDEX_URL` and friends for interactive shells.
-4. **Apt.** Gitea's apt signing key is fetched, the stock sources are moved to
-   `/etc/apt/sources.disabled/`, and `outpost.list` is written with one line per distro Gitea
-   actually serves (the node's own codename is tried too, in case you uploaded packages for it).
+4. **OS packages.** On Debian and Ubuntu, Gitea's apt signing key is fetched, the stock sources
+   are moved to `/etc/apt/sources.disabled/`, and `outpost.list` is written with one line per
+   distro Gitea actually serves (the node's own codename is tried too, in case you uploaded
+   packages for it). An Alpine node gets the same treatment for apk (`/etc/apk/repositories`
+   parked as `repositories.disabled`, Gitea's key under `/etc/apk/keys/`), a Rocky, Alma, Fedora
+   or CentOS Stream node for dnf (`*.repo` files parked in `/etc/yum.repos.d.disabled/`,
+   `outpost.repo` written). The family comes from `/etc/os-release`.
 5. **Seal.** `/usr/local/sbin/outpost-egress` is installed with a systemd unit that re-applies
    it at boot, and run. From now on: loopback, replies, DNS, Gitea, private networks and the
    `allow` list are reachable; nothing else is. [The seal](../architecture/egress.md) has the details.
@@ -86,9 +90,9 @@ ok   gitea reachable with trusted TLS
 ok   system trust store has the CA
 ok   pip points at gitea
 ok   npm points at gitea
-ok   apt sources are gitea only
+ok   package sources are gitea only
 ok   node dns for containers running
-ok   apt update works offline
+ok   package index updates offline
 ok   egress sealed
 ok   public internet rejected
 ok   egress seal survives reboot

@@ -1,6 +1,6 @@
 """Turning a project folder, or a single lockfile, into a needs file. Used by the dashboard.
 
-  scan(folder)                    look at a folder: lockfiles, Dockerfiles, Python version -> a proposal
+  scan(folder)                    look at a folder: lockfiles, Dockerfiles (images; apt, apk, rpm packages), Python version -> a proposal
   describe_lockfile(path)         what one lockfile is and how many packages it pins
   write_needs(platform, project)  write needs/<name>.yml from a proposal the user accepted
 
@@ -28,6 +28,21 @@ MAX_DEPTH = 3
 # base image -> apt distro, for the usual suspects
 _CODENAMES = ("bookworm", "bullseye", "trixie", "noble", "jammy", "focal")
 _UBUNTU = {"24.04": "noble", "22.04": "jammy", "20.04": "focal"}
+# `node:20-alpine` names no branch: it is whatever Alpine was current when the image was built. Outpost
+# proposes the branch its own demo pins (alpine:3.20); bump the two together.
+ALPINE_CURRENT = "v3.20"
+_RPM_IMAGES = {"rockylinux": "rocky", "almalinux": "alma", "fedora": "fedora"}
+
+
+def kind_for_distro(distro: str | None) -> str | None:
+    """bookworm -> apt, v3.20 -> apk, rocky9 -> rpm."""
+    if not distro:
+        return None
+    if re.fullmatch(r"v\d+\.\d+", distro):
+        return "apk"
+    if re.fullmatch(r"(rocky|alma|fedora|stream)\d+", distro):
+        return "rpm"
+    return "apt"
 
 
 def describe_lockfile(path: Path) -> dict:
@@ -48,9 +63,20 @@ def describe_lockfile(path: Path) -> dict:
 
 
 def distro_for_image(image: str) -> str | None:
-    """`python:3.12-slim` -> bookworm, `ubuntu:24.04` -> noble, unknown -> None."""
+    """`python:3.12-slim` -> bookworm, `ubuntu:24.04` -> noble (apt); `alpine:3.20` and `python:3.12-alpine3.20`
+    -> v3.20, `node:20-alpine` -> ALPINE_CURRENT (apk); `rockylinux:9` -> rocky9, `fedora:40` -> fedora40 (rpm);
+    unknown -> None. kind_for_distro() says which kind a result belongs to."""
     name, _, tag = image.partition(":")
     name = name.rsplit("/", 1)[-1]
+    m = re.search(r"alpine(\d+\.\d+)?", tag) if name != "alpine" else re.match(r"(\d+\.\d+)", tag)
+    if name == "alpine" or (m and "alpine" in tag):
+        return f"v{m.group(1)}" if m and m.group(1) else ALPINE_CURRENT
+    if name in _RPM_IMAGES:
+        major = tag.split(".")[0].split("-")[0]
+        return f"{_RPM_IMAGES[name]}{major}" if major.isdigit() else None
+    if name == "centos":
+        m = re.match(r"stream(\d+)", tag)
+        return f"stream{m.group(1)}" if m else None
     for codename in _CODENAMES:
         if codename in tag or (name == "debian" and tag.startswith(codename)):
             return codename
@@ -81,8 +107,16 @@ def needed_image(image: str) -> str | None:
     return image
 
 
+# `RUN apt-get install ...`, `apk add ...`, `dnf install ...` (also yum, microdnf): the kind and the install verb
+_INSTALLS = (
+    ("apt", r"apt-get\s+(?:-\S+\s+)*install\s+(.*?)(?:&&|;|\n|$)"),
+    ("apk", r"\bapk\s+(?:-\S+\s+)*add\s+(.*?)(?:&&|;|\n|$)"),
+    ("rpm", r"\b(?:dnf|yum|microdnf)\s+(?:-\S+\s+)*install\s+(.*?)(?:&&|;|\n|$)"),
+)
+
+
 def read_dockerfile(path: Path) -> dict:
-    """Images and apt packages a Dockerfile asks for. Build stages and ${ARGS} are left out."""
+    """Images and OS packages (apt, apk, rpm) a Dockerfile asks for. Build stages and ${ARGS} are left out."""
     text = path.read_text(errors="replace")
     stages: set[str] = set()
     images: list[str] = []
@@ -95,16 +129,19 @@ def read_dockerfile(path: Path) -> dict:
         image = needed_image(image)
         if image and image not in images:
             images.append(image)
-    packages: list[str] = []
     joined = re.sub(r"\\\s*\n", " ", text)
-    for m in re.finditer(r"apt-get\s+(?:-\S+\s+)*install\s+(.*?)(?:&&|;|\n|$)", joined):
-        for word in m.group(1).split():
-            if word.startswith("-") or word.split("=")[0].isupper():  # a flag, or VAR=value
-                continue
-            word = word.split("=")[0]  # package=version pins the version; we fetch the distro's current one
-            if re.fullmatch(r"[a-z0-9][a-z0-9+.-]*", word) and word not in packages:
-                packages.append(word)
-    return {"path": str(path), "images": images, "apt": packages}
+    found: dict[str, list[str]] = {}
+    for kind, pattern in _INSTALLS:
+        packages: list[str] = []
+        for m in re.finditer(pattern, joined):
+            for word in m.group(1).split():
+                if word.startswith("-") or word.split("=")[0].isupper():  # a flag, or VAR=value
+                    continue
+                word = word.split("=")[0]  # package=version pins the version; we fetch the distro's current one
+                if re.fullmatch(r"[a-z0-9][a-z0-9+._-]*", word) and word not in packages:
+                    packages.append(word)
+        found[kind] = packages
+    return {"path": str(path), "images": images, **found}
 
 
 def python_version(folder: Path, images: list[str]) -> str | None:
@@ -147,17 +184,25 @@ def scan(folder: str | Path) -> dict:
                 dockerfiles.append(read_dockerfile(path))
     images = [i for d in dockerfiles for i in d["images"]]
     images = list(dict.fromkeys(images))
-    apt = list(dict.fromkeys(p for d in dockerfiles for p in d["apt"]))
-    distro = next((distro_for_image(i) for i in images if distro_for_image(i)), None)
-    return {
+    distros = {}
+    for image in images:   # the first image of each family names the distro for that family's packages
+        d = distro_for_image(image)
+        distros.setdefault(kind_for_distro(d), d)
+    packages = {kind: list(dict.fromkeys(p for d in dockerfiles for p in d.get(kind, []))) for kind in ("apt", "apk", "rpm")}
+    out = {
         "folder": str(root),
         "name": re.sub(r"[^a-z0-9]+", "-", root.name.lower()).strip("-") or "project",
         "python": python_version(root, images) or "3.12",
         "lockfiles": lockfiles,
         "dockerfiles": [d["path"] for d in dockerfiles],
         "images": images,
-        "apt": {"distro": distro or "bookworm", "packages": apt},
+        "apt": {"distro": distros.get("apt") or "bookworm", "packages": packages["apt"]},
     }
+    if packages["apk"] or distros.get("apk"):
+        out["apk"] = {"branch": distros.get("apk") or ALPINE_CURRENT, "packages": packages["apk"]}
+    if packages["rpm"] or distros.get("rpm"):
+        out["rpm"] = {"distro": distros.get("rpm") or "rocky9", "packages": packages["rpm"]}
+    return out
 
 
 def write_needs(platform: Platform, project: dict) -> Path:
@@ -185,6 +230,12 @@ def write_needs(platform: Platform, project: dict) -> Path:
     apt = project.get("apt") or {}
     if apt.get("packages"):
         data["apt"] = {"distro": str(apt.get("distro") or "bookworm"), "packages": [p.strip() for p in apt["packages"] if p.strip()]}
+    apk = project.get("apk") or {}
+    if apk.get("packages"):
+        data["apk"] = {"branch": str(apk.get("branch") or ALPINE_CURRENT), "packages": [p.strip() for p in apk["packages"] if p.strip()]}
+    rpm = project.get("rpm") or {}
+    if rpm.get("packages"):
+        data["rpm"] = {"distro": str(rpm.get("distro") or "rocky9"), "packages": [p.strip() for p in rpm["packages"] if p.strip()]}
     if project.get("files"):
         data["files"] = project["files"]
     path = needs_dir / f"{name}.yml"

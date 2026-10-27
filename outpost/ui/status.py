@@ -70,6 +70,12 @@ def box_status(platform: Platform, needs: Needs) -> dict:
         for pkg in pkgs:
             if not any(d.startswith(pkg + "_") for d in debs):
                 missing["apt"].append(f"{pkg} ({distro})")
+    for kind, wanted, ext in (("apk", needs.apk, "*.apk"), ("rpm", needs.rpm, "*.rpm")):   # name-version-... files
+        for distro, pkgs in wanted.items():
+            have = [p.name for p in (box / kind / distro).glob(ext)] if (box / kind / distro).exists() else []
+            for pkg in pkgs:
+                if not any(f.startswith(pkg + "-") for f in have):
+                    missing[kind].append(f"{pkg} ({distro})")
     for f in needs.files:
         if not (box / "files" / f.name / f.version / f.filename).exists():
             missing["files"].append(f"{f.name} {f.version}")
@@ -128,7 +134,7 @@ def preflight(platform: Platform) -> list[dict]:
     """Things this computer needs, each {"name", "ok", "detail", "need"}; `need` says which step cares."""
     checks = []
     for tool, need, why in (("ssh", "all server steps", "talks to the servers"), ("openssl", "gitea setup", "makes the CA and certificates"),
-                            ("docker", "fetch (apt) and the lab", "resolves apt packages in a container")):
+                            ("docker", "fetch (apt, apk, rpm) and the lab", "resolves OS packages in a container")):
         path = shutil.which(tool)
         checks.append({"name": tool, "ok": bool(path), "detail": path or f"not found; {why}", "need": need})
     try:
@@ -242,8 +248,9 @@ def search(platform: Platform, needs: Needs, q: str, limit: int = 40) -> dict:
     for py, specs in needs.pypi.items():
         hits += [{"kind": f"pypi (py{py})", "text": s} for s in specs if q in s.lower()]
     hits += [{"kind": "npm", "text": f"{n.name}@{n.version}"} for n in needs.npm if q in n.name.lower()]
-    for distro, pkgs in needs.apt.items():
-        hits += [{"kind": f"apt ({distro})", "text": p} for p in pkgs if q in p.lower()]
+    for kind, wanted in (("apt", needs.apt), ("apk", needs.apk), ("rpm", needs.rpm)):
+        for distro, pkgs in wanted.items():
+            hits += [{"kind": f"{kind} ({distro})", "text": p} for p in pkgs if q in p.lower()]
     hits += [{"kind": "file", "text": f"{f.name} {f.version}"} for f in needs.files if q in f.name.lower()]
     box_hits = []
     manifest = platform.box_dir / "manifest.json"

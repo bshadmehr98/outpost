@@ -5,19 +5,39 @@ Package registries we fill:                 Clients read them at:
   pypi     wheels and sdists                https://gitea/api/packages/ORG/pypi/simple
   npm      tarballs                         https://gitea/api/packages/ORG/npm/
   debian   .deb files                       deb https://gitea/api/packages/ORG/debian DISTRO main
+  alpine   .apk files                       https://gitea/api/packages/ORG/alpine/BRANCH/main   (in /etc/apk/repositories)
+  rpm      .rpm files                       baseurl=https://gitea/api/packages/ORG/rpm/GROUP     (one group per distro)
   container images                          docker pull gitea/OWNER/IMAGE:TAG
+
+The Alpine and RPM endpoints follow the Gitea docs (https://docs.gitea.com/usage/packages/alpine and
+https://docs.gitea.com/usage/packages/rpm): PUT /api/packages/{owner}/alpine/{branch}/{repository} and
+PUT /api/packages/{owner}/rpm/{group}/upload (or /rpm/upload without a group), 201 when stored and
+409 when the same file is already there; the signing keys are GET /alpine/key and GET /rpm/repository.key.
 """
 
 import base64
 import hashlib
 import json
+import re
 import tarfile
 import uuid
 from pathlib import Path
+from typing import NamedTuple
 from urllib.parse import quote
 
 from ..http import Http, HttpError
 from .. import oci
+
+
+class AlpineKey(NamedTuple):
+    """Gitea's Alpine signing key and the file name apk needs it under. apk only trusts an APKINDEX whose
+    signature is named after a file in /etc/apk/keys/, and Gitea signs with `<owner>@<fingerprint>.rsa.pub`,
+    which it reports in the Content-Disposition of /alpine/key; so the name travels with the key."""
+    name: str
+    content: str
+
+
+ALPINE_KEY_DEFAULT_NAME = "{owner}.rsa.pub"   # only if Gitea sends no Content-Disposition; apk would then need a rename
 
 
 class GiteaClient:
@@ -164,6 +184,41 @@ class GiteaClient:
 
     def debian_has_distro(self, distro: str, owner: str | None = None) -> bool:
         return self.http.get(f"/api/packages/{owner or self.org}/debian/dists/{quote(distro)}/Release").status == 200
+
+    def upload_alpine(self, path: Path, branch: str, repository: str = "main", owner: str | None = None) -> str:
+        """PUT /api/packages/{owner}/alpine/{branch}/{repository}; Gitea reads the architecture from the package."""
+        url = f"/api/packages/{owner or self.org}/alpine/{quote(branch)}/{quote(repository)}"
+        resp = self.http.request("PUT", url, data=path.read_bytes(), headers={"Content-Type": "application/octet-stream"})
+        return _outcome(resp, "alpine", f"{branch}/{repository} {path.name}")
+
+    def alpine_key(self, owner: str | None = None) -> AlpineKey:
+        """The RSA public key Gitea signs its APKINDEX files with, and the file name apk must store it under."""
+        owner = owner or self.org
+        resp = self.http.get(f"/api/packages/{owner}/alpine/key", ok=(200,))
+        disposition = next((v for k, v in resp.headers.items() if k.lower() == "content-disposition"), "")
+        m = re.search(r'filename\*?=(?:UTF-8\'\')?"?([^";]+)"?', disposition)
+        name = m.group(1).strip() if m else ALPINE_KEY_DEFAULT_NAME.format(owner=owner)
+        return AlpineKey(name=name.rsplit("/", 1)[-1], content=resp.text)
+
+    def alpine_has_branch(self, branch: str, arch: str, repository: str = "main", owner: str | None = None) -> bool:
+        url = f"/api/packages/{owner or self.org}/alpine/{quote(branch)}/{quote(repository)}/{quote(arch)}/APKINDEX.tar.gz"
+        return self.http.get(url).status == 200
+
+    def upload_rpm(self, path: Path, group: str = "", owner: str | None = None) -> str:
+        """PUT /api/packages/{owner}/rpm/{group}/upload, or /rpm/upload with no group. A group is a repository of
+        its own in Gitea; Outpost uses one group per distro so rocky9 and fedora40 packages never mix."""
+        group_part = f"/{quote(group, safe='/')}" if group else ""
+        url = f"/api/packages/{owner or self.org}/rpm{group_part}/upload"
+        resp = self.http.request("PUT", url, data=path.read_bytes(), headers={"Content-Type": "application/octet-stream"})
+        return _outcome(resp, "rpm", f"{group or 'no group'} {path.name}")
+
+    def rpm_key(self, owner: str | None = None) -> str:
+        """The PGP key Gitea signs its RPM repository metadata (and re-signs uploaded packages) with."""
+        return self.http.get(f"/api/packages/{owner or self.org}/rpm/repository.key", ok=(200,)).text
+
+    def rpm_has_group(self, group: str, owner: str | None = None) -> bool:
+        group_part = f"/{quote(group, safe='/')}" if group else ""
+        return self.http.get(f"/api/packages/{owner or self.org}/rpm{group_part}/repodata/repomd.xml").status == 200
 
     def registry(self) -> oci.Registry:
         """A container-registry view of the same Gitea. Tokens come from /v2/token with our Basic auth."""

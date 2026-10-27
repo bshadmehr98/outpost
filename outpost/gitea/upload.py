@@ -1,4 +1,6 @@
-"""Push a box into Gitea. Every file kind maps to one Gitea package registry.
+"""Push a box into Gitea. Every file kind maps to one Gitea package registry: generic, PyPI, npm,
+Debian (one suite per apt distro), Alpine (one branch per apk branch), RPM (one group per rpm distro)
+and the container registry.
 
 Everything lands in the one organisation, images included: `python:3.12-slim` becomes
 `<gitea>/pkgs/library--python:3.12-slim` and Dockerfiles reference that name explicitly.
@@ -52,6 +54,20 @@ def upload_box(box: Path, client: GiteaClient, gitea: GiteaInfo, ca_pem: str, lo
             for path in sorted(distro_dir.glob("*.deb")):
                 tally("apt", client.upload_debian(path, distro_dir.name))
 
+    apk = box / "apk"
+    if apk.exists():
+        log("==> apk")
+        for branch_dir in sorted(p for p in apk.iterdir() if p.is_dir()):
+            for path in sorted(branch_dir.glob("*.apk")):
+                tally("apk", client.upload_alpine(path, branch_dir.name))
+
+    rpm = box / "rpm"
+    if rpm.exists():
+        log("==> rpm")
+        for distro_dir in sorted(p for p in rpm.iterdir() if p.is_dir()):
+            for path in sorted(distro_dir.glob("*.rpm")):
+                tally("rpm", client.upload_rpm(path, group=distro_dir.name))
+
     images = box / "images"
     if images.exists():
         log("==> images")
@@ -62,7 +78,8 @@ def upload_box(box: Path, client: GiteaClient, gitea: GiteaInfo, ca_pem: str, lo
             log(f"    {ref.short}  ->  {oci.gitea_ref(gitea, ref)}")
             tally("images", "uploaded")
 
-    stats["config_image"] = push_config_image(client, gitea, ca_pem, boxmod.distros_in(box), log=log)
+    stats["config_image"] = push_config_image(client, gitea, ca_pem, boxmod.distros_in(box),
+                                              apk_branches=boxmod.distros_in(box, "apk"), rpm_distros=boxmod.distros_in(box, "rpm"), log=log)
 
     for kind, s in stats.items():
         if "uploaded" in s:
@@ -70,14 +87,22 @@ def upload_box(box: Path, client: GiteaClient, gitea: GiteaInfo, ca_pem: str, lo
     return stats
 
 
-def push_config_image(client: GiteaClient, gitea: GiteaInfo, ca_pem: str, distros: list[str], log=print) -> dict:
+def push_config_image(client: GiteaClient, gitea: GiteaInfo, ca_pem: str, distros: list[str],
+                      apk_branches: list[str] | None = None, rpm_distros: list[str] | None = None, log=print) -> dict:
     """Build the one-layer `config` image from the client files and push it. Also run on its own
-    after the CA is rotated, so builds pick up the new certificate without a full upload."""
+    after the CA is rotated, so builds pick up the new certificate without a full upload.
+    `distros` are the apt suites, `apk_branches` the Alpine branches and `rpm_distros` the RPM groups
+    that exist in Gitea; a package source is only written for what exists, and the keys with them."""
     log("==> config image")
+    apk_branches, rpm_distros = list(apk_branches or []), list(rpm_distros or [])
     apt_key = client.debian_key() if distros else None
+    apk_key = client.alpine_key() if apk_branches else None
+    rpm_key = client.rpm_key() if rpm_distros else None
+    files = clients.config_image_files(gitea, ca_pem, apt_key, distros, apk_key=apk_key, apk_branches=apk_branches,
+                                       rpm_key=rpm_key, rpm_distros=rpm_distros)
     with tempfile.TemporaryDirectory(prefix="outpost-config-image-") as tmp:
-        layout = oci.build_layout(clients.config_image_files(gitea, ca_pem, apt_key, distros), Path(tmp), gitea.config_image)
+        layout = oci.build_layout(files, Path(tmp), gitea.config_image)
         client.ensure_org(gitea.org)
         client.push_image(layout, gitea.org, "config", "latest")
     log(f"    {gitea.config_image}  (COPY --from=... / / in your Dockerfiles)")
-    return {"distros": distros}
+    return {"distros": distros, "apk_branches": apk_branches, "rpm_distros": rpm_distros}

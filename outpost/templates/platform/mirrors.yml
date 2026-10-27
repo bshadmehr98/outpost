@@ -4,4 +4,9 @@
 # docker: https://registry-1.docker.io
 # debian: http://deb.debian.org/debian
 # ubuntu: http://archive.ubuntu.com/ubuntu
+# alpine: https://dl-cdn.alpinelinux.org/alpine                # apk packages: <alpine>/<branch>/{main,community}
+# rocky: https://dl.rockylinux.org/pub/rocky                   # rpm packages for rocky9: <rocky>/9/{BaseOS,AppStream,extras}
+# alma: https://repo.almalinux.org/almalinux                   # rpm packages for alma9
+# fedora: https://dl.fedoraproject.org/pub/fedora/linux        # rpm packages for fedora40: <fedora>/releases/40 and updates/40
+# centos_stream: https://mirror.stream.centos.org              # rpm packages for stream9: <centos_stream>/9-stream
 # github: https://github.com

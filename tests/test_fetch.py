@@ -9,7 +9,7 @@ import pytest
 
 from outpost import oci, versions
 from outpost.config import Mirrors
-from outpost.fetch import apt, files, images, npm, pypi
+from outpost.fetch import apk, apt, files, images, npm, pypi, rpm
 from outpost.needs import FileNeed, NpmNeed
 
 
@@ -59,6 +59,64 @@ def test_apt_script_and_image():
     apt.fetch({"noble": ["htop"]}, Path("/tmp/box-test"), Mirrors(), log=lambda *_: None, run=run)
     cmd = run.calls[0]
     assert cmd[:4] == ["docker", "run", "--rm", "--platform"] and "ubuntu:noble" in cmd
+
+
+def test_apk_script_and_image():
+    assert apk.image_for("v3.20") == "alpine:3.20" and apk.image_for("v3.19") == "alpine:3.19"
+    with pytest.raises(ValueError):
+        apk.image_for("3.20")
+    with pytest.raises(ValueError):
+        apk.image_for("edge")
+    script = apk.script_for("v3.20", ["curl", "jq"], Mirrors(alpine="https://alpine.mirror.ir/alpine"))
+    assert "https://alpine.mirror.ir/alpine/v3.20/main\nhttps://alpine.mirror.ir/alpine/v3.20/community" in script
+    assert "> /etc/apk/repositories" in script and "apk update" in script
+    assert "apk fetch --recursive -o /out curl jq" in script
+    run = Recorder()
+    result = apk.fetch({"v3.20": ["curl"]}, Path("/tmp/box-test"), Mirrors(), log=lambda *_: None, run=run)
+    cmd = run.calls[0]
+    assert cmd[:5] == ["docker", "run", "--rm", "--platform", f"linux/{versions.ARCH}"] and "alpine:3.20" in cmd
+    assert cmd[-2] == "-c" and cmd[cmd.index("alpine:3.20") + 1] == "sh" and "/tmp/box-test/apk/v3.20:/out" in cmd
+    assert result == {"v3.20": 0}
+    with pytest.raises(RuntimeError, match="apk download for v3.20 failed"):
+        apk.fetch({"v3.20": ["curl"]}, Path("/tmp/box-test"), Mirrors(), log=lambda *_: None, run=Recorder(fail_first=True))
+
+
+def test_rpm_script_and_image():
+    assert rpm.image_for("rocky9") == "rockylinux:9" and rpm.image_for("alma9") == "almalinux:9"
+    assert rpm.image_for("fedora40") == "fedora:40" and rpm.image_for("stream9") == "quay.io/centos/centos:stream9"
+    with pytest.raises(ValueError):
+        rpm.image_for("rhel9")
+    assert rpm.distro_for_host("rocky", "9.4") == "rocky9" and rpm.distro_for_host("almalinux", "9.4") == "alma9"
+    assert rpm.distro_for_host("fedora", "40") == "fedora40" and rpm.distro_for_host("centos", "9") == "stream9"
+    assert rpm.distro_for_host("ubuntu", "24.04") is None
+    script = rpm.script_for("rocky9", ["curl", "git"], Mirrors(rocky="https://rocky.mirror.ir/rocky"))
+    assert "rm -f /etc/yum.repos.d/*.repo" in script and "baseurl=https://rocky.mirror.ir/rocky/9/BaseOS/x86_64/os" in script
+    assert "baseurl=https://rocky.mirror.ir/rocky/9/AppStream/x86_64/os" in script and "gpgcheck=0" in script
+    assert "dnf-plugins-core" in script and "dnf -q -y download --resolve --alldeps --destdir /out curl git" in script
+    fedora = rpm.script_for("fedora40", ["curl"], Mirrors())
+    assert "https://dl.fedoraproject.org/pub/fedora/linux/releases/40/Everything/x86_64/os" in fedora and "updates/40/Everything/x86_64" in fedora
+    assert "https://mirror.stream.centos.org/9-stream/BaseOS/x86_64/os" in rpm.script_for("stream9", ["curl"], Mirrors())
+    versions.use_arch("arm64")
+    try:
+        assert "/9/BaseOS/aarch64/os" in rpm.script_for("alma9", ["curl"], Mirrors())
+    finally:
+        versions.use_arch("amd64")
+    run = Recorder()
+    rpm.fetch({"rocky9": ["curl"]}, Path("/tmp/box-test"), Mirrors(), log=lambda *_: None, run=run)
+    cmd = run.calls[0]
+    assert cmd[:4] == ["docker", "run", "--rm", "--platform"] and "rockylinux:9" in cmd and "bash" in cmd and "/tmp/box-test/rpm/rocky9:/out" in cmd
+    with pytest.raises(RuntimeError, match="rpm download for rocky9 failed"):
+        rpm.fetch({"rocky9": ["curl"]}, Path("/tmp/box-test"), Mirrors(), log=lambda *_: None, run=Recorder(fail_first=True))
+
+
+def test_fetch_all_runs_every_kind(tmp_path, monkeypatch):
+    from outpost.fetch import fetch_all
+    from outpost.needs import Needs
+    calls = []
+    for mod, name in ((apk, "apk"), (rpm, "rpm"), (apt, "apt")):
+        monkeypatch.setattr(mod, "fetch", lambda needs, box, mirrors, log, _n=name: calls.append((_n, needs)) or {})
+    results = fetch_all(Needs(apk={"v3.20": ["curl"]}, rpm={"rocky9": ["git"]}), tmp_path, Mirrors(), only={"apk", "rpm"}, log=lambda *_: None)
+    assert calls == [("apk", {"v3.20": ["curl"]}), ("rpm", {"rocky9": ["git"]})] and set(results) == {"apk", "rpm", "manifest"}
 
 
 class _NpmHandler(BaseHTTPRequestHandler):

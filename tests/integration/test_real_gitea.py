@@ -10,6 +10,7 @@ same URL. Containers are removed afterwards.
 import json
 import os
 import subprocess
+import tempfile
 import time
 import urllib.request
 from pathlib import Path
@@ -17,6 +18,8 @@ from pathlib import Path
 import pytest
 
 from outpost import oci, versions
+from outpost.config import Mirrors
+from outpost.fetch import apk as apkmod
 from outpost.gitea.client import GiteaClient
 from outpost.http import Http
 from outpost.infra import clients
@@ -114,6 +117,31 @@ def test_debian(gitea, tmp_path):
     assert "BEGIN PGP PUBLIC KEY BLOCK" in gitea.debian_key()
 
 
+@pytest.fixture(scope="module")
+def apk_files(tmp_path_factory):
+    """zlib and its dependency tree for Alpine v3.20, fetched the way `outpost fetch` does (apk inside alpine:3.20)."""
+    box = tmp_path_factory.mktemp("box")
+    apkmod.fetch({"v3.20": ["zlib"]}, box, Mirrors(), log=lambda *_: None)
+    files = sorted((box / "apk" / "v3.20").glob("*.apk"))
+    assert files and any(f.name.startswith("zlib-") for f in files)
+    return files
+
+
+def test_alpine(gitea, apk_files):
+    """Real .apk files land in Gitea's Alpine registry; Gitea signs the index with a key named after the owner and
+    a fingerprint, reported in Content-Disposition, and serves an APKINDEX for the branch and architecture."""
+    first = apk_files[0]
+    assert gitea.upload_alpine(first, "v3.20") == "uploaded"
+    assert gitea.upload_alpine(first, "v3.20") == "exists"
+    for path in apk_files[1:]:
+        gitea.upload_alpine(path, "v3.20")
+    key = gitea.alpine_key()
+    assert key.name.startswith("pkgs@") and key.name.endswith(".rsa.pub") and "BEGIN PUBLIC KEY" in key.content
+    assert gitea.alpine_has_branch("v3.20", "x86_64") and not gitea.alpine_has_branch("v3.19", "x86_64")
+    index = urllib.request.urlopen(f"{URL}/api/packages/pkgs/alpine/v3.20/main/x86_64/APKINDEX.tar.gz").read()
+    assert index[:2] == b"\x1f\x8b"
+
+
 def test_pull_from_docker_hub_and_push_to_gitea(gitea, tmp_path):
     """`alpine:3.20` from Docker Hub lands under the one organisation as `pkgs/library--alpine`, like every image."""
     ref = oci.parse_ref("alpine:3.20")
@@ -162,3 +190,27 @@ def test_config_image_is_usable_in_a_build(gitea, tmp_path):
     out = sh("docker", "exec", DIND, "docker", "run", "--rm", "outpost-it-config").stdout
     assert "index-url = https://gitea.internal/api/packages/pkgs/pypi/simple" in out
     assert "debian bookworm main" in out
+
+
+def test_apk_add_from_gitea_with_the_config_image_key(gitea, apk_files):
+    """An Alpine build that copies the config image in finds Gitea's key under /etc/apk/keys/<name Gitea signed
+    with>, so `apk add` from a repositories file that names only Gitea works. The repositories line is written
+    with the plain-http URL this test's Gitea answers on; on a real platform client_files writes the https one."""
+    host = URL.split("//")[1]
+    info = GiteaInfo(name="gitea.internal", ip="10.0.0.5", org="pkgs")
+    files = clients.config_image_files(info, "CA PEM", None, [], apk_key=gitea.alpine_key(), apk_branches=["v3.20"])
+    key_paths = [p for p in files if p.startswith("/etc/apk/keys/")]
+    assert len(key_paths) == 1 and files["/etc/apk/repositories"][0] == b"https://gitea.internal/api/packages/pkgs/alpine/v3.20/main\n"
+    layout = oci.build_layout(files, Path(tempfile_dir := tempfile.mkdtemp(prefix="outpost-it-apk-")) / "config", info.config_image)
+    gitea.push_image(layout, "pkgs", "config", "apk-test")
+    ctx = Path(tempfile_dir) / "ctx"
+    ctx.mkdir()
+    (ctx / "Dockerfile").write_text(
+        f"FROM {host}/pkgs/config:apk-test AS config\nFROM {host}/pkgs/library--alpine:3.20\nCOPY --from=config / /\n"
+        f"RUN echo http://{host}/api/packages/pkgs/alpine/v3.20/main > /etc/apk/repositories && apk update && apk add zlib\n"
+        "CMD apk info zlib && ls /etc/apk/keys\n")
+    sh("docker", "cp", str(ctx), f"{DIND}:/ctx-apk")
+    built = sh("docker", "exec", DIND, "docker", "build", "-q", "-t", "outpost-it-apk", "/ctx-apk", check=False)
+    assert built.returncode == 0, built.stderr[-2000:]
+    out = sh("docker", "exec", DIND, "docker", "run", "--rm", "outpost-it-apk").stdout
+    assert "zlib-" in out and key_paths[0].rsplit("/", 1)[1] in out

@@ -17,7 +17,7 @@
 Day two:
   outpost hosts           what every server runs right now (versions, seal, workloads)
   outpost gitea backup    archive Gitea's data to backups/; `gitea restore <file>` puts it back
-  outpost infra upgrade X apt upgrade on the nodes, from Gitea
+  outpost infra upgrade X OS upgrade on the nodes (apt, apk or dnf), from Gitea
   outpost pki rotate      new CA and certificate, pushed everywhere
   outpost report          one HTML page with the evidence, for an auditor or a boss
 """
@@ -78,6 +78,8 @@ def _node_context(platform: Platform, servers, infra, hosts: list[Host]) -> Node
         gitea=info,
         ca_pem=_ca_pem(platform),
         distros=uploaded.get("distros", []),
+        apk_branches=uploaded.get("apk_branches", []),
+        rpm_distros=uploaded.get("rpm_distros", []),
         allow=list(dict.fromkeys(infra.allow + node_ips)),
         infra_name=infra.name,
         args=infra.args,
@@ -128,6 +130,10 @@ def cmd_needs(args) -> int:
         log(f"  npm    {len(needs.npm)} packages: {', '.join(f'{n.name}@{n.version}' for n in needs.npm[:6])}{' ...' if len(needs.npm) > 6 else ''}")
     for distro, pkgs in needs.apt.items():
         log(f"  apt    ({distro}) {', '.join(pkgs)}")
+    for branch, pkgs in needs.apk.items():
+        log(f"  apk    ({branch}) {', '.join(pkgs)}")
+    for distro, pkgs in needs.rpm.items():
+        log(f"  rpm    ({distro}) {', '.join(pkgs)}")
     for f in needs.files:
         log(f"  file   {f.name} {f.version}  <- {f.url}")
     log(f"Total: {json.dumps(needs.summary())}")
@@ -215,7 +221,9 @@ def cmd_upload(args) -> int:
         info = gitea_info(platform, servers)
         with connect(platform, servers) as client:
             stats = upload_box(box, client, info, _ca_pem(platform), log=log)
-        platform.write_state("upload", {"distros": stats.get("config_image", {}).get("distros", []), "stats": stats, "source": [str(s) for s in sources]})
+        config = stats.get("config_image", {})
+        platform.write_state("upload", {"distros": config.get("distros", []), "apk_branches": config.get("apk_branches", []),
+                                        "rpm_distros": config.get("rpm_distros", []), "stats": stats, "source": [str(s) for s in sources]})
     finally:
         if keep:
             keep.cleanup()
@@ -261,20 +269,37 @@ def _infra_setup(platform: Platform, servers, infra, hosts: list[Host], setup: b
     return 0 if all_ok else 1
 
 
+UPGRADE_SCRIPT = """. /etc/os-release 2>/dev/null
+case " $ID $ID_LIKE " in
+  *alpine*)
+    apk update 2>&1 | tail -3
+    apk upgrade 2>&1 | tail -25
+    ;;
+  *rhel*|*fedora*|*centos*|*rocky*|*almalinux*)
+    dnf makecache -q 2>&1 | tail -3
+    dnf upgrade -y -q 2>&1 | tail -25
+    if command -v needs-restarting >/dev/null 2>&1 && ! needs-restarting -r >/dev/null 2>&1; then echo 'REBOOT-REQUIRED'; fi
+    ;;
+  *)
+    apt-get update -qq 2>&1 | tail -3
+    DEBIAN_FRONTEND=noninteractive apt-get upgrade -y -q -o Dpkg::Options::=--force-confold 2>&1 | grep -E '^[0-9]+ upgraded|^Setting up|^E:|^W:|Unpacking' | tail -25
+    test -f /var/run/reboot-required && echo 'REBOOT-REQUIRED' || true
+    ;;
+esac
+"""
+
+
 def _infra_upgrade(platform: Platform, servers, infra, hosts: list[Host]) -> int:
-    """apt upgrade on every node, answered by Gitea only. Put the packages to keep current in a needs
+    """OS upgrade on every node, answered by Gitea only: apt-get on Debian and Ubuntu, apk on Alpine, dnf on
+    the RHEL family, decided on the node from /etc/os-release. Put the packages to keep current in a needs
     file (needs/os-updates.yml), fetch, upload, then run this; the seal stays on throughout."""
     failed = []
     for host in hosts:
-        log(f"==> {host.alias}: apt-get update and upgrade from Gitea")
-        out = host.run(
-            "apt-get update -qq 2>&1 | tail -3\n"
-            "DEBIAN_FRONTEND=noninteractive apt-get upgrade -y -q -o Dpkg::Options::=--force-confold 2>&1 "
-            "| grep -E '^[0-9]+ upgraded|^Setting up|^E:|^W:|Unpacking' | tail -25\n"
-            "test -f /var/run/reboot-required && echo 'REBOOT-REQUIRED' || true", check=False, timeout=3600)
+        log(f"==> {host.alias}: package index update and upgrade from Gitea")
+        out = host.run(UPGRADE_SCRIPT, check=False, timeout=3600)
         for line in out.stdout.strip().splitlines():
             log(f"  [{host.alias}] {line}")
-        if not out.ok or "E:" in out.stdout:
+        if not out.ok or any(marker in out.stdout for marker in ("E:", "ERROR:", "Error:")):   # apt, apk, dnf
             failed.append(host.alias)
             log(f"  [{host.alias}] FAILED: {out.stderr.strip()[-300:]}")
         elif "REBOOT-REQUIRED" in out.stdout:
@@ -439,7 +464,8 @@ def cmd_pki(args) -> int:
     from .gitea.upload import push_config_image
     uploaded = platform.read_state("upload") or {}
     with connect(platform, servers) as client:
-        push_config_image(client, gitea_info(platform, servers), _ca_pem(platform), uploaded.get("distros", []), log=log)
+        push_config_image(client, gitea_info(platform, servers), _ca_pem(platform), uploaded.get("distros", []),
+                          apk_branches=uploaded.get("apk_branches", []), rpm_distros=uploaded.get("rpm_distros", []), log=log)
     done = [n for n in servers.infrastructures if platform.read_state(f"infra-{n}")]
     log(f"==> [3/3] nodes of {', '.join(done) or 'no infrastructure yet'}: trust the new CA")
     rc = 0

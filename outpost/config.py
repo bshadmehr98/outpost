@@ -19,7 +19,7 @@ class GiteaConfig:
     host: str                      # SSH alias from ~/.ssh/config
     name: str                      # DNS name every node will use, e.g. gitea.internal
     ip: str | None = None          # detected over SSH when missing
-    org: str = "pkgs"              # Gitea organisation that holds pip, npm, apt and files
+    org: str = "pkgs"              # Gitea organisation that holds pip, npm, apt, apk, rpm and files
     user: str = "outpost"          # Gitea admin user Outpost creates
     allow: list[str] = field(default_factory=list)  # extra CIDRs the Gitea host may reach
 
@@ -63,6 +63,11 @@ class Mirrors:
     debian: str = "http://deb.debian.org/debian"
     debian_security: str = "http://security.debian.org/debian-security"
     ubuntu: str = "http://archive.ubuntu.com/ubuntu"
+    alpine: str = "https://dl-cdn.alpinelinux.org/alpine"
+    rocky: str = "https://dl.rockylinux.org/pub/rocky"
+    alma: str = "https://repo.almalinux.org/almalinux"
+    fedora: str = "https://dl.fedoraproject.org/pub/fedora/linux"
+    centos_stream: str = "https://mirror.stream.centos.org"
     github: str = "https://github.com"
     gitea_dl: str = "https://dl.gitea.com/gitea"
     docker_static: str = "https://download.docker.com/linux/static/stable"

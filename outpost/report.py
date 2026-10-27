@@ -104,7 +104,7 @@ def render(data: dict) -> str:
     if up:
         stats = up.get("stats") or {}
         total = sum(int(x.get("uploaded", 0)) + int(x.get("exists", 0)) for x in stats.values() if isinstance(x, dict) and "uploaded" in x)
-        out.append(f"<tr><th>Box in Gitea</th><td>{total} files across {', '.join(k for k, x in stats.items() if isinstance(x, dict) and 'uploaded' in x) or 'no kinds'}; apt distros: {', '.join(up.get('distros') or []) or 'none'}</td></tr>")
+        out.append(f"<tr><th>Box in Gitea</th><td>{total} files across {', '.join(k for k, x in stats.items() if isinstance(x, dict) and 'uploaded' in x) or 'no kinds'}; apt distros: {', '.join(up.get('distros') or []) or 'none'}; apk branches: {', '.join(up.get('apk_branches') or []) or 'none'}; rpm distros: {', '.join(up.get('rpm_distros') or []) or 'none'}</td></tr>")
     bk = data["backup"]
     out.append(f"<tr><th>Last backup</th><td>{e(bk['when']) + ', ' + str(round(bk['bytes'] / 1e6)) + ' MB' if bk else 'none recorded'}</td></tr>")
     out.append("<tr><th>Pinned versions</th><td>" + ", ".join(f"{k} {e(v2)}" for k, v2 in data["pinned"].items()) + "</td></tr></table>")

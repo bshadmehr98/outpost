@@ -74,6 +74,53 @@ def test_debian_upload(client, fake_gitea, tmp_path):
     assert "PGP" in client.debian_key()
 
 
+def test_alpine_upload_and_key_name(client, fake_gitea, tmp_path):
+    apk = tmp_path / "curl-8.9.1-r1.apk"
+    apk.write_bytes(b"\x1f\x8b\x08apk")
+    assert client.upload_alpine(apk, "v3.20") == "uploaded"
+    assert client.upload_alpine(apk, "v3.20") == "exists"
+    assert client.upload_alpine(apk, "v3.19", repository="community") == "uploaded"
+    assert [p for m, p in fake_gitea.requests if m == "PUT" and "alpine" in p] == ["/api/packages/pkgs/alpine/v3.20/main"] * 2 + ["/api/packages/pkgs/alpine/v3.19/community"]
+    assert client.alpine_has_branch("v3.20", "x86_64") and not client.alpine_has_branch("v3.18", "x86_64")
+    key = client.alpine_key()
+    assert key.name == "pkgs@6f2a9c1e.rsa.pub" and "BEGIN PUBLIC KEY" in key.content   # the name apk needs under /etc/apk/keys
+    fake_gitea.alpine_key_name = ""
+    assert client.alpine_key().name == "pkgs.rsa.pub"   # documented fallback when Gitea sends no Content-Disposition
+
+
+def test_rpm_upload_per_group_and_key(client, fake_gitea, tmp_path):
+    rpm = tmp_path / "curl-7.76.1-29.el9.x86_64.rpm"
+    rpm.write_bytes(b"\xed\xab\xee\xdbrpm")
+    assert client.upload_rpm(rpm, group="rocky9") == "uploaded"
+    assert client.upload_rpm(rpm, group="rocky9") == "exists"
+    assert client.upload_rpm(rpm) == "uploaded"   # no group: Gitea's plain /rpm/upload
+    puts = [p for m, p in fake_gitea.requests if m == "PUT" and "/rpm" in p]
+    assert puts == ["/api/packages/pkgs/rpm/rocky9/upload"] * 2 + ["/api/packages/pkgs/rpm/upload"]
+    assert client.rpm_has_group("rocky9") and not client.rpm_has_group("fedora40")
+    assert "PGP" in client.rpm_key()
+
+
+def test_upload_box_sends_apk_and_rpm_and_records_them_for_the_config_image(client, fake_gitea, tmp_path):
+    from outpost import box as boxmod
+    from outpost.gitea.upload import upload_box
+    from outpost.infra.clients import GiteaInfo
+    box = tmp_path / "box"
+    (box / "apk" / "v3.20").mkdir(parents=True)
+    (box / "apk" / "v3.20" / "curl-8.9.1-r1.apk").write_bytes(b"apk1")
+    (box / "rpm" / "rocky9").mkdir(parents=True)
+    (box / "rpm" / "rocky9" / "curl-7.76.1-29.el9.x86_64.rpm").write_bytes(b"rpm1")
+    (box / "rpm" / "fedora40").mkdir(parents=True)
+    (box / "rpm" / "fedora40" / "curl-8.6.0-8.fc40.x86_64.rpm").write_bytes(b"rpm2")
+    boxmod.write_manifest(box)
+    assert boxmod.distros_in(box) == [] and boxmod.distros_in(box, "apk") == ["v3.20"] and boxmod.distros_in(box, "rpm") == ["fedora40", "rocky9"]
+    stats = upload_box(box, client, GiteaInfo(name="gitea.internal", ip="10.0.0.5", org="pkgs"), "CA PEM", log=lambda *_: None)
+    assert stats["apk"] == {"uploaded": 1, "exists": 0} and stats["rpm"] == {"uploaded": 2, "exists": 0}
+    assert stats["config_image"] == {"distros": [], "apk_branches": ["v3.20"], "rpm_distros": ["fedora40", "rocky9"]}
+    assert ("GET", "/api/packages/pkgs/alpine/key") in fake_gitea.requests and ("GET", "/api/packages/pkgs/rpm/repository.key") in fake_gitea.requests
+    assert ("GET", "/api/packages/pkgs/debian/repository.key") not in fake_gitea.requests   # no apt distros, no apt key
+    assert ("pkgs/config", "latest") in fake_gitea.manifests
+
+
 def test_upload_puts_every_image_under_the_organisation(client, fake_gitea, tmp_path):
     """python:3.12-slim lands as pkgs/library--python, bitnami/redis as pkgs/bitnami--redis; no other org is made."""
     from outpost import box as boxmod

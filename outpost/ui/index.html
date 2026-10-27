@@ -289,8 +289,8 @@ const EXTRA = [
 ];
 const SEAL = { on:'internet switched off', off:'internet OPEN' };
 const TYPES = { compose:'Docker + Compose', swarm:'Docker Swarm', k3s:'k3s (Kubernetes)' };
-const KIND_LABEL = { images:'images', pypi:'Python', npm:'npm', apt:'apt', files:'files' };
-const KIND_COLOR = { images:'#0e7067', pypi:'#3b6fd6', npm:'#c2410c', apt:'#7c3aed', files:'#6b7280' };
+const KIND_LABEL = { images:'images', pypi:'Python', npm:'npm', apt:'apt', apk:'apk', rpm:'rpm', files:'files' };
+const KIND_COLOR = { images:'#0e7067', pypi:'#3b6fd6', npm:'#c2410c', apt:'#7c3aed', apk:'#0369a1', rpm:'#b91c1c', files:'#6b7280' };
 
 // =============================================================== icons (inline SVG, stroke)
 const I = {
@@ -338,7 +338,7 @@ const anyRunning = () => !!currentRun;
 const dis = (extra = true) => (anyRunning() || !extra) ? 'disabled' : '';
 
 // =============================================================== status
-function hasNeeds() { const n = o.needs; return !n.error && (n.images + n.pypi + n.npm + n.apt + n.files) > 0; }
+function hasNeeds() { const n = o.needs; return !n.error && (n.images + n.pypi + n.npm + n.apt + (n.apk || 0) + (n.rpm || 0) + n.files) > 0; }
 function isTemplate() { return !!o.servers && o.servers.gitea.host === 'gitea-1' && !o.servers.is_lab; }
 function infraStatus() {
   if (!o.servers) return { done: 0, total: 0, bad: 0, names: [] };
@@ -456,7 +456,7 @@ function pageOverview() {
   const arrow = key => { const a = s.arrows[key]; return `<div class="arrow ${a.state}" title="${esc(a.why)}">${ic('arrow')}<span class="tip">${a.state === 'ok' ? 'in sync' : a.state === 'stale' ? 'behind' : ''}</span></div>`; };
   const projects = o.needs_files.filter(f => f.name !== 'demo').length || o.needs_files.length;
   html += `<div class="card"><div class="hd"><h3>${ic('zap')}How things flow <small>click a stage</small></h3></div><div class="bd" style="padding-bottom:30px"><div class="pipe">
-    <div class="stage" onclick="go('needs')"><div class="t">${ic('layers')} Projects need</div><div class="v">${n.error ? '!' : n.images + n.pypi + n.npm + n.apt + n.files}</div><div class="s">${n.error ? esc(n.error) : `items from ${projects} project${projects === 1 ? '' : 's'}`}</div></div>
+    <div class="stage" onclick="go('needs')"><div class="t">${ic('layers')} Projects need</div><div class="v">${n.error ? '!' : n.images + n.pypi + n.npm + n.apt + (n.apk || 0) + (n.rpm || 0) + n.files}</div><div class="s">${n.error ? esc(n.error) : `items from ${projects} project${projects === 1 ? '' : 's'}`}</div></div>
     ${arrow('fetch')}
     <div class="stage" onclick="go('fetch')"><div class="t">${ic('box')} Box on this computer</div><div class="v">${o.box ? mb(b.bytes) : '—'}</div><div class="s">${o.box ? `${b.files} files${b.missing_total ? `, <span class="warn">${b.missing_total} missing</span>` : ''}` : 'nothing downloaded yet'}</div></div>
     ${arrow('upload')}
@@ -875,14 +875,14 @@ function searchOut(r) {
 function fetchList(title) {
   const d = o.needs_detail;
   if (!d) return card(title, 'box', `<div class="bad">${esc(o.needs.error)}</div>`);
-  const s = d.summary, total = s.images + s.pypi + s.npm + s.apt + s.files;
+  const s = d.summary, total = s.images + s.pypi + s.npm + s.apt + (s.apk || 0) + (s.rpm || 0) + s.files;
   const ul = (items, fmt = x => `<li>${esc(x)}</li>`, max = 40) => `<ul class="list">${items.slice(0, max).map(fmt).join('') || '<li class="muted">none</li>'}${items.length > max ? `<li class="muted">… ${items.length - max} more</li>` : ''}</ul>`;
-  return card(title, 'box', `<details class="plain"><summary>${ic('chev', 'chev')}${total} items: ${s.images} images · ${s.pypi} Python · ${s.npm} npm · ${s.apt} apt · ${s.files} files, including Gitea, Docker, CoreDNS and k3s themselves</summary>
+  return card(title, 'box', `<details class="plain"><summary>${ic('chev', 'chev')}${total} items: ${s.images} images · ${s.pypi} Python · ${s.npm} npm · ${s.apt} apt · ${s.apk || 0} apk · ${s.rpm || 0} rpm · ${s.files} files, including Gitea, Docker, CoreDNS and k3s themselves</summary>
     <div class="grid2" style="margin-top:12px;font-size:13px">
       <div><b>Images</b>${ul(d.images, i => `<li><code>${esc(i)}</code></li>`)}</div>
       <div><b>Files</b>${ul(d.files, f => `<li>${esc(f.name)} <span class="muted">${esc(f.version)}</span></li>`)}</div>
       <div><b>Python</b>${Object.entries(d.pypi).map(([py, specs]) => `<div class="muted">python ${esc(py)}: ${specs.length}</div>${ul(specs)}`).join('') || ul([])}</div>
-      <div><b>npm</b>${ul(d.npm)}<b>apt</b>${Object.entries(d.apt).map(([dist, pk]) => `<div class="muted">${esc(dist)}</div>${ul(pk)}`).join('') || ul([])}</div></div></details>`);
+      <div><b>npm</b>${ul(d.npm)}${['apt', 'apk', 'rpm'].map(k => `<b>${k}</b>${Object.entries(d[k] || {}).map(([dist, pk]) => `<div class="muted">${esc(dist)}</div>${ul(pk)}`).join('') || ul([])}`).join('')}</div></div></details>`);
 }
 
 // =============================================================== 3 fetch
@@ -964,7 +964,7 @@ function pageUpload() {
   const last = Object.entries(st).filter(([k]) => k !== 'config_image');
   html += card('Upload', 'upload', `<dl class="kv">
       <dt>Status</dt><dd>${u ? (stale ? pill('warn', 'uploaded, box changed since') : pill('ok', 'Gitea has the box')) : pill('', 'nothing uploaded yet')}</dd>
-      ${u ? `<dt>apt distros</dt><dd>${esc((u.distros || []).join(', ') || 'none')}</dd>
+      ${u ? `<dt>OS packages</dt><dd>${esc(['apt ' + ((u.distros || []).join(', ') || 'none'), 'apk ' + ((u.apk_branches || []).join(', ') || 'none'), 'rpm ' + ((u.rpm_distros || []).join(', ') || 'none')].join(' · '))}</dd>
         <dt>Last run</dt><dd>${last.map(([k, v]) => `<span class="chip">${esc(k)}: ${typeof v === 'object' ? Object.entries(v).map(([a, b]) => `${b} ${a}`).join(', ') : esc(v)}</span>`).join(' ') || '—'}</dd>` : ''}
       ${o.box_changes?.new_files ? `<dt>New since</dt><dd>${o.box_changes.new_files} file${o.box_changes.new_files > 1 ? 's' : ''} (${mb(o.box_changes.new_bytes)}) in the box are newer than the last push</dd>` : ''}</dl>
       ${willDo('Opens an SSH tunnel to Gitea and pushes every file of the box into its package registries; files already there are skipped. Ends by building the small config image.', o.servers ? [o.servers.gitea.host] : [], u ? 'a minute for a few new files' : 'five to twenty minutes', false)}`,

@@ -4,7 +4,7 @@ The whole flow on one page. The [tutorial](tutorial/01-the-problem.md) explains 
 this is for the second time.
 
 ```
-# laptop: python 3.11+, ssh, openssl, docker (for apt packages and the lab)
+# laptop: python 3.11+, ssh, openssl, docker (for OS packages and the lab)
 pipx install .                          # from a checkout; not on PyPI yet
 
 outpost init my-platform && cd my-platform

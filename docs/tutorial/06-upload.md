@@ -36,6 +36,8 @@ flowchart LR
 | pypi | PyPI | `https://gitea.lab/api/packages/pkgs/pypi/simple` |
 | npm | npm | `https://gitea.lab/api/packages/pkgs/npm/` |
 | apt | Debian, one suite per distro | `deb https://gitea.lab/api/packages/pkgs/debian bookworm main` |
+| apk | Alpine, one branch per branch | `https://gitea.lab/api/packages/pkgs/alpine/v3.20/main` in `/etc/apk/repositories` |
+| rpm | RPM, one group per distro | `baseurl=https://gitea.lab/api/packages/pkgs/rpm/rocky9` in `outpost.repo` |
 | images | container | `gitea.lab/pkgs/library--python:3.12-slim` |
 
 Images move under `pkgs` like everything else, with their original owner kept inside the
@@ -70,12 +72,18 @@ client configuration files every node will get:
 /etc/apt/sources.list.d/outpost.list      deb [signed-by=...] https://gitea.lab/api/packages/pkgs/debian bookworm main
 /etc/apt/apt.conf.d/99outpost             Acquire::https::CaInfo "/etc/outpost/ca.crt"
 /etc/apt/sources.list, debian.sources     emptied, so apt cannot even try the internet
+/etc/apk/repositories                     https://gitea.lab/api/packages/pkgs/alpine/v3.20/main (or emptied when Gitea has no Alpine branch)
+/etc/apk/keys/pkgs@<fingerprint>.rsa.pub  Gitea's Alpine signing key, under the name apk looks for
+/etc/yum.repos.d/outpost.repo             [outpost-rocky9] baseurl=https://gitea.lab/api/packages/pkgs/rpm/rocky9, gpgkey, sslcacert
+/etc/outpost/gitea-rpm.asc                Gitea's RPM signing key
+/etc/yum.repos.d/rocky.repo, fedora.repo, almalinux-*.repo, centos*.repo   overwritten with a comment: no public mirror reachable
 ```
 
 A Dockerfile copies it in with one line, `COPY --from=config / /`, and every later `RUN
 apt-get`, `pip install` or `npm install` in that build finds Gitea by itself. The image is
 built in memory on the laptop (Outpost has its own small OCI implementation, no Docker needed)
-and only includes apt lines for distros that actually exist in Gitea.
+and only includes apt lines, apk lines, rpm sections and their keys for distros and branches
+that actually exist in Gitea. It holds text files only, so it copies cleanly onto any base image.
 
 `state/upload.json` records what went in; the dashboard uses it to warn when the box changed
 after the last upload.

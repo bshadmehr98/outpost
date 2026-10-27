@@ -82,6 +82,14 @@ The output says how many packages changed on each node and whether a reboot is r
 full distribution mirror would be tens of gigabytes; a list of the packages that face the
 network is a few hundred megabytes and is what most audits ask for.
 
+The upgrade is family-aware: one script reads `/etc/os-release` on the node and runs `apt-get
+update && apt-get upgrade` on Debian and Ubuntu, `apk update && apk upgrade` on Alpine, and
+`dnf makecache && dnf upgrade -y` on Rocky, Alma, Fedora and CentOS Stream (with
+`needs-restarting -r` for the reboot hint where it exists). For RHEL-family servers the needs
+file uses an `rpm:` block (`distro: rocky9`) and `fetch --only rpm`; for Alpine an `apk:` block
+(`branch: v3.20`) and `fetch --only apk`. The node's own distro is tried at `infra setup`, so
+packages uploaded for it are found without editing anything on the node.
+
 ## Rotating the CA: `outpost pki rotate`
 
 Every server trusts one private CA. If `secrets/ca.key` may have leaked, or on a schedule:

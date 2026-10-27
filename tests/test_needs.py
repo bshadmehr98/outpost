@@ -24,7 +24,25 @@ def test_merge_two_files(tmp_path):
     assert needs.apt == {"bookworm": ["curl", "gcc", "libpq-dev"], "noble": ["htop"]}
     assert needs.files == [FileNeed("tool", "1.0", "https://example.com/dl/tool-1.0.tgz", "tool-1.0.tgz")]
     assert needs.sources == ["a.yml", "b.yml"]
-    assert needs.summary() == {"images": 3, "pypi": 3, "npm": 2, "apt": 4, "files": 1}
+    assert needs.summary() == {"images": 3, "pypi": 3, "npm": 2, "apt": 4, "apk": 0, "rpm": 0, "files": 1}
+
+
+def test_apk_and_rpm_blocks_merge_like_apt(tmp_path):
+    needs_dir = tmp_path / "needs"
+    needs_dir.mkdir()
+    (needs_dir / "a.yml").write_text(
+        "apk: {branch: v3.20, packages: [curl, jq]}\n"
+        "rpm:\n  - {distro: rocky9, packages: [curl]}\n  - {distro: fedora40, packages: [git]}\n"
+    )
+    (needs_dir / "b.yml").write_text(
+        "apk:\n  - {branch: v3.20, packages: [curl, git]}\n  - {branch: v3.19, packages: [curl]}\n"
+        "rpm: {distro: rocky9, packages: [curl, jq]}\n"
+    )
+    needs = load_needs(needs_dir)
+    assert needs.apk == {"v3.20": ["curl", "jq", "git"], "v3.19": ["curl"]}
+    assert needs.rpm == {"rocky9": ["curl", "jq"], "fedora40": ["git"]}
+    assert needs.apt == {} and not needs.is_empty()
+    assert needs.summary() == {"images": 0, "pypi": 0, "npm": 0, "apt": 0, "apk": 4, "rpm": 3, "files": 0}
 
 
 def test_empty_and_missing(tmp_path):
@@ -35,6 +53,8 @@ def test_empty_and_missing(tmp_path):
     ("pypi: [{foo: bar}]", "pip specs"),
     ("npm: [chalk]", "name@version"),
     ("apt: {packages: [curl]}", "distro"),
+    ("apk: {packages: [curl]}", "apk needs `branch:`"),
+    ("rpm: [{packages: [curl]}]", "rpm needs `distro:`"),
     ("files: [{url: https://x/y}]", "`name:`"),
     ("pypi: [{file: missing.txt}]", "does not exist"),
 ])
