@@ -94,7 +94,8 @@ def corefile(node_ip: str) -> str:
 def host_files(gitea: GiteaInfo, ca_pem: str, node_ip: str) -> dict[str, str]:
     """Extra files that only make sense on a real host."""
     return {
-        "/etc/docker/daemon.json": json.dumps({"registry-mirrors": [gitea.url], "dns": [node_ip]}, indent=2) + "\n",
+        # no registry-mirrors: images are referenced by their Gitea name, so a bare Docker Hub name fails at once
+        "/etc/docker/daemon.json": json.dumps({"dns": [node_ip]}, indent=2) + "\n",
         f"/etc/docker/certs.d/{gitea.name}/ca.crt": ca_pem,
         "/etc/outpost/Corefile": corefile(node_ip),
         "/etc/outpost/resolv.conf": f"nameserver {node_ip}\n",  # handed to k3s so pods use the node's DNS

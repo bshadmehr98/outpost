@@ -49,13 +49,18 @@ With the organisation `pkgs` and the name `gitea.lab`:
 | pip | `/etc/pip.conf` `index-url` | `https://gitea.lab/api/packages/pkgs/pypi/simple` |
 | npm | `/etc/npmrc` `registry` | `https://gitea.lab/api/packages/pkgs/npm/` |
 | apt | `sources.list.d/outpost.list` | `deb [signed-by=/etc/outpost/gitea-apt.asc] https://gitea.lab/api/packages/pkgs/debian bookworm main` |
-| docker | `daemon.json` `registry-mirrors` | `https://gitea.lab` (images under `library/<name>` and `<owner>/<name>`) |
-| k3s / containerd | `registries.yaml` mirror for `docker.io` | `https://gitea.lab` |
+| docker | `certs.d/gitea.lab/ca.crt`; the image name itself | `gitea.lab/pkgs/<owner>--<image>:<tag>`, e.g. `gitea.lab/pkgs/library--python:3.12-slim` |
+| k3s / containerd | `registries.yaml` with the CA for `gitea.lab`; the image name itself | the same `gitea.lab/pkgs/<owner>--<image>:<tag>` |
 | curl, scripts | generic registry | `https://gitea.lab/api/packages/pkgs/generic/<name>/<version>/<file>` |
 
-Container images are the exception to "everything under `pkgs`": Docker's mirror feature
-asks the mirror for the same path it would ask Docker Hub (`library/python`), so images keep
-their owner. Each owner becomes a Gitea organisation on upload.
+Container images are no exception to "everything under `pkgs`". Upload pushes each one as
+`pkgs/<owner>--<image>`, where the owner is the original one and `library` for official Docker
+Hub images: `python:3.12-slim` becomes `pkgs/library--python:3.12-slim`, `bitnami/redis:7` becomes
+`pkgs/bitnami--redis:7`, `ghcr.io/org/app:1.4` becomes `pkgs/org--app:1.4`. The owner stays in
+the name so that `library/redis` and `bitnami/redis` cannot collide. Dockerfiles, Compose,
+stack and Kubernetes files reference that name explicitly; there is no registry mirror on the
+nodes, so a bare Docker Hub name is rejected by the seal like any other reach for the internet.
+Only one organisation exists in Gitea.
 
 ## Tokens
 

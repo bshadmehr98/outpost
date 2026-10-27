@@ -2,6 +2,14 @@
 
 All notable changes to Outpost. The format follows Keep a Changelog; versions follow SemVer.
 
+## Unreleased
+
+### Changed
+- Container images now live under the one Gitea organisation like every other kind of package, as `<owner>--<image>`: `python:3.12-slim` is uploaded to `<gitea>/pkgs/library--python:3.12-slim`, `bitnami/redis:7` to `<gitea>/pkgs/bitnami--redis:7`, `ghcr.io/org/app:1.4` to `<gitea>/pkgs/org--app:1.4`. No organisation per image owner is created any more.
+- Dockerfiles, Compose, stack and Kubernetes files reference the Gitea copy explicitly (`FROM ${GITEA}/${ORG}/library--python:3.12-slim`). Nothing on a node rewrites image names: `daemon.json` no longer sets `registry-mirrors` and k3s's `registries.yaml` no longer mirrors `docker.io`. A bare Docker Hub name on a sealed node fails at once, like any other reach for the internet. The verification check `docker uses gitea mirror` is replaced by `docker trusts and reaches gitea registry`.
+- The demo and the `hello-python` and `hello-k3s` checks use the explicit names; the dashboard's project scan reads a Gitea name back into the need that produces it (`library--python:3.12-slim` is proposed as `python:3.12-slim`).
+- Migration: re-run `outpost upload` so images land under `pkgs`, re-run `outpost infra setup <name>` so `daemon.json` and `registries.yaml` are rewritten, and change the `FROM` and `image:` lines of your projects to the Gitea names (`outpost init` templates and `demo/` are updated; an existing `demo/` folder is yours to edit).
+
 ## 0.1.0 - 2026-10-26
 
 First public release.

@@ -15,6 +15,7 @@ from pathlib import Path
 
 import yaml
 
+from .. import oci
 from ..config import ConfigError
 from ..needs import parsers
 from ..paths import Platform
@@ -60,6 +61,26 @@ def distro_for_image(image: str) -> str | None:
     return None
 
 
+def needed_image(image: str) -> str | None:
+    """The needs entry behind a FROM line, or None when it cannot be known.
+
+    `${GITEA}/${ORG}/library--python:3.12-slim` and `gitea.internal/pkgs/library--python:3.12-slim` are what a
+    converted Dockerfile says; the need that put them there is `python:3.12-slim`. `bitnami--redis:7` is
+    `bitnami/redis:7`. A `${BASE}` whose tail is not a name on its own is skipped."""
+    tail = image.rsplit("/", 1)[-1]
+    name, sep, tag = tail.partition(":")
+    if name == "config" and "/" in image:  # Outpost's own config image, not something to fetch
+        return None
+    if "$" in image:  # ${REGISTRY}/${ORG}/python:3.12-slim -> python:3.12-slim, if the tail stands on its own
+        if "$" in tail or not re.fullmatch(r"[a-z0-9][a-z0-9._-]*:[A-Za-z0-9._-]+", tail):
+            return None
+        image = tail
+    original = oci.original_ref(name)
+    if original:
+        return f"{original}{sep}{tag}"
+    return image
+
+
 def read_dockerfile(path: Path) -> dict:
     """Images and apt packages a Dockerfile asks for. Build stages and ${ARGS} are left out."""
     text = path.read_text(errors="replace")
@@ -71,12 +92,8 @@ def read_dockerfile(path: Path) -> dict:
             stages.add(stage.lower())
         if image.lower() in stages or image.lower() == "scratch":
             continue
-        if "$" in image:  # ${REGISTRY}/${ORG}/python:3.12-slim -> python:3.12-slim, if the tail stands on its own
-            tail = image.rsplit("/", 1)[-1]
-            if "$" in tail or not re.fullmatch(r"[a-z0-9][a-z0-9._-]*:[A-Za-z0-9._-]+", tail):
-                continue
-            image = tail
-        if image not in images:
+        image = needed_image(image)
+        if image and image not in images:
             images.append(image)
     packages: list[str] = []
     joined = re.sub(r"\\\s*\n", " ", text)

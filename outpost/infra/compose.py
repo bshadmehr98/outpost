@@ -19,6 +19,6 @@ def extra_checks(ctx: common.NodeContext) -> list[tuple[str, str]]:
         (f"compose at pinned version {versions.COMPOSE}", f"docker compose version | grep -q {versions.COMPOSE}"),
         ("compose plugin", "docker compose version"),
         ("buildx plugin", "docker buildx version"),
-        ("docker uses gitea mirror", f"docker info --format '{{{{json .RegistryConfig.Mirrors}}}}' | grep -q {ctx.gitea.name}"),
+        ("docker trusts and reaches gitea registry", common.registry_check(ctx)),
         ("container egress hooked", "iptables -C DOCKER-USER -j OUTPOST"),
     ]

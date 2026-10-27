@@ -6,7 +6,7 @@
   <img alt="version 0.1" src="https://img.shields.io/badge/version-0.1-blue">
   <img alt="python 3.11+" src="https://img.shields.io/badge/python-3.11%2B-3776ab">
   <img alt="dependencies: PyYAML only" src="https://img.shields.io/badge/dependencies-PyYAML%20only-success">
-  <img alt="tests: 127 unit, 20 integration" src="https://img.shields.io/badge/tests-127%20unit%20%C2%B7%2020%20integration-success">
+  <img alt="tests: 134 unit, 20 integration" src="https://img.shields.io/badge/tests-134%20unit%20%C2%B7%2020%20integration-success">
   <img alt="license MIT" src="https://img.shields.io/badge/license-MIT-lightgrey">
 </p>
 
@@ -75,8 +75,10 @@ afternoon:
 - **A real seal.** iptables rejects outbound internet for the host *and* for its containers and
   pods, with a kernel-level backstop in the `security` table that stays effective whatever
   Docker or k3s add to the firewall. Open it on purpose with a logged reason.
-- **Dockerfiles change by one line.** `COPY --from=config / /` brings pip, npm, apt and CA
-  configuration into any build.
+- **Dockerfiles change by two lines.** `FROM` names the Gitea copy of the base image
+  (`${GITEA}/pkgs/library--python:3.12-slim`), and `COPY --from=config / /` brings pip, npm, apt
+  and CA configuration into the build. Nothing on a node rewrites image names: a bare Docker Hub
+  name fails at once, like every other reach for the internet.
 - **CI that cannot cheat.** Gitea Actions runners on the nodes, in host mode: a job is a shell
   script on a sealed node, under the same rules as everything else.
 - **A demo you can audit.** A Flask site whose Dockerfile refuses to build if the internet
@@ -131,7 +133,7 @@ Verifying dev
     ok   docker running
     ok   compose plugin
     ok   buildx plugin
-    ok   docker uses gitea mirror
+    ok   docker trusts and reaches gitea registry
     ok   container egress hooked
     ok   actions runner active
 ```
@@ -169,12 +171,12 @@ apt:   {distro: bookworm, packages: [libpq-dev]}
 files: [{url: https://github.com/jqlang/jq/releases/download/jq-1.7.1/jq-linux-amd64, name: jq, version: "1.7.1"}]
 ```
 
-And one line at the top of each Dockerfile:
+And two lines in each Dockerfile: the base image by its Gitea name, and the config image copied in:
 
 ```dockerfile
 ARG GITEA
 FROM ${GITEA}/pkgs/config:latest AS config
-FROM python:3.12-slim
+FROM ${GITEA}/pkgs/library--python:3.12-slim     # the Gitea copy of python:3.12-slim
 COPY --from=config / /
 # apt-get, pip and npm now use Gitea. Nothing else changes.
 ```
@@ -191,8 +193,10 @@ COPY --from=config / /
 
 Five ideas carry the design:
 
-1. **Gitea is the local internet.** Every client speaks its native protocol to Gitea; images
-   keep their owner (`library/python`) so Docker's mirror feature works unchanged.
+1. **Gitea is the local internet.** Every client speaks its native protocol to Gitea, and
+   everything lives under one organisation: wheels, tarballs, packages, files, and images as
+   `pkgs/<owner>--<image>` (`library--python`, `bitnami--redis`, `org--app` for `ghcr.io/org/app`).
+   Dockerfiles and manifests name that copy explicitly; nothing on a node rewrites names.
 2. **The box is a folder.** A manifest with a SHA-256 per file, optionally packed into signed
    `tar.xz` files for USB sticks or GitHub releases.
 3. **Seal first, install after.** Docker, k3s, CoreDNS and the runner are fetched from Gitea
@@ -290,9 +294,10 @@ Gitea's API is reached through an SSH tunnel, so wherever `ssh gitea-1` works, e
 **Can I use my own Gitea?** Not yet. Outpost installs and configures Gitea with its own
 `app.ini` and certificate so that every later step can assume the layout.
 
-**What about images from ghcr.io or quay.io?** Fetched and uploaded like any other; Docker's
-mirror feature only covers Docker Hub names, so reference them in Dockerfiles as
-`gitea.internal/<owner>/<image>`.
+**What about images from ghcr.io or quay.io?** Fetched, uploaded and referenced like any
+other: `ghcr.io/org/app:1.4` becomes `gitea.internal/pkgs/org--app:1.4`, exactly as
+`python:3.12-slim` becomes `gitea.internal/pkgs/library--python:3.12-slim`. Docker Hub is not a
+special case; a bare `FROM python:3.12-slim` on a sealed node fails at once, on purpose.
 
 **Security updates for the OS?** Not mirrored unless you list the packages. Open egress for a
 window with a reason, run the upgrade, seal. The log keeps the record.
@@ -336,7 +341,7 @@ outpost/
   ui/             the dashboard: server.py, status.py, explain.py (errors into sentences), projects.py, index.html
   lab.py          throwaway servers in Docker
   templates/      what `outpost init` copies, and the lab server's Dockerfile
-tests/            127 unit tests with a fake SSH host and a fake Gitea speaking real HTTP
+tests/            134 unit tests with a fake SSH host and a fake Gitea speaking real HTTP
 tests/integration real Gitea container and Docker Hub; the full flow on the lab (fetch, a Gitea upgrade,
                   backup and restore, compose, swarm, k3s, the demo, a reboot, the dashboard's server side)
 ```

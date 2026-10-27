@@ -31,7 +31,7 @@ outpost check hello-python --infra dev # one check
 Results are kept in `state/check-<infra>.json` and shown in `outpost ui`.
 
 `outpost init` ships two: `hello-python` for Docker-based infrastructures and `hello-k3s`,
-which runs a pod from an image that exists only in Gitea, then a second pod that must fail to reach pypi.org.
+which runs a pod from `$GITEA/$ORG/library--alpine:3.20`, the Gitea copy of `alpine:3.20`, then a second pod that must fail to reach pypi.org.
 
 ## The verification table
 

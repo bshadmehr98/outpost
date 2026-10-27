@@ -4,7 +4,7 @@ Two layers. The unit tests prove the logic with fakes and run in seconds; the in
 tests prove the whole thing against real software and run in minutes.
 
 ```
-.venv/bin/python -m pytest                                   # unit: ~127 tests, ~12 s
+.venv/bin/python -m pytest                                   # unit: ~134 tests, ~12 s
 OUTPOST_INTEGRATION=1 .venv/bin/python -m pytest tests/integration   # real Gitea, Docker Hub, the lab
 ```
 
@@ -36,8 +36,9 @@ What the unit suite covers, by file:
 
 `tests/integration/test_real_gitea.py` starts `gitea/gitea:<pinned version>` in Docker and a
 Docker-in-Docker daemon on a private network, and checks the real registry behaviour: generic,
-PyPI, npm and Debian uploads, pulling `alpine` from Docker Hub and pushing it into Gitea, a
-Docker daemon using Gitea as a mirror, and a build that uses the config image.
+PyPI, npm and Debian uploads, pulling `alpine` from Docker Hub and pushing it into Gitea as
+`pkgs/library--alpine`, a Docker daemon with no mirror pulling it by that name (and failing on the
+bare name), and a build that uses the config image.
 
 `tests/integration/test_full_flow.py` is the tutorial as code. It runs `outpost lab up` in
 `/tmp/outpost-rig`, then the real commands over SSH, in order:

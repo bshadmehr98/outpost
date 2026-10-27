@@ -1,5 +1,7 @@
 """Push a box into Gitea. Every file kind maps to one Gitea package registry.
 
+Everything lands in the one organisation, images included: `python:3.12-slim` becomes
+`<gitea>/pkgs/library--python:3.12-slim` and Dockerfiles reference that name explicitly.
 Already-present files are skipped (Gitea answers 409), so re-uploading a box is cheap.
 At the end the `config` image is built from the same client files every node gets,
 so a Dockerfile only needs:  COPY --from=gitea.internal/pkgs/config / /
@@ -53,11 +55,11 @@ def upload_box(box: Path, client: GiteaClient, gitea: GiteaInfo, ca_pem: str, lo
     images = box / "images"
     if images.exists():
         log("==> images")
+        client.ensure_org(gitea.org)
         for layout in sorted(p for p in images.iterdir() if (p / "index.json").exists()):
             ref = oci.parse_ref(oci.layout_ref(layout))
-            client.ensure_org(ref.owner)
-            client.push_image(layout, ref.owner, ref.image, ref.tag)
-            log(f"    {ref.short}  ->  {gitea.name}/{ref.repo}:{ref.tag}")
+            client.push_image(layout, gitea.org, ref.mirror_name, ref.tag)
+            log(f"    {ref.short}  ->  {oci.gitea_ref(gitea, ref)}")
             tally("images", "uploaded")
 
     stats["config_image"] = push_config_image(client, gitea, ca_pem, boxmod.distros_in(box), log=log)

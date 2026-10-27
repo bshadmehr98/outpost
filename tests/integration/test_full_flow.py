@@ -25,6 +25,7 @@ from outpost.cli import main
 pytestmark = [pytest.mark.skipif(os.environ.get("OUTPOST_INTEGRATION") != "1", reason="set OUTPOST_INTEGRATION=1"), pytest.mark.integration]
 
 GITEA_IP = lab.SERVERS["lab-gitea"][0]
+GITEA_NAME = "gitea.lab"   # the name `lab up` writes into servers.yml
 
 
 def sh(*cmd, check=True, **kw):
@@ -128,7 +129,10 @@ def test_4_infra_setup_and_verify(rig):
     report = json.loads((rig / "state" / "verify-dev.json").read_text())
     assert report["result"] == "ok", json.dumps(report, indent=1)
     names = {r["name"] for r in report["nodes"]["lab-node-1"]}
-    assert {"public internet rejected", "docker uses gitea mirror", "container egress hooked", "apt sources are gitea only", "node dns for containers running"} <= names
+    assert {"public internet rejected", "docker trusts and reaches gitea registry", "container egress hooked", "apt sources are gitea only", "node dns for containers running"} <= names
+    # nothing rewrites image names: a bare Docker Hub name is rejected, the Gitea name of the same image works
+    assert ssh("lab-node-1", "docker pull alpine:3.20", check=False).returncode != 0
+    assert ssh("lab-node-1", f"docker pull {GITEA_NAME}/pkgs/library--alpine:3.20", check=False).returncode == 0
     assert main(["--dir", str(rig), "infra", "verify", "dev"]) == 0
 
 
@@ -152,8 +156,8 @@ def test_7_swarm(rig):
     assert main(["--dir", str(rig), "infra", "setup", "prod"]) == 0
     nodes = ssh("lab-node-1", "docker node ls --format '{{.Hostname}} {{.Status}} {{.ManagerStatus}}'").stdout
     assert "lab-node-1 Ready Leader" in nodes and "lab-node-2 Ready" in nodes
-    # a service pulls its image through the Gitea mirror on whichever node runs it
-    ssh("lab-node-1", "docker service rm hello >/dev/null 2>&1; docker service create -q --name hello --replicas 2 --constraint node.role==worker alpine:3.20 sleep 300")
+    # a service pulls its image from Gitea, by its Gitea name, on whichever node runs it
+    ssh("lab-node-1", f"docker service rm hello >/dev/null 2>&1; docker service create -q --name hello --replicas 2 --constraint node.role==worker {GITEA_NAME}/pkgs/library--alpine:3.20 sleep 300")
     for _ in range(60):
         if "2/2" in ssh("lab-node-1", "docker service ls --format '{{.Replicas}}' --filter name=hello").stdout:
             break

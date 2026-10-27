@@ -74,6 +74,30 @@ def test_debian_upload(client, fake_gitea, tmp_path):
     assert "PGP" in client.debian_key()
 
 
+def test_upload_puts_every_image_under_the_organisation(client, fake_gitea, tmp_path):
+    """python:3.12-slim lands as pkgs/library--python, bitnami/redis as pkgs/bitnami--redis; no other org is made."""
+    from outpost import box as boxmod
+    from outpost import oci
+    from outpost.gitea.upload import upload_box
+    from outpost.infra.clients import GiteaInfo
+    box = tmp_path / "box"
+    for ref in ("python:3.12-slim", "bitnami/redis:7", "ghcr.io/org/app:1.4"):
+        r = oci.parse_ref(ref)
+        oci.build_layout({"/hello": (ref.encode(), 0o644)}, box / "images" / r.safe_name, r.short)
+    boxmod.write_manifest(box)
+    gitea = GiteaInfo(name="gitea.internal", ip="10.0.0.5", org="pkgs")
+    lines = []
+    stats = upload_box(box, client, gitea, "CA PEM", log=lines.append)
+    assert stats["images"] == {"uploaded": 3, "exists": 0}
+    stored = {repo for repo, _tag in fake_gitea.manifests}
+    assert stored == {"pkgs/library--python", "pkgs/bitnami--redis", "pkgs/org--app", "pkgs/config"}
+    assert ("pkgs/library--python", "3.12-slim") in fake_gitea.manifests and ("pkgs/org--app", "1.4") in fake_gitea.manifests
+    assert fake_gitea.orgs == {"pkgs"}, "no organisation per image owner"
+    assert not any(path.startswith("/v2/library/") for _m, path in fake_gitea.requests)
+    assert "    python:3.12-slim  ->  gitea.internal/pkgs/library--python:3.12-slim" in lines
+    assert "    bitnami/redis:7  ->  gitea.internal/pkgs/bitnami--redis:7" in lines
+
+
 def test_error_surfaces_server_text(fake_gitea, tmp_path):
     client = GiteaClient(Http(fake_gitea.url), "pkgs")
     with pytest.raises(ValueError, match="not a wheel"):

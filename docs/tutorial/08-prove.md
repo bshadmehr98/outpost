@@ -26,7 +26,8 @@ ok   docker run --rm outpost-check-hello                 → Hello from Outpost
 ok   docker run --rm outpost-check-hello python -c "...urlopen('https://pypi.org')..." && echo LEAK || echo SEALED   → SEALED
 ```
 
-**hello-k3s** (for `k3s`) runs a pod from `alpine:3.20`, which exists only in Gitea, reads its
+**hello-k3s** (for `k3s`) runs a pod from `gitea.lab/pkgs/library--alpine:3.20`, the Gitea copy
+of `alpine:3.20`, reads its
 log, then runs a second pod that must *fail* to reach pypi.org. That second pod exists because
 of a hole we found and fixed; the [decisions page](../development/decisions.md) tells the story.
 
@@ -54,7 +55,7 @@ The most convincing proof is a failure. On the node, try to install something th
 Gitea:
 
 ```
-ssh -F lab/ssh_config lab-node-1 'docker run --rm python:3.12-slim pip install requests'
+ssh -F lab/ssh_config lab-node-1 'docker run --rm gitea.lab/pkgs/library--python:3.12-slim pip install requests'
 ```
 
 It fails within a second with pip naming Gitea's index as the only place it looked. Nothing

@@ -19,7 +19,7 @@ flowchart LR
         gp["PyPI registry<br/>pkgs/pypi/simple"]
         gn["npm registry<br/>pkgs/npm/"]
         ga["Debian registry<br/>pkgs/debian, suite bookworm"]
-        gi["container registry<br/>library/python, grafana/grafana, ..."]
+        gi["container registry<br/>pkgs/library--python, pkgs/grafana--grafana, ..."]
         gc["config image<br/>pkgs/config:latest"]
     end
     f --> gf
@@ -36,12 +36,21 @@ flowchart LR
 | pypi | PyPI | `https://gitea.lab/api/packages/pkgs/pypi/simple` |
 | npm | npm | `https://gitea.lab/api/packages/pkgs/npm/` |
 | apt | Debian, one suite per distro | `deb https://gitea.lab/api/packages/pkgs/debian bookworm main` |
-| images | container | `gitea.lab/library/python:3.12-slim` |
+| images | container | `gitea.lab/pkgs/library--python:3.12-slim` |
 
-Images keep their original namespace rather than moving under `pkgs`: `python:3.12-slim`
-becomes `library/python:3.12-slim`, `grafana/grafana` stays `grafana/grafana`. That is what
-lets a Docker daemon use Gitea as a transparent *mirror* for Docker Hub names, so `FROM
-python:3.12-slim` in a Dockerfile works unchanged.
+Images move under `pkgs` like everything else, with their original owner kept inside the
+name: `python:3.12-slim` becomes `pkgs/library--python:3.12-slim`, `grafana/grafana:10.2`
+becomes `pkgs/grafana--grafana:10.2`, `ghcr.io/org/app:1.4` becomes `pkgs/org--app:1.4`. The
+owner stays so that `library/redis` and `bitnami/redis` cannot collide. Dockerfiles and
+manifests then name that copy explicitly, `FROM gitea.lab/pkgs/library--python:3.12-slim`;
+nothing on a node rewrites a Docker Hub name, and a bare `FROM python:3.12-slim` fails at once
+on a sealed node, which is the honest answer. The upload log prints every mapping:
+
+```
+==> images
+    python:3.12-slim  ->  gitea.lab/pkgs/library--python:3.12-slim
+    alpine:3.20       ->  gitea.lab/pkgs/library--alpine:3.20
+```
 
 Before sending anything, upload verifies every file against `manifest.json`. Gitea answers
 409 for a file it already has, so re-uploading a box costs one request per file and no
@@ -79,7 +88,7 @@ Or from the Gitea host, which is allowed to reach itself:
 ```
 ssh -F lab/ssh_config lab-gitea
 curl -sk https://gitea.lab/api/packages/pkgs/pypi/simple/flask/
-curl -sk https://gitea.lab/v2/library/python/tags/list
+curl -sk https://gitea.lab/v2/pkgs/library--python/tags/list
 exit
 ```
 

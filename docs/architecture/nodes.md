@@ -13,8 +13,8 @@ on the server; nothing is a daemon of Outpost's own.
 | `/etc/pip.conf` | `index-url` and `cert` → Gitea | 3 clients |
 | `/etc/npmrc`, `/usr/local/etc/npmrc` | `registry` and `cafile` → Gitea | 3 |
 | `/etc/apt/apt.conf.d/99outpost` | `Acquire::https::CaInfo` → the CA | 3 |
-| `/etc/docker/daemon.json` | `registry-mirrors: [https://gitea.lab]`, `dns: [<node ip>]` | 3 |
-| `/etc/docker/certs.d/gitea.lab/ca.crt` | the CA for Docker's registry client | 3 |
+| `/etc/docker/daemon.json` | `dns: [<node ip>]`; no `registry-mirrors`, images are named by their Gitea copy | 3 |
+| `/etc/docker/certs.d/gitea.lab/ca.crt` | the CA for Docker's registry client, so `gitea.lab/pkgs/...` pulls are trusted | 3 |
 | `/etc/profile.d/outpost.sh` | `PIP_INDEX_URL`, `NPM_CONFIG_REGISTRY` and their CA variables for shells | 3 |
 | `/etc/outpost/gitea-apt.asc` | Gitea's apt signing key | 4 apt |
 | `/etc/apt/sources.list.d/outpost.list` | one `deb` line per distro Gitea serves | 4 |
@@ -63,14 +63,16 @@ systemd unit for `dockerd` ordered after `outpost-egress.service`. The Compose a
 plugins go to `/usr/local/lib/docker/cli-plugins/`. Nodes of a Compose infrastructure do not
 know about each other; each is a place to run `docker compose up`.
 
-Extra checks: Docker running, `docker info` shows the Gitea mirror, `DOCKER-USER` jumps to `OUTPOST`.
+Extra checks: Docker running, Docker trusts and reaches Gitea's registry (`certs.d` has the CA and
+`https://gitea.lab/v2/` answers), `DOCKER-USER` jumps to `OUTPOST`.
 
 ## Swarm
 
 Docker as above on every node. The first node runs `docker swarm init --advertise-addr <ip>`
 (plus `args:` from `servers.yml`); the others join as workers with the worker token. Each
 node's IP is added to the others' allow lists so the overlay network (2377, 7946, 4789) is not
-sealed. A service scheduled on any node pulls its image through that node's mirror setting.
+sealed. A service scheduled on any node pulls its image from Gitea by its Gitea name
+(`gitea.lab/pkgs/library--alpine:3.20`); every node trusts the same CA.
 
 Extra checks: swarm active, plus the Compose ones.
 
@@ -78,15 +80,16 @@ Extra checks: swarm active, plus the Compose ones.
 
 | path | what |
 |---|---|
-| `/etc/rancher/k3s/registries.yaml` | mirrors `docker.io` and `gitea.lab` to `https://gitea.lab`, with the CA |
+| `/etc/rancher/k3s/registries.yaml` | `gitea.lab` endpoint `https://gitea.lab` with the CA; no `docker.io` entry |
 | `/var/lib/rancher/k3s/agent/images/k3s-airgap-images-amd64.tar.gz` | every image k3s itself needs (pause, coredns, traefik, metrics-server, local-path), imported at start |
 | `/usr/local/bin/k3s` | the binary; the official `install.sh` is run with `INSTALL_K3S_SKIP_DOWNLOAD=true` |
 | `k3s.service` | `server --node-ip <ip> --resolv-conf /etc/outpost/resolv.conf <args>` |
 
 The first node is the server; setup waits until the node is `Ready` and the default service
 account exists. Further nodes are agents joined with `K3S_URL` and the server's node token.
-Application images are pulled by containerd through the mirror, so `image: alpine:3.20` in a
-manifest resolves to Gitea. The lab passes `--kubelet-arg=eviction-hard=...` through `args:`
+Application images are pulled by containerd from Gitea by their Gitea name, so a manifest says
+`image: gitea.lab/pkgs/library--alpine:3.20`; a bare `alpine:3.20` would ask Docker Hub and be
+rejected by the seal. The lab passes `--kubelet-arg=eviction-hard=...` through `args:`
 because the kubelet's default of "evict below 10 % free disk" is often true on a laptop.
 
 Extra checks: k3s installed, `registries.yaml` points at Gitea, service active.

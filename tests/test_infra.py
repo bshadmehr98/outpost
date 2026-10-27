@@ -22,8 +22,16 @@ def test_client_files_point_everything_at_gitea():
     image = clients.config_image_files(G, "CA", "KEY", ["bookworm"])
     assert image["/etc/apt/sources.list.d/debian.sources"][0].startswith(b"# Disabled by Outpost")
     host = clients.host_files(G, "CA", "10.0.0.11")
-    assert json.loads(host["/etc/docker/daemon.json"]) == {"registry-mirrors": ["https://gitea.internal"], "dns": ["10.0.0.11"]}
-    assert "/etc/docker/certs.d/gitea.internal/ca.crt" in host
+    daemon = json.loads(host["/etc/docker/daemon.json"])
+    assert daemon == {"dns": ["10.0.0.11"]} and "registry-mirrors" not in daemon   # images are named by their Gitea copy, nothing is rewritten
+    assert host["/etc/docker/certs.d/gitea.internal/ca.crt"] == "CA"
+    registries = k3s.registries_yaml(CTX)
+    assert "docker.io" not in registries and "ca_file: /etc/outpost/ca.crt" in registries and 'endpoint:\n      - "https://gitea.internal"' in registries
+    for module in (compose, swarm):
+        checks = dict(module.extra_checks(CTX))
+        assert not any("mirror" in name or "mirror" in cmd for name, cmd in checks.items())
+        assert "test -s /etc/docker/certs.d/gitea.internal/ca.crt" in checks["docker trusts and reaches gitea registry"]
+        assert "https://gitea.internal/v2/" in checks["docker trusts and reaches gitea registry"]
     assert "bind 10.0.0.11" in host["/etc/outpost/Corefile"] and "hosts /etc/hosts" in host["/etc/outpost/Corefile"]
     assert host["/etc/outpost/resolv.conf"] == "nameserver 10.0.0.11\n"
     assert G.config_image == "gitea.internal/pkgs/config:latest"
@@ -102,7 +110,7 @@ def test_k3s_server_and_agent():
     agent = FakeHost("k2", facts={"ip": "10.0.0.32", "codename": "noble"}, responses=[(r"api/v1/version", "ok")])
     result = k3s.setup(CTX, [server, agent])
     assert result["server"] == "k1"
-    assert "docker.io:" in server.files["/etc/rancher/k3s/registries.yaml"] and "ca_file: /etc/outpost/ca.crt" in server.files["/etc/rancher/k3s/registries.yaml"]
+    assert "docker.io" not in server.files["/etc/rancher/k3s/registries.yaml"] and "ca_file: /etc/outpost/ca.crt" in server.files["/etc/rancher/k3s/registries.yaml"]
     assert server.ran("INSTALL_K3S_SKIP_DOWNLOAD=true INSTALL_K3S_EXEC='server --node-ip 10.0.0.31 --resolv-conf /etc/outpost/resolv.conf'")
     custom = NodeContext(gitea=G, ca_pem="CA", args="--disable traefik")
     s2 = FakeHost("k9", facts={"ip": "10.0.0.39"}, responses=[(r"api/v1/version", "ok"), (r"node-token", "T")])

@@ -23,13 +23,14 @@ Then open, for the lab:
 ## The project
 
 `demo/` in your platform folder is a small Flask site served by gunicorn, with a Dockerfile
-whose first three lines are the only Outpost-specific thing in it:
+whose first five lines are the only Outpost-specific thing in it: the config stage, and the
+base image named by its Gitea copy.
 
 ```dockerfile
 ARG GITEA=gitea.internal
 ARG ORG=pkgs
 FROM ${GITEA}/${ORG}/config:latest AS config
-FROM python:3.12-slim
+FROM ${GITEA}/${ORG}/library--python:3.12-slim
 COPY --from=config / /
 RUN apt-get update && apt-get install -y --no-install-recommends curl
 COPY requirements.txt .

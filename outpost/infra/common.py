@@ -71,6 +71,15 @@ def curl(ctx: NodeContext, url: str, out: str) -> str:
     return f"curl --cacert {clients.PATH_CA} -fsSL {shlex.quote(url)} -o {shlex.quote(out)}"
 
 
+def registry_check(ctx: NodeContext) -> str:
+    """Docker has the CA for Gitea's registry and the registry answers /v2/ (200, or 401 asking for a token).
+    Pulls nothing, so it holds on a sealed node with an empty registry."""
+    g = ctx.gitea
+    return (f"test -s /etc/docker/certs.d/{g.name}/ca.crt && "
+            f"code=$(curl --cacert {clients.PATH_CA} -sS --max-time 10 -o /dev/null -w '%{{http_code}}' {g.url}/v2/) && "
+            f"{{ [ \"$code\" = 200 ] || [ \"$code\" = 401 ]; }} && echo \"/v2/ -> $code\"")
+
+
 def prepare_node(host, ctx: NodeContext, log=print) -> dict:
     log(f"==> {host.alias}: connecting and configuring the clients")
     facts = host.facts()

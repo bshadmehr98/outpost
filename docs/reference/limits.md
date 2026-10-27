@@ -12,7 +12,11 @@ Things Outpost does not do, on purpose or not yet.
   or a CI job).
 - **OS security updates** are mirrored only for the packages you list in `needs/os-updates.yml`;
   `outpost infra upgrade` installs them. A full distro mirror is tens of gigabytes and out of scope.
-- **Non-Docker-Hub images** must be referenced by their Gitea name in Dockerfiles and manifests.
+- **Every image is referenced by its Gitea name** in Dockerfiles and manifests:
+  `gitea.internal/pkgs/library--python:3.12-slim`, `gitea.internal/pkgs/org--app:1.4`. There is no
+  registry mirror on the nodes and nothing rewrites names, so a bare `FROM python:3.12` fails at
+  once on a sealed node. One edited line per Dockerfile is the price of knowing where every
+  image comes from.
 - **IPv6** outbound is rejected entirely when sealed; Gitea is reached over IPv4.
 - **Ubuntu and Debian hosts** are what the setup is written for. Other systemd distributions
   mostly work (the trust-store step knows RHEL too) but are untested.

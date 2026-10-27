@@ -1,8 +1,9 @@
-# The only change from a normal Dockerfile: copy Outpost's config files in first.
+# Two changes from a normal Dockerfile: the base image is named by its Gitea copy, and
+# Outpost's config files are copied in first.
 ARG GITEA
 ARG ORG=pkgs
 FROM ${GITEA}/${ORG}/config:latest AS config
-FROM python:3.12-slim
+FROM ${GITEA}/${ORG}/library--python:3.12-slim
 COPY --from=config / /
 RUN apt-get update && apt-get install -y --no-install-recommends curl && rm -rf /var/lib/apt/lists/*
 RUN pip install --no-cache-dir flask

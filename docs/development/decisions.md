@@ -100,9 +100,19 @@ Mac. Packages without wheels fall back to an sdist, fetched without dependencies
 reliably; running the real one in a throwaway container of the right distro is simpler and
 exact. Download the full tree, because a slim image lacks what a full image has.
 
-**Docker's registry mirror only applies to Docker Hub names.** `FROM ghcr.io/x/y` is not
-mirrored and must be written with the Gitea name. Images keep their owner on upload for the
-mirror to work at all (`library/python`).
+**All images under one organisation, referenced explicitly.** The first version kept images
+under their original owner (`library/python`, `grafana/grafana`) and pointed Docker's
+`registry-mirrors` and containerd's `docker.io` mirror at Gitea, so that `FROM python:3.12-slim`
+kept working unchanged. Two things were wrong with it. The mirror only covers Docker Hub names,
+so `ghcr.io/org/app` was already a special case that had to be written with the Gitea name, and
+each owner became a Gitea organisation of its own, unlike every other kind of package. And a
+mirror hides where an image really comes from: a Dockerfile that says `python:3.12-slim` looks
+like it reaches Docker Hub, and whether it does depends on a daemon setting nobody reads. Now
+every image lives next to the wheels and packages as `pkgs/<owner>--<image>` (the owner stays in
+the name so `library/redis` and `bitnami/redis` cannot collide), every image is written the same
+way, `gitea.internal/pkgs/library--python:3.12-slim`, and a bare Docker Hub name fails at once
+on a sealed node like every other reach for the internet. The cost is one extra edited line per
+Dockerfile, and it is the line that tells the truth.
 
 **A token with `--scopes all` is a root password.** The first version kept an all-scope admin
 token in `secrets/gitea-token` because it was convenient. It could create users and change the

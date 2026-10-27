@@ -1,7 +1,9 @@
 """k3s: a small Kubernetes. The first node is the server, the rest are agents.
 
 k3s ships an "airgap images" tarball with everything the cluster itself needs; we place it
-where k3s looks and tell containerd to fetch application images from Gitea.
+where k3s looks and tell containerd to trust Gitea's certificate. Application images are
+referenced by their Gitea name (`gitea.internal/pkgs/library--alpine:3.20`); there is no
+`docker.io` mirror, so a bare Docker Hub name fails at once on a sealed node.
 """
 
 from .. import versions
@@ -14,8 +16,6 @@ def registries_yaml(ctx: common.NodeContext) -> str:
     g = ctx.gitea
     return (
         "mirrors:\n"
-        "  docker.io:\n"
-        f"    endpoint:\n      - \"{g.url}\"\n"
         f"  \"{g.name}\":\n"
         f"    endpoint:\n      - \"{g.url}\"\n"
         "configs:\n"

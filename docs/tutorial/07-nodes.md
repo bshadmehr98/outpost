@@ -38,7 +38,8 @@ What each step does on the server:
    trusts Gitea's certificate whichever store it reads. Setup then checks that the node can
    reach `https://gitea.lab/api/v1/version` and stops with a clear message if it cannot.
 3. **Clients.** The same files that went into the config image are written on the host, plus
-   `/etc/docker/daemon.json` with Gitea as registry mirror and the node's own DNS server, and
+   `/etc/docker/daemon.json` with the node's own DNS server (no registry mirror: images are
+   named by their Gitea copy, and Docker trusts it through `certs.d`), and
    `/etc/profile.d/outpost.sh` with `PIP_INDEX_URL` and friends for interactive shells.
 4. **Apt.** Gitea's apt signing key is fetched, the stock sources are moved to
    `/etc/apt/sources.disabled/`, and `outpost.list` is written with one line per distro Gitea
@@ -54,7 +55,7 @@ What each step does on the server:
 7. **Runtime.** For `compose` and `swarm`: Docker's static binaries, a systemd unit ordered
    after the egress unit, the Compose and buildx CLI plugins. The first Swarm node runs
    `docker swarm init`, the others join as workers with the token. For `k3s`: `registries.yaml`
-   that mirrors `docker.io` to Gitea, the k3s air-gap image bundle placed where k3s looks, and
+   that gives containerd the CA for Gitea, the k3s air-gap image bundle placed where k3s looks, and
    the official installer run with `INSTALL_K3S_SKIP_DOWNLOAD=true`; agents join the server
    with its node token.
 8. **Runner.** The official Gitea Actions runner is installed on the first node of each
@@ -94,7 +95,7 @@ ok   egress seal survives reboot
 ok   routed traffic sealed too (containers, pods)
 ```
 
-plus per type: Docker running and using the Gitea mirror, container egress hooked, swarm
+plus per type: Docker running and trusting Gitea's registry, container egress hooked, swarm
 active, k3s active with `registries.yaml` pointing at Gitea, actions runner active. The result
 goes to `state/verify-<name>.json`; the dashboard shows it per node.
 
@@ -106,8 +107,9 @@ goes to `state/verify-<name>.json`; the dashboard shows it per node.
 ssh -F lab/ssh_config lab-node-1
 cat /etc/pip.conf /etc/docker/daemon.json /etc/apt/sources.list.d/outpost.list
 iptables -S OUTPOST                           # the chain
-docker pull alpine:3.20                       # works, via Gitea
-docker run --rm alpine:3.20 wget -T 3 https://pypi.org   # fails at once
+docker pull gitea.lab/pkgs/library--alpine:3.20     # works: the Gitea copy of alpine:3.20
+docker pull alpine:3.20                             # fails at once: Docker Hub is rejected, nothing rewrites the name
+docker run --rm gitea.lab/pkgs/library--alpine:3.20 wget -T 3 https://pypi.org   # fails at once
 exit
 ```
 

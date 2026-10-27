@@ -57,3 +57,17 @@ def test_read_dockerfile_recovers_image_behind_registry_variable(tmp_path):
     df = tmp_path / "Dockerfile"
     df.write_text("ARG REG\nFROM ${REG}:3000/${ORG}/python:3.12-slim\nFROM ${BASE}\nFROM ${REG}/x/${IMG}\n")
     assert projects.read_dockerfile(df)["images"] == ["python:3.12-slim"]
+
+
+def test_read_dockerfile_maps_gitea_names_back_to_needs(tmp_path):
+    """A converted Dockerfile names the Gitea copy; a scan must propose the need that produces it."""
+    df = tmp_path / "Dockerfile"
+    df.write_text("ARG GITEA=gitea.internal\nARG ORG=pkgs\nFROM ${GITEA}/${ORG}/config:latest AS config\n"
+                  "FROM ${GITEA}/${ORG}/library--python:3.12-slim\nCOPY --from=config / /\n"
+                  "FROM gitea.internal/pkgs/bitnami--redis:7\nFROM gitea.internal/pkgs/org--app:1.4\n"
+                  "FROM gitea.internal/pkgs/library--python:3.12-slim\n")
+    assert projects.read_dockerfile(df)["images"] == ["python:3.12-slim", "bitnami/redis:7", "org/app:1.4"]
+    assert projects.needed_image("${GITEA}/${ORG}/library--alpine:3.20") == "alpine:3.20"
+    assert projects.needed_image("postgres:16") == "postgres:16"
+    assert projects.needed_image("${BASE}") is None
+    assert projects.scan(tmp_path)["images"] == ["python:3.12-slim", "bitnami/redis:7", "org/app:1.4"]

@@ -27,6 +27,28 @@ def test_ref_names():
         oci.parse_ref("python@sha256:abc")
 
 
+@pytest.mark.parametrize("ref,mirror_name,full", [
+    ("python:3.12-slim", "library--python", "gitea.internal/pkgs/library--python:3.12-slim"),
+    ("bitnami/redis:7", "bitnami--redis", "gitea.internal/pkgs/bitnami--redis:7"),
+    ("ghcr.io/org/app:1.4", "org--app", "gitea.internal/pkgs/org--app:1.4"),
+    ("alpine", "library--alpine", "gitea.internal/pkgs/library--alpine:latest"),
+])
+def test_every_image_lives_under_the_organisation(ref, mirror_name, full):
+    """library/redis and bitnami/redis must not collide, so the owner stays inside the name."""
+    from outpost.infra.clients import GiteaInfo
+    r = oci.parse_ref(ref)
+    assert r.mirror_name == mirror_name
+    assert oci.gitea_ref(GiteaInfo(name="gitea.internal", ip="10.0.0.5", org="pkgs"), r) == full
+    assert oci.OWNER_SEP == "--"
+
+
+def test_original_ref_inverts_mirror_name():
+    assert oci.original_ref("library--python") == "python"
+    assert oci.original_ref("bitnami--redis") == "bitnami/redis"
+    assert oci.original_ref("org--app") == "org/app"
+    assert oci.original_ref("python") is None and oci.original_ref("--x") is None and oci.original_ref("x--") is None
+
+
 def test_build_layout_is_consistent(tmp_path):
     layout = oci.build_layout({"/etc/pip.conf": (b"[global]\n", 0o644)}, tmp_path / "img", "x/config:latest")
     index = json.loads((layout / "index.json").read_text())

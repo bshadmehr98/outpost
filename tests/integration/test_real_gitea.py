@@ -3,7 +3,7 @@
     OUTPOST_INTEGRATION=1 pytest tests/integration -v
 
 Needs Docker and internet. Starts gitea/gitea:28.2.0 in a container, reached by its bridge IP so that
-both this machine and a Docker-in-Docker daemon (used to test the registry-mirror path) can use the
+both this machine and a Docker-in-Docker daemon (used to pull an image by its Gitea name) can use the
 same URL. Containers are removed afterwards.
 """
 
@@ -115,29 +115,35 @@ def test_debian(gitea, tmp_path):
 
 
 def test_pull_from_docker_hub_and_push_to_gitea(gitea, tmp_path):
+    """`alpine:3.20` from Docker Hub lands under the one organisation as `pkgs/library--alpine`, like every image."""
     ref = oci.parse_ref("alpine:3.20")
     layout = oci.Registry(Http("https://registry-1.docker.io")).pull(ref, tmp_path / "alpine")
     assert oci.layout_ref(layout) == "alpine:3.20"
-    gitea.ensure_org("library")
-    gitea.push_image(layout, "library", "alpine", "3.20")
-    gitea.push_image(layout, "library", "alpine", "outpost-only")  # a tag Docker Hub does not have
-    assert ("library/alpine", "outpost-only") not in {}  # pulled back through a real Docker daemon in the next test
+    assert ref.mirror_name == "library--alpine"
+    gitea.push_image(layout, "pkgs", ref.mirror_name, "3.20")
+    gitea.push_image(layout, "pkgs", ref.mirror_name, "outpost-only")  # a tag Docker Hub does not have
+    listed = gitea.registry().call("GET", "/v2/pkgs/library--alpine/tags/list", "pkgs/library--alpine")
+    assert listed.status == 200 and {"3.20", "outpost-only"} <= set(listed.json()["tags"])
+    assert gitea.http.get("/api/v1/orgs/library").status == 404  # no organisation per image owner any more
 
 
-def test_docker_daemon_uses_gitea_as_mirror(gitea):
-    """A Docker daemon with Gitea as registry mirror pulls `alpine:outpost-only`, a tag that only exists in Gitea."""
+def test_docker_daemon_pulls_by_gitea_name(gitea):
+    """A Docker daemon with no registry mirror pulls `<gitea>/pkgs/library--alpine:outpost-only` by its explicit
+    name, a tag that only exists in Gitea. A bare `alpine:outpost-only` is not rewritten and must fail."""
     host = URL.split("//")[1]
     sh("docker", "rm", "-f", DIND, check=False)
     sh("docker", "run", "-d", "--privileged", "--name", DIND, "--network", NET, "-e", "DOCKER_TLS_CERTDIR=", "docker:dind",
-       f"--registry-mirror={URL}", f"--insecure-registry={host}")
+       f"--insecure-registry={host}")
     for _ in range(60):
         if sh("docker", "exec", DIND, "docker", "info", check=False).returncode == 0:
             break
         time.sleep(2)
-    pulled = sh("docker", "exec", DIND, "docker", "pull", "alpine:outpost-only", check=False)
+    assert "Registry Mirrors" not in sh("docker", "exec", DIND, "docker", "info").stdout
+    pulled = sh("docker", "exec", DIND, "docker", "pull", f"{host}/pkgs/library--alpine:outpost-only", check=False)
     assert pulled.returncode == 0, pulled.stderr
-    out = sh("docker", "exec", DIND, "docker", "run", "--rm", "alpine:outpost-only", "cat", "/etc/alpine-release").stdout
+    out = sh("docker", "exec", DIND, "docker", "run", "--rm", f"{host}/pkgs/library--alpine:outpost-only", "cat", "/etc/alpine-release").stdout
     assert out.startswith("3.20")
+    assert sh("docker", "exec", DIND, "docker", "pull", "alpine:outpost-only", check=False).returncode != 0
 
 
 def test_config_image_is_usable_in_a_build(gitea, tmp_path):
@@ -148,9 +154,9 @@ def test_config_image_is_usable_in_a_build(gitea, tmp_path):
     gitea.push_image(layout, "pkgs", "config", "latest")
     (tmp_path / "ctx").mkdir()
     (tmp_path / "ctx" / "Dockerfile").write_text(
-        f"FROM {host}/pkgs/config:latest AS config\nFROM {host}/library/alpine:3.20\nCOPY --from=config / /\n"
+        f"FROM {host}/pkgs/config:latest AS config\nFROM {host}/pkgs/library--alpine:3.20\nCOPY --from=config / /\n"
         "CMD cat /etc/pip.conf /etc/apt/sources.list.d/outpost.list\n")
-    # build inside dind, whose daemon trusts the plain-http Gitea and mirrors from it
+    # build inside dind, whose daemon trusts the plain-http Gitea; both images are named by their Gitea copy
     sh("docker", "cp", str(tmp_path / "ctx"), f"{DIND}:/ctx")
     sh("docker", "exec", DIND, "docker", "build", "-q", "-t", "outpost-it-config", "/ctx")
     out = sh("docker", "exec", DIND, "docker", "run", "--rm", "outpost-it-config").stdout
