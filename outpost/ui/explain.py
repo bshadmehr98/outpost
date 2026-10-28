@@ -1,7 +1,7 @@
 """Turn a failed run into a sentence and a fix, and a finished run into one line of history.
 
-  explain(log)               the first known failure in a log -> {"title", "fix"} or None
-  summarize(args, log, exit) "Uploaded 312 files, 2 new" / "Fetched 1.2 GB" / "failed: ..." for the Activity page
+    explain(log)                  the first known failure in a log -> {"title", "fix", "line"} or None
+    summarize(args, log, exit)    "Uploaded 312 new files to Gitea" / "failed: ..." for the Activity page
 
 Both only read text. The patterns are the errors people hit in the first week; unknown errors
 still show the last lines of the log, so nothing is hidden, only translated when we can.
@@ -177,6 +177,7 @@ FAILURES = [
 
 
 def explain(log: str) -> dict | None:
+    """The first known failure in the last 80 lines of a log, as {"title", "fix", "line"}, or None."""
     tail = "\n".join(log.strip().splitlines()[-80:])
     for pattern, title, fix in FAILURES:
         m = re.search(pattern, tail)
@@ -185,78 +186,126 @@ def explain(log: str) -> dict | None:
     return None
 
 
-def _n(pattern: str, log: str, group: int = 1) -> str | None:
-    m = re.search(pattern, log)
-    return m.group(group) if m else None
+def summarize(args: list[str], log: str, exit_code: int | None) -> str:
+    """One line for the Activity page: what the run did, or why it failed.
 
-
-def summarize(args: list[str], log: str, exit_code: int | None) -> str:  # noqa: C901 too complex; split into named steps in the refactor
-    """One human line for the Activity page."""
-    cmd = args[0] if args else ""
+    Args:
+        args: the command line after `outpost`, such as ["infra", "setup", "dev"].
+        exit_code: None when the run was cut short.
+    """
     if exit_code is None:
         return "was cut short"
     if exit_code != 0:
-        e = explain(log)
-        return "failed: " + (e["title"] if e else "see the output")
-    if cmd == "fetch":
-        box = _n(r"Box: (\d+ files, \d+ MB)", log)
-        return f"Fetched everything; the box has {box}" if box else "Fetched"
-    if cmd == "upload":
-        parts = re.findall(r"(\w+): (\d+) uploaded, (\d+) already there", log)
-        up = sum(int(p[1]) for p in parts)
-        there = sum(int(p[2]) for p in parts)
-        return f"Uploaded {up} new file{'s' if up != 1 else ''} to Gitea" + (
-            f", {there} were already there" if there else ""
-        )
-    if cmd == "gitea" and len(args) > 1 and args[1] == "setup":
-        v = _n(r"Gitea (\S+) is up at (\S+)", log)
-        return f"Gitea {v} is installed and sealed" if v else "Gitea setup finished"
-    if cmd == "gitea" and len(args) > 1 and args[1] == "backup":
-        mb = _n(r"backup done: \S+ \((\d+ MB)\)", log)
-        return f"Backed up Gitea ({mb})" if mb else "Backed up Gitea"
-    if cmd == "gitea" and len(args) > 1 and args[1] == "restore":
+        failure = explain(log)
+        return "failed: " + (failure["title"] if failure else "see the output")
+    summarizer = SUMMARIZERS.get(args[0] if args else "")
+    return (summarizer(args, log) if summarizer else None) or "finished"
+
+
+# -- one summarizer per command: (args, log) -> a line, or None for "finished" ----------------------
+
+
+def _fetch(args: list[str], log: str) -> str:
+    box = _found(r"Box: (\d+ files, \d+ MB)", log)
+    return f"Fetched everything; the box has {box}" if box else "Fetched"
+
+
+def _upload(args: list[str], log: str) -> str:
+    tallies = re.findall(r"(\w+): (\d+) uploaded, (\d+) already there", log)
+    uploaded = sum(int(t[1]) for t in tallies)
+    there = sum(int(t[2]) for t in tallies)
+    return f"Uploaded {uploaded} new file{_plural(uploaded)} to Gitea" + (
+        f", {there} were already there" if there else ""
+    )
+
+
+def _gitea(args: list[str], log: str) -> str | None:
+    action = _arg(args, 1)
+    if action == "setup":
+        version = _found(r"Gitea (\S+) is up at (\S+)", log)
+        return f"Gitea {version} is installed and sealed" if version else "Gitea setup finished"
+    if action == "backup":
+        size = _found(r"backup done: \S+ \((\d+ MB)\)", log)
+        return f"Backed up Gitea ({size})" if size else "Backed up Gitea"
+    if action == "restore":
         return "Restored Gitea from a backup"
-    if cmd == "infra" and len(args) > 2:
-        action, name = args[1], args[2]
-        nodes = len(re.findall(r"^  \S+: all good", log, re.M))
-        what = "Set up and verified" if action == "setup" else "Verified" if action == "verify" else "Upgraded"
-        return f"{what} {name}: {nodes} node{'s' if nodes != 1 else ''} all good" if nodes else f"{what} {name}"
-    if cmd == "check":
-        r = _n(r"(\d+/\d+) checks passed", log)
-        return (
-            f"Smoke checks on {args[args.index('--infra') + 1] if '--infra' in args else '?'}: {r} passed"
-            if r
-            else "Smoke checks passed"
-        )
-    if cmd == "demo" and len(args) > 1 and args[1] == "push":
-        n = _n(r"committed (\d+) file", log)
-        return (
-            f"Pushed the demo ({n} file{'s' if n != '1' else ''} changed); Gitea Actions is deploying it"
-            if n
-            else "Pushed the demo; nothing had changed"
-        )
-    if cmd == "egress" and len(args) > 2:
-        return {
-            "seal": "Switched the internet off on " + args[1],
-            "open": "Switched the internet ON for " + args[1],
-            "status": "Checked the seal on " + args[1],
-        }.get(args[2], "egress")
-    if cmd == "lab":
-        return "Created the lab servers" if len(args) > 1 and args[1] == "up" else "Removed the lab servers"
-    if cmd == "pack":
-        return "Packed the box into signed archives"
-    if cmd == "needs":
-        return "Listed the needs"
-    if cmd == "hosts":
-        return "Refreshed the machine facts"
-    if cmd == "pki":
-        return "Rotated the CA and reissued certificates"
-    if cmd == "report":
-        return "Wrote the proof report"
-    if cmd == "proxy":
-        return (
-            "Set up and verified the egress proxy"
-            if len(args) > 1 and args[1] == "setup"
-            else "Verified the egress proxy"
-        )
-    return "finished"
+    return None
+
+
+def _infra(args: list[str], log: str) -> str | None:
+    if len(args) <= 2:
+        return None
+    action, name = args[1], args[2]
+    nodes = len(re.findall(r"^  \S+: all good", log, re.M))
+    what = "Set up and verified" if action == "setup" else "Verified" if action == "verify" else "Upgraded"
+    return f"{what} {name}: {nodes} node{_plural(nodes)} all good" if nodes else f"{what} {name}"
+
+
+def _check(args: list[str], log: str) -> str:
+    passed = _found(r"(\d+/\d+) checks passed", log)
+    infra = args[args.index("--infra") + 1] if "--infra" in args else "?"
+    return f"Smoke checks on {infra}: {passed} passed" if passed else "Smoke checks passed"
+
+
+def _demo(args: list[str], log: str) -> str | None:
+    if _arg(args, 1) != "push":
+        return None
+    files = _found(r"committed (\d+) file", log)
+    if not files:
+        return "Pushed the demo; nothing had changed"
+    return f"Pushed the demo ({files} file{'s' if files != '1' else ''} changed); Gitea Actions is deploying it"
+
+
+def _egress(args: list[str], log: str) -> str | None:
+    if len(args) <= 2:
+        return None
+    server, action = args[1], args[2]
+    return {
+        "seal": "Switched the internet off on " + server,
+        "open": "Switched the internet ON for " + server,
+        "status": "Checked the seal on " + server,
+    }.get(action, "egress")
+
+
+def _lab(args: list[str], log: str) -> str:
+    return "Created the lab servers" if _arg(args, 1) == "up" else "Removed the lab servers"
+
+
+def _proxy(args: list[str], log: str) -> str:
+    return "Set up and verified the egress proxy" if _arg(args, 1) == "setup" else "Verified the egress proxy"
+
+
+def _always(line: str):
+    return lambda args, log: line
+
+
+SUMMARIZERS = {
+    "fetch": _fetch,
+    "upload": _upload,
+    "gitea": _gitea,
+    "infra": _infra,
+    "check": _check,
+    "demo": _demo,
+    "egress": _egress,
+    "lab": _lab,
+    "proxy": _proxy,
+    "pack": _always("Packed the box into signed archives"),
+    "needs": _always("Listed the needs"),
+    "hosts": _always("Refreshed the machine facts"),
+    "pki": _always("Rotated the CA and reissued certificates"),
+    "report": _always("Wrote the proof report"),
+}
+
+
+def _found(pattern: str, log: str) -> str | None:
+    """The first group of the first match of pattern in log, or None."""
+    m = re.search(pattern, log)
+    return m.group(1) if m else None
+
+
+def _arg(args: list[str], index: int) -> str | None:
+    return args[index] if len(args) > index else None
+
+
+def _plural(count: int) -> str:
+    return "s" if count != 1 else ""

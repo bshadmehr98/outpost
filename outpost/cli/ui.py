@@ -1,6 +1,6 @@
 """outpost ui: the dashboard, a local web page over the same workspace."""
 
-from outpost.ui.server import serve
+from outpost.ui import serve
 from outpost.workspace import Workspace
 
 

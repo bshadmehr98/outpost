@@ -612,7 +612,7 @@ function pageApps() {
 // =============================================================== keep it healthy
 function pageMaintain() {
   const g = o.state.gitea, bk = o.state.backup, list = o.backups || [];
-  let html = head('Keep it healthy', 'The few things a platform needs over time: a backup of Gitea, versions kept current, security updates, and a certificate that can be replaced.', '');
+  let html = head('Keep it healthy', 'The few things a workspace needs over time: a backup of Gitea, versions kept current, security updates, and a certificate that can be replaced.', '');
   html += explain(`<p>Gitea is the one copy of everything your servers depend on. <b>Back it up</b> after each upload. Outpost also backs it up by itself before upgrading Gitea.</p>`,
     `<p>A backup pauses Gitea for the time a tar of its data takes (under a minute for a few gigabytes), copies the archive to <code>backups/</code> here, and removes it from the server. Restore puts it back on the same server, keeping the current data aside. Keep backups somewhere that is not this laptop.</p>`);
   html += card('Backups of Gitea', 'box', `${g ? '' : notice('warn', '<b>Gitea is not installed yet.</b>Nothing to back up.')}
@@ -641,7 +641,7 @@ function pageMaintain() {
     <dt>Set up</dt><dd>${pst.when ? esc(when(pst.when)) + (pst.tinyproxy ? ', tinyproxy ' + esc(pst.tinyproxy) : '') : pill('warn', 'not yet')}</dd>
     <dt>Verified</dt><dd>${pst.verify ? pill(pst.verify.result === 'ok' ? 'ok' : 'bad', pst.verify.result === 'ok' ? 'allowed names pass, others refused' : 'problems') + ' <span class="muted">' + esc(when(pst.verify.when)) + '</span>' : pill('', 'never')}</dd></dl>
     ${willDo('Installs tinyproxy from Gitea on the proxy host, writes the allow list, starts it as its own user, and seals the host with one exception for that user. Nodes already set up get the proxy settings.', [px.host], 'a minute or two', false)}`
-    : `<p style="margin:0;color:var(--ink-2)">None. No sealed workload can reach any name outside the platform. If an application must call a third-party API (an SMS or e-mail provider), add the names under <b>Egress proxy</b> in step 1; see docs/architecture/proxy.md.</p>`,
+    : `<p style="margin:0;color:var(--ink-2)">None. No sealed workload can reach any name outside the workspace. If an application must call a third-party API (an SMS or e-mail provider), add the names under <b>Egress proxy</b> in step 1; see docs/architecture/proxy.md.</p>`,
     px ? `<button class="primary" ${dis(!!g)} onclick="run('maintain', ['proxy','setup'])">${ic('play')}Set up the proxy</button><button ${dis(!!pst.when)} onclick="run('maintain', ['proxy','verify'])">${ic('shield')}Verify the proxy</button>${cmdHint(['proxy', 'setup'])}` : `<button class="sm" onclick="go('servers')">Add names in step 1</button>`);
   html += card('Evidence', 'file', `<p style="margin:0;color:var(--ink-2)">The <b>proof report</b> is one page built from what the last commands recorded: which machines, their seal state, every verification table, the smoke checks and what the demo reports. Print it or save it for whoever needs to be convinced. It needs no server; refresh the machines and re-run Verify first if you want it fresh.</p>`,
     `<a class="btn" href="/report.html" target="_blank" rel="noopener">${ic('ext')}Open the proof report</a>${cmdHint(['report'])}`);
@@ -682,7 +682,7 @@ function labPanel() {
       <tr><td><code>lab-k3s</code></td><td>k3s server (<b>k8s</b>), optional</td><td class="mono muted">172.31.252.30</td></tr></table>
     <div class="rows" style="margin-top:14px"><div class="row"><div class="l">${ic('cpu')}Status</div>${up ? pill('ok', o.lab.running.length + ' running: ' + o.lab.running.join(', ')) : pill('', 'not running')}</div></div>
     ${o.servers && !o.servers.is_lab && !isTemplate() && up ? notice('warn', '<b>The lab is running, but servers.yml points at other servers.</b>Create the lab again to switch this folder to it.') : ''}
-    ${up && isTemplate() ? notice('info', '<b>A lab is already running on this computer,</b> made from another platform folder. Create it here to take it over.') : ''}`;
+    ${up && isTemplate() ? notice('info', '<b>A lab is already running on this computer,</b> made from another workspace. Create it here to take it over.') : ''}`;
   const body2 = body + willDo('Builds a small Ubuntu server image and starts four containers from it on a private Docker network. Writes servers.yml and lab/ssh_config so every other step talks to them.', ['this computer\'s Docker'], 'about a minute the first time', true);
   const foot = `<button class="primary" ${dis(docker)} onclick="run('servers', ['lab','up'])">${ic('play')}${up ? 'Recreate lab' : 'Create lab'}</button>
     <button ${dis(docker)} onclick="run('servers', ['lab','up','--small'])">${up ? 'Recreate' : 'Create'} without k3s</button>
@@ -789,7 +789,7 @@ function pageNeeds() {
       <button class="xs ghost danger" onclick="deleteNeed('${esc(f.file)}')">${ic('trash')}</button></span></div>
       ${f.error ? `<div class="bad" style="font-size:13px;margin-top:6px">${ic('alert')} ${esc(f.error)}</div>` : `<div class="chips">${chip(s.images, 'image')}${chip(s.pypi, 'Python package')}${chip(s.npm, 'npm package')}${chip(s.apt, 'apt package')}${chip(s.files, 'file')}</div>`}
       ${f.raw?.folder ? `<div class="hint">from ${esc(f.raw.folder)}</div>` : ''}
-      ${f.name === 'demo' ? `<div class="hint">The demo project in <code>demo/</code> that ships with a new platform; step 7 deploys it. Delete it once you have your own.</div>` : ''}
+      ${f.name === 'demo' ? `<div class="hint">The demo project in <code>demo/</code> that ships with a new workspace; step 7 deploys it. Delete it once you have your own.</div>` : ''}
       ${editing ? yamlEditor(f.file) : ''}</div>`;
   }
   html += card('Projects', 'layers', plist);
@@ -802,7 +802,7 @@ function pageNeeds() {
     <div class="hint">Looks three levels deep for lockfiles and Dockerfiles, skipping node_modules and virtualenvs. Nothing in that folder is changed.</div><div id="scan-msg"></div>`;
   if (ui.needsTab === 'upload') add += `<div class="grid2"><div><label class="f">Project name</label><input type="text" id="up-name" placeholder="my-api"></div>
     <div><label class="f">Lockfile</label><input type="file" id="up-file" style="font-size:13px"></div></div>
-    <div class="actions" style="margin-top:12px"><button class="primary" onclick="uploadLockfile()">${ic('upload')}Upload and read</button><span class="hint" style="margin:0">Stored under <code>needs/&lt;project&gt;/</code>, so the platform folder stays self-contained.</span></div><div id="scan-msg"></div>`;
+    <div class="actions" style="margin-top:12px"><button class="primary" onclick="uploadLockfile()">${ic('upload')}Upload and read</button><span class="hint" style="margin:0">Stored under <code>needs/&lt;project&gt;/</code>, so the workspace stays self-contained.</span></div><div id="scan-msg"></div>`;
   if (ui.proposal) add += proposalEditor();
   html += card('Add a project', 'plus', add);
   html += searchCard();
@@ -1047,7 +1047,7 @@ function pageDeploy() {
   if (d && !st && !ui.demoBusy && !ui.demoError) setTimeout(demoStatus, 0);  // first visit: ask Gitea and the nodes once
   const ready = Object.entries(urls).filter(([, u]) => u.set_up);
   let html = head('Deploy', 'A real project, pushed to Gitea, built and deployed by Gitea Actions on the sealed nodes.', ready.length ? `${ready.length} target${ready.length > 1 ? 's' : ''}` : '', 6);
-  html += explain(`<p><code>demo/</code> in your platform folder is a small Flask site with pinned dependencies, a Dockerfile, and deploy files for Compose, Swarm and k3s.
+  html += explain(`<p><code>demo/</code> in your workspace is a small Flask site with pinned dependencies, a Dockerfile, and deploy files for Compose, Swarm and k3s.
     <b>Push</b> commits it into the <code>demo</code> repository in Gitea together with a workflow written from <code>servers.yml</code>. Gitea Actions then runs it on the <b>Outpost runners</b>:
     each node got one during setup, and jobs run on the nodes themselves, which can reach nothing but Gitea.</p>`,
     `<p>The workflow has a <b>build</b> job on a node with Docker (apt and pip from Gitea; the Dockerfile <i>refuses to build</i> if the public internet answers) that pushes the image into Gitea's registry,
@@ -1058,7 +1058,7 @@ function pageDeploy() {
   if (!o.servers) return html + notice('warn', '<b>No servers yet.</b>Fill in servers.yml in step 1.');
   const files = o.demo.files || [];
   html += card('The project', 'folder', `${o.demo.local ? `<div class="chips">${files.map(f => `<span class="chip">${esc(f)}</span>`).join('')}</div>
-      <div class="hint">In <code>${esc(o.root)}/demo</code>. Its pip packages come from <code>needs/demo.yml</code>, so they are in the box and in Gitea.</div>` : `<div class="muted">Not in this platform folder yet; Push copies it in first.</div>`}
+      <div class="hint">In <code>${esc(o.root)}/demo</code>. Its pip packages come from <code>needs/demo.yml</code>, so they are in the box and in Gitea.</div>` : `<div class="muted">Not in this workspace yet; Push copies it in first.</div>`}
     <table style="margin-top:14px"><tr><th>Infrastructure</th><th>Type</th><th>Runs on</th><th>Opens at</th><th>Status</th></tr>
     ${Object.entries(urls).map(([n, u]) => { const h = st?.serving?.[n]?.health; return `<tr><td><b>${esc(n)}</b></td><td>${TYPES[u.type]}</td><td><code>${esc(u.node)}</code> port ${u.port}</td>
       <td>${u.url ? `<a href="${esc(u.url)}" target="_blank" rel="noopener">${esc(u.url)} ${ic('ext')}</a>` : '<span class="muted">after setup</span>'}</td>
@@ -1121,7 +1121,7 @@ function pageProve() {
     <li><b>A project needs a new package.</b> Add it to its lockfile; <b>Fetch</b>, then <b>Upload</b>. The Overview tells you when the box or Gitea is behind.</li>
     <li><b>A build fails reaching the internet.</b> It fails within a second and names the host. Use <i>Do we have…?</i> in step 2 to see whether the package is already in the box, otherwise add it.</li>
     <li><b>A new server.</b> Add it to servers.yml in step 1 and run <b>Set up</b> for its infrastructure. Existing nodes are left alone.</li>
-    <li><b>Keep it in git.</b> The platform folder is the whole state. Commit it without <code>secrets/</code>, <code>box/</code> and <code>lab/</code>; the template .gitignore already does that.</li></ul>`);
+    <li><b>Keep it in git.</b> The workspace is the whole state. Commit it without <code>secrets/</code>, <code>box/</code> and <code>lab/</code>; the template .gitignore already does that.</li></ul>`);
   return html;
 }
 function egress(action) { const t = $('eg-target').value, reason = $('eg-reason').value.trim(); ui.egressTarget = t; run('prove', ['egress', t, action, ...(reason && action !== 'status' ? ['--reason', reason] : [])]); }

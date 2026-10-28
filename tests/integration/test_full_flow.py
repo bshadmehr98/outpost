@@ -45,7 +45,7 @@ RIG = Path(os.environ.get("OUTPOST_RIG_DIR", "/tmp/outpost-rig"))
 
 @pytest.fixture(scope="module")
 def rig():
-    """A platform folder whose servers are the lab containers, exactly what `outpost lab up` gives a user."""
+    """A workspace whose servers are the lab containers, exactly what `outpost lab up` gives a user."""
     shutil.rmtree(RIG, ignore_errors=True)
     assert main(["init", str(RIG)]) == 0
     assert main(["--dir", str(RIG), "lab", "up"]) == 0
@@ -386,11 +386,11 @@ def test_10_reboot_keeps_the_seal_and_the_apps(rig):
 
 def test_11_dashboard_endpoints_against_the_rig(rig):
     """The dashboard's server-side pieces, against real state and real machines."""
-    from outpost.ui import server
+    from outpost.ui import overview, refresh_hosts
     from outpost.workspace import Workspace
 
     workspace = Workspace(rig)
-    data = server.overview(workspace)
+    data = overview(workspace)
     assert data["report"]["ok"] and set(data["hosts"]) >= {"lab-gitea", "lab-node-1"} and data["drift"] == {}
-    fresh = server.refresh_hosts(workspace, ["lab-node-1"])
+    fresh = refresh_hosts(workspace, ["lab-node-1"])
     assert fresh["lab-node-1"]["workloads"]["compose_projects"] == ["demo-dev"]

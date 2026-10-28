@@ -120,3 +120,21 @@ def test_runs_and_search(tmp_path):
 def test_preflight_lists_tools(tmp_path):
     names = [c["name"] for c in status.preflight(Workspace(tmp_path))]
     assert names[:3] == ["ssh", "openssl", "docker"] and "pip" in names
+
+
+def test_one_bad_image_ref_does_not_make_every_image_unneeded(tmp_path):
+    """Bug: one needs image that did not parse (a digest) emptied the wanted set, so box_changes listed
+    every image in the box as unneeded."""
+    p = Workspace(tmp_path)
+    (p.box_dir / "images" / "redis_7").mkdir(parents=True)
+    (p.box_dir / "images" / "old_1").mkdir(parents=True)
+    n = Needs(images=["redis:7", "python@sha256:" + "a" * 64])
+    assert status.box_changes(p, n)["unneeded"] == ["image old_1"]
+    assert status.box_status(p, n)["missing"]["images"] == ["redis:7", "python@sha256:" + "a" * 64]
+
+
+def test_box_changes_does_not_call_python_dependencies_unneeded(tmp_path):
+    p = Workspace(tmp_path)
+    (p.box_dir / "pypi").mkdir(parents=True)
+    (p.box_dir / "pypi" / "werkzeug-3.0.0-py3-none-any.whl").write_bytes(b"x")
+    assert status.box_changes(p, Needs(pypi={"3.12": ["flask==3.0.0"]}))["unneeded"] == []

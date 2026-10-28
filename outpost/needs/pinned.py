@@ -7,8 +7,10 @@ tinyproxy is the distro's own package, so it is fetched for the proxy host's dis
 servers.yml names (`egress_proxy.distro`), or the one `outpost hosts` saw on the server.
 """
 
+from pathlib import Path
+
 from outpost import versions
-from outpost.config import ConfigError, ProxyConfig
+from outpost.config import ConfigError, Mirrors, ProxyConfig
 from outpost.distros import is_apt_distro, os_family, rpm_distro_of_host, split_rpm_distro
 from outpost.hosts import cached_facts
 from outpost.needs.model import FileNeed, Needs, add_unique
@@ -18,20 +20,37 @@ from outpost.system import AirGappedSystem
 PROXY_PACKAGE = "tinyproxy"
 
 
-def all_needs(system: AirGappedSystem) -> Needs:
+def all_needs(system: AirGappedSystem, skip_unknown_proxy_distro: bool = False) -> Needs:
     """Everything to fetch: the needs files, the pinned downloads for the infrastructure types in
     servers.yml, and tinyproxy for the egress proxy host's distro when servers.yml has an egress proxy.
 
+    Args:
+        skip_unknown_proxy_distro: leave tinyproxy out, instead of raising, while the proxy host's
+            distro is unknown or wrong (the dashboard shows the rest).
+
     Raises:
-        ConfigError: a needs file is wrong, or the proxy host's distro is unknown.
+        ConfigError: a needs file or mirrors.yml is wrong, or the proxy host's distro is unknown.
     """
-    needs = load_needs(system.workspace.needs_dir)
-    add_pinned_files(needs, versions.pinned_files(system.mirrors, system.servers.infra_types))
+    needs = needs_and_pinned_files(system.workspace.needs_dir, system.mirrors, system.servers.infra_types)
     proxy = system.servers.egress_proxy
     if proxy:
         facts = None if proxy.distro else cached_facts(system.workspace).get(proxy.host)
-        add_proxy_package(needs, proxy, facts)
+        try:
+            add_proxy_package(needs, proxy, facts)
+        except ConfigError:
+            if not skip_unknown_proxy_distro:
+                raise
     return needs
+
+
+def needs_and_pinned_files(needs_dir: Path, mirrors: Mirrors, infra_types: set[str]) -> Needs:
+    """The needs files and the pinned downloads, without tinyproxy. all_needs() starts from this; the
+    dashboard uses it alone while servers.yml does not load.
+
+    Raises:
+        ConfigError: a needs file is wrong.
+    """
+    return add_pinned_files(load_needs(needs_dir), versions.pinned_files(mirrors, infra_types))
 
 
 def add_pinned_files(needs: Needs, pinned_files: list[dict]) -> Needs:

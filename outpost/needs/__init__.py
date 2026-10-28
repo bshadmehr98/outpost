@@ -31,7 +31,7 @@ A needs file:
 
     model.py              FileNeed, NpmNeed, Needs
     needs_file.py         load_needs(), read_needs_file(): one reader per kind
-    pinned.py             all_needs(), add_pinned_files(), add_proxy_package(), proxy_package_need()
+    pinned.py             all_needs(), needs_and_pinned_files(), add_pinned_files(), add_proxy_package(), proxy_package_need()
     python_lockfiles.py   requirements, poetry, uv, Pipfile -> pip specs
     js_lockfiles.py       package-lock, pnpm, yarn -> NpmNeed
 
@@ -41,7 +41,14 @@ Code outside this folder uses only the names below.
 from outpost.needs.js_lockfiles import read_js_lockfile
 from outpost.needs.model import FileNeed, Needs, NpmNeed
 from outpost.needs.needs_file import load_needs, read_needs_file
-from outpost.needs.pinned import PROXY_PACKAGE, add_pinned_files, add_proxy_package, all_needs, proxy_package_need
+from outpost.needs.pinned import (
+    PROXY_PACKAGE,
+    add_pinned_files,
+    add_proxy_package,
+    all_needs,
+    needs_and_pinned_files,
+    proxy_package_need,
+)
 from outpost.needs.python_lockfiles import read_python_lockfile
 
 __all__ = [
@@ -53,6 +60,7 @@ __all__ = [
     "add_proxy_package",
     "all_needs",
     "load_needs",
+    "needs_and_pinned_files",
     "proxy_package_need",
     "read_js_lockfile",
     "read_needs_file",

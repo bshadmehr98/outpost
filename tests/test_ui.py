@@ -1,4 +1,5 @@
 import json
+import re
 import threading
 import time
 import urllib.request
@@ -20,8 +21,12 @@ def ui(workspace_dir):
     server.shutdown()
 
 
-def call(url, method="GET", body=None):
-    req = urllib.request.Request(url, method=method, data=json.dumps(body).encode() if body is not None else None)
+def call(url, method="GET", body=None, headers=None):
+    """A request the way the page makes it: a JSON body says so in Content-Type."""
+    data = json.dumps(body).encode() if body is not None else None
+    req = urllib.request.Request(url, method=method, data=data, headers=headers or {})
+    if data is not None and "Content-Type" not in (headers or {}):
+        req.add_header("Content-Type", "application/json")
     try:
         with urllib.request.urlopen(req) as resp:
             return resp.status, resp.read()
@@ -215,12 +220,12 @@ def test_server_status_rejects_odd_aliases(ui):
 
 def test_ssh_config_problems_are_messages_and_the_environment_still_counts(workspace_dir, monkeypatch, tmp_path):
     from outpost import ssh
-    from outpost.ui.server import server_status, ssh_check
+    from outpost.ui import reach_server, server_status
 
     workspace = Workspace(workspace_dir)
     monkeypatch.setenv("OUTPOST_SSH_CONFIG", str(tmp_path / "missing"))
     try:
-        for check in (ssh_check, server_status):
+        for check in (reach_server, server_status):
             result = check(workspace, "node-1")
             assert result["ok"] is False and "does not exist" in result["message"]
         # servers.yml that does not load: OUTPOST_SSH_CONFIG is still the choice
@@ -228,9 +233,9 @@ def test_ssh_config_problems_are_messages_and_the_environment_still_counts(works
         config.write_text("Host x\n")
         monkeypatch.setenv("OUTPOST_SSH_CONFIG", str(config))
         workspace.servers_file.write_text("gitea: [not, a, mapping]\n")
-        from outpost.ui.server import _choose_ssh_config
+        from outpost.ui.reach import choose_ssh_config
 
-        assert _choose_ssh_config(workspace) is None
+        assert choose_ssh_config(workspace) is None
         assert ["-F", str(config)] == ssh.options.ssh_options(5)[-2:]
     finally:
         monkeypatch.delenv("OUTPOST_SSH_CONFIG")
@@ -277,6 +282,60 @@ def test_servers_form_round_trips_the_egress_proxy(ui, workspace_dir):
 
 
 def test_proxy_commands_are_allowed_from_the_page():
-    from outpost.ui.server import ALLOWED_COMMANDS
+    from outpost.ui import ALLOWED_COMMANDS
 
     assert "proxy" in ALLOWED_COMMANDS
+
+
+def test_every_get_route_answers(ui, workspace_dir):
+    """The routes index.html reads, against a fresh workspace: none of them errors."""
+    from outpost.ui.server import DELETE_ROUTES, GET_PREFIX_ROUTES, GET_ROUTES, POST_ROUTES, PUT_ROUTES
+
+    for path in GET_ROUTES:
+        status, body = call(ui + path + ("?name=servers.yml" if path == "/api/file" else "?q=flask"))
+        assert status == 200, (path, body[:200])
+    page = (Path(__file__).parents[1] / "outpost" / "ui" / "index.html").read_text()
+    asked = set(re.findall(r"api\(['`](/[a-z/-]+)", page))
+    served = set(GET_ROUTES) | set(PUT_ROUTES) | set(POST_ROUTES) | set(DELETE_ROUTES) | set(GET_PREFIX_ROUTES)
+    assert len(asked) > 10 and asked <= served, asked - served
+    assert call(ui + "/api/runs/20260101-000000-needs")[0] == 200 and call(ui + "/api/run/nope")[0] == 400
+    assert set(GET_PREFIX_ROUTES) == {"/api/run/", "/api/runs/"}
+    assert call(ui + "/api/nothing")[0] == 404
+    status, body = call(ui + "/report.html")
+    assert status == 200 and b"What this workspace is" in body
+
+
+def test_a_broken_mirrors_yml_shows_as_a_needs_error_not_a_blank_page(ui, workspace_dir):
+    """Bug: mirrors.yml was read outside the guarded block, so one bad mirrors.yml made all of
+    /api/overview a 400 and the dashboard showed nothing."""
+    (workspace_dir / "mirrors.yml").write_text("pypi: [not: a url\n")
+    status, body = call(ui + "/api/overview")
+    data = json.loads(body)
+    assert status == 200 and "mirrors.yml" in data["needs"]["error"] and data["needs_detail"] is None
+    assert data["servers"]["gitea"]["host"] and data["box_status"]["missing_total"] == 0
+
+
+def test_needs_detail_is_what_fetch_gets_including_tinyproxy(ui, workspace_dir):
+    """The Needs page shows needs.all_needs: tinyproxy is there once the proxy host's distro is known,
+    and left out (not an error) while it is not."""
+    servers = workspace_dir / "servers.yml"
+    servers.write_text(servers.read_text() + "\negress_proxy: {allow: [api.twilio.com]}\n")
+    data = json.loads(call(ui + "/api/overview")[1])
+    assert data["needs_detail"] and "tinyproxy" not in json.dumps(data["needs_detail"]["apt"])
+    servers.write_text(servers.read_text().replace("allow: [api.twilio.com]", "allow: [api.twilio.com], distro: noble"))
+    data = json.loads(call(ui + "/api/overview")[1])
+    assert "tinyproxy" in data["needs_detail"]["apt"]["noble"]
+    assert "tinyproxy (noble)" in data["box_status"]["missing"]["apt"]
+
+
+def test_backups_are_listed_from_the_workspace(ui, workspace_dir):
+    backups = workspace_dir / "backups"
+    backups.mkdir()
+    (backups / "gitea-20260101-000000.tar.gz").write_bytes(b"x" * 3)
+    assert json.loads(call(ui + "/api/backups")[1]) == [
+        {
+            "file": "backups/gitea-20260101-000000.tar.gz",
+            "bytes": 3,
+            "when": json.loads(call(ui + "/api/backups")[1])[0]["when"],
+        }
+    ]
