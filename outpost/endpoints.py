@@ -16,12 +16,11 @@ from dataclasses import dataclass, field
 from urllib.parse import quote
 
 from outpost import hosts
+from outpost.client_config import PRIVATE_NETS
 from outpost.config import GiteaConfig, ProxyConfig
 from outpost.ssh import SshError
 from outpost.system import AirGappedSystem
 from outpost.workspace import STATE_GITEA, STATE_PROXY
-
-PRIVATE_NETS = ("10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16")  # reached directly, never through the proxy
 
 
 @dataclass(frozen=True)

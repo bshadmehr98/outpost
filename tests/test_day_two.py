@@ -215,12 +215,12 @@ def test_infra_upgrade_runs_apk_or_dnf_on_other_families(workspace_dir):
 
 def test_docker_install_restarts_the_daemon_on_a_version_change():
     from outpost.endpoints import GiteaEndpoint
-    from outpost.infra import common
+    from outpost.infra import node
     from outpost.infra.context import NodeContext
 
     ctx = NodeContext(gitea=GiteaEndpoint("gitea.internal", "10.0.0.5", "pkgs"), ca_pem="CA")
     host = FakeHost(responses=[(r"docker --version", "Docker version 29.0.0, build x")])
-    common.install_docker(host, ctx, log=lambda *_: None)
+    node.install_docker(host, ctx, log=lambda *_: None)
     assert any("systemctl restart docker" in s for s in host.scripts) and not any(
         "enable --now docker" in s for s in host.scripts
     )

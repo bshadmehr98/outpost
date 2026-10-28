@@ -2,9 +2,8 @@
 
 from pathlib import Path
 
-from outpost import gitea
+from outpost import egress, gitea
 from outpost.cli.output import say
-from outpost.infra import egress
 from outpost.system import AirGappedSystem
 from outpost.workspace import STATE_GITEA
 
@@ -53,5 +52,5 @@ def _info(system: AirGappedSystem) -> int:
         return 1
     for key, value in state.items():
         say(f"  {key}: {value}")
-    say(f"  egress: {egress.status(system.gitea_host)}")
+    say(f"  egress: {egress.seal_status(system.gitea_host)}")
     return 0

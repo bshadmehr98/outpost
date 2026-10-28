@@ -1,8 +1,7 @@
 """outpost infra setup|verify|upgrade|list: the nodes of one infrastructure."""
 
 from outpost.cli.output import say, say_error
-from outpost.infra.setup import set_up_infra, verify_infra
-from outpost.infra.upgrade import upgrade_nodes
+from outpost.infra import set_up_infra, upgrade_nodes, verify_infra
 from outpost.system import AirGappedSystem
 from outpost.workspace import verify_state
 

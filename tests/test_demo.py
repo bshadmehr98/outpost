@@ -212,7 +212,7 @@ def test_runner_labels_and_install(tmp_path):
     )
     runner.install(host2, ctx, ["dev:host"], "T", registered={"n1"})
     assert not host2.ran("register --config") and not host2.ran("curl --cacert")
-    assert runner.extra_checks()[0][0] == "actions runner active"
+    assert runner.verifications()[0][0] == "actions runner active"
 
 
 def test_push_replaces_a_package_token_gitea_does_not_know(tmp_path, monkeypatch):

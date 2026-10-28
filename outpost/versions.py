@@ -5,6 +5,7 @@ here, run `outpost fetch`, `outpost upload`, and re-run the setup.
 
     use_arch("arm64")                          # once, after reading servers.yml (AirGappedSystem.load does it)
     arch_names()["docker"]                     # aarch64: the CPU type as Docker's downloads name it
+    check_server_arch("dev-1", host.facts())   # RuntimeError when the server is of another CPU type
     pinned_files(mirrors, {"compose", "k3s"})  # [{"name": "gitea", "version": ..., "url": ..., "filename": ...}, ...]
 
 ARCH is a module global that use_arch() sets: read it as `versions.ARCH` at call time, never import
@@ -69,6 +70,19 @@ def use_arch(arch: str) -> str:
 def arch_names(arch: str | None = None) -> dict:
     """How each download and tool names the CPU type: uname, docker, compose, k3s, and pip's platform tags."""
     return ARCHES[arch or ARCH]
+
+
+def check_server_arch(alias: str, facts: dict) -> None:
+    """Stop when a server's CPU type (facts["arch"], from uname) is not the one the box is built for.
+
+    Raises:
+        RuntimeError: the server is of another CPU type. Facts without an arch pass.
+    """
+    wanted = arch_names()["uname"]
+    if facts.get("arch") and facts["arch"] != wanted:
+        raise RuntimeError(
+            f"[{alias}] is {facts['arch']} but this platform is built for {wanted} (arch: {ARCH} in servers.yml)."
+        )
 
 
 def pinned_files(mirrors: "Mirrors", infra_types: set[str]) -> list[dict]:

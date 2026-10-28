@@ -39,7 +39,7 @@ from urllib.parse import parse_qs, urlparse
 
 import yaml
 
-from .. import demo, ssh, versions
+from .. import demo, egress, ssh, versions
 from .. import hosts as hostsmod
 from .. import report as reportmod
 from ..checks import load_checks
@@ -373,7 +373,6 @@ def ssh_check(workspace: Workspace, alias: str) -> dict:
 
 def server_status(workspace: Workspace, alias: str) -> dict:
     """Egress state and the egress log of one server, read over SSH."""
-    from ..infra import egress
     from ..ssh import Host, SshError
 
     if not re.fullmatch(r"[A-Za-z0-9._-]+", alias or ""):
@@ -383,7 +382,7 @@ def server_status(workspace: Workspace, alias: str) -> dict:
         return {"ok": False, "message": problem}
     host = Host(alias, connect_timeout=8)
     try:
-        state = egress.status(host)
+        state = egress.seal_status(host)
         log = host.run("tail -n 40 /var/log/outpost-egress.log 2>/dev/null || true").stdout
         facts = (
             host.run("uptime -p 2>/dev/null; df -h / | awk 'NR==2{print $4\" free of \"$2}'")

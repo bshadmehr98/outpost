@@ -17,6 +17,7 @@ from pathlib import Path
 
 from outpost import box as boxmod
 from outpost import (
+    client_config,
     gitea,  # gitea.connect through the package, so tests replace one name: outpost.gitea.connect
     oci,
     pki,
@@ -24,7 +25,6 @@ from outpost import (
 from outpost.endpoints import GiteaEndpoint, ProxyEndpoint, gitea_endpoint, proxy_endpoint_or_none
 from outpost.gitea.client import GiteaClient
 from outpost.gitea.upload_formats import EXISTS, UPLOADED
-from outpost.infra import clients
 from outpost.system import AirGappedSystem
 from outpost.workspace import STATE_UPLOAD
 
@@ -126,7 +126,7 @@ def push_config_image(
     log("==> config image")
     apk_branches, rpm_distros = list(apk_branches or []), list(rpm_distros or [])
     packages = client.packages
-    files = clients.config_image_files(
+    files = client_config.config_image_files(
         gitea,
         ca_pem,
         packages.debian_key() if distros else None,

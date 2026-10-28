@@ -1,9 +1,9 @@
 import json
 
-from outpost import versions
+from outpost import client_config, egress, versions
 from outpost.endpoints import GiteaEndpoint
 from outpost.gitea import AlpineKey
-from outpost.infra import clients, common, compose, egress, k3s, swarm, verify
+from outpost.infra import compose, k3s, node, swarm, verify
 from outpost.infra.context import NodeContext
 from tests.conftest import FakeHost
 
@@ -14,7 +14,7 @@ CTX = NodeContext(
 
 
 def test_client_files_point_everything_at_gitea():
-    files = clients.client_files(G, "CA", "KEY", ["bookworm", "noble"])
+    files = client_config.client_files(G, "CA", "KEY", ["bookworm", "noble"])
     assert (
         files["/etc/pip.conf"]
         == "[global]\nindex-url = https://gitea.internal/api/packages/pkgs/pypi/simple\ncert = /etc/outpost/ca.crt\n"
@@ -29,9 +29,9 @@ def test_client_files_point_everything_at_gitea():
         "deb [signed-by=/etc/outpost/gitea-apt.asc] https://gitea.internal/api/packages/pkgs/debian noble main",
     ]
     assert files["/etc/outpost/gitea-apt.asc"] == "KEY"
-    image = clients.config_image_files(G, "CA", "KEY", ["bookworm"])
+    image = client_config.config_image_files(G, "CA", "KEY", ["bookworm"])
     assert image["/etc/apt/sources.list.d/debian.sources"][0].startswith(b"# Disabled by Outpost")
-    host = clients.host_files(G, "CA", "10.0.0.11")
+    host = client_config.node_files(G, "CA", "10.0.0.11")
     daemon = json.loads(host["/etc/docker/daemon.json"])
     assert (
         daemon == {"dns": ["10.0.0.11"]} and "registry-mirrors" not in daemon
@@ -44,7 +44,7 @@ def test_client_files_point_everything_at_gitea():
         and 'endpoint:\n      - "https://gitea.internal"' in registries
     )
     for module in (compose, swarm):
-        checks = dict(module.extra_checks(CTX))
+        checks = dict(module.verifications(CTX))
         assert not any("mirror" in name or "mirror" in cmd for name, cmd in checks.items())
         assert "test -s /etc/docker/certs.d/gitea.internal/ca.crt" in checks["docker trusts and reaches gitea registry"]
         assert "https://gitea.internal/v2/" in checks["docker trusts and reaches gitea registry"]
@@ -58,7 +58,7 @@ APK_KEY = AlpineKey(name="pkgs@6f2a9c1e.rsa.pub", content="RSA KEY")
 
 
 def test_client_files_for_apk_and_rpm_point_at_gitea_only():
-    files = clients.client_files(
+    files = client_config.client_files(
         G,
         "CA",
         None,
@@ -89,8 +89,8 @@ def test_client_files_for_apk_and_rpm_point_at_gitea_only():
     assert files["/etc/outpost/gitea-rpm.asc"] == "RPM KEY"
     assert "/etc/apt/sources.list.d/outpost.list" not in files and "/etc/outpost/gitea-apt.asc" not in files
     # without branches or distros nothing of theirs is written, in particular no key under /etc/apk/keys
-    none = clients.client_files(G, "CA", "KEY", ["bookworm"], apk_key=APK_KEY, rpm_key="RPM KEY")
-    assert not any(p.startswith(("/etc/apk/", "/etc/yum.repos.d/")) or p == clients.PATH_RPM_KEY for p in none)
+    none = client_config.client_files(G, "CA", "KEY", ["bookworm"], apk_key=APK_KEY, rpm_key="RPM KEY")
+    assert not any(p.startswith(("/etc/apk/", "/etc/yum.repos.d/")) or p == client_config.PATH_RPM_KEY for p in none)
     assert (
         G.apk_repo == "https://gitea.internal/api/packages/pkgs/alpine"
         and G.rpm_repo == "https://gitea.internal/api/packages/pkgs/rpm"
@@ -98,7 +98,7 @@ def test_client_files_for_apk_and_rpm_point_at_gitea_only():
 
 
 def test_config_image_blanks_stock_os_sources_and_stays_text_only():
-    image = clients.config_image_files(
+    image = client_config.config_image_files(
         G, "CA", "KEY", ["bookworm"], apk_key=APK_KEY, apk_branches=["v3.20"], rpm_key="RPM KEY", rpm_distros=["rocky9"]
     )
     assert (
@@ -121,7 +121,7 @@ def test_config_image_blanks_stock_os_sources_and_stays_text_only():
         mode == 0o644 and b"\x00" not in content for content, mode in image.values()
     )  # text files only, no binaries
     # with no Alpine branches the stock /etc/apk/repositories is blanked and no key dir entry is made
-    bare = clients.config_image_files(G, "CA", None, [])
+    bare = client_config.config_image_files(G, "CA", None, [])
     assert bare["/etc/apk/repositories"][0].startswith(b"# Disabled by Outpost") and not any(
         p.startswith("/etc/apk/keys/") for p in bare
     )
@@ -130,8 +130,8 @@ def test_config_image_blanks_stock_os_sources_and_stays_text_only():
         and "/etc/yum.repos.d/outpost.repo" not in bare
     )
     assert (
-        "/etc/apk/repositories" not in clients.disabled_os_sources(["v3.20"])
-        and "/etc/apk/repositories" in clients.disabled_os_sources()
+        "/etc/apk/repositories" not in client_config.disabled_os_sources(["v3.20"])
+        and "/etc/apk/repositories" in client_config.disabled_os_sources()
     )
 
 
@@ -149,7 +149,7 @@ def test_prepare_node_on_alpine_configures_apk_and_parks_the_stock_repositories(
         },
         responses=[(r"api/v1/version", "ok")],
     )
-    common.prepare_node(host, ctx, log=lambda *_: None)
+    node.prepare_node(host, ctx, log=lambda *_: None)
     joined = "\n".join(host.scripts)
     step = next(s for s in host.scripts if "/etc/apk/keys" in s)
     assert "find /etc/apk/keys -name 'pkgs@*.rsa.pub' -delete" in step
@@ -188,7 +188,7 @@ def test_prepare_node_on_rocky_configures_dnf_and_parks_the_stock_repo_files():
         },
         responses=[(r"api/v1/version", "ok")],
     )
-    common.prepare_node(host, ctx, log=lambda *_: None)
+    node.prepare_node(host, ctx, log=lambda *_: None)
     joined = "\n".join(host.scripts)
     step = next(s for s in host.scripts if "/etc/yum.repos.d" in s)
     assert (
@@ -211,7 +211,7 @@ def test_prepare_node_on_rocky_configures_dnf_and_parks_the_stock_repo_files():
 
 
 def test_verify_checks_pick_the_command_by_family_on_the_node():
-    checks = dict(verify.common_checks(CTX))
+    checks = dict(verify.node_verifications(CTX))
     assert "apt sources are gitea only" not in checks and "apt update works offline" not in checks
     sources, index = checks["package sources are gitea only"], checks["package index updates offline"]
     for cmd in (sources, index):
@@ -224,26 +224,26 @@ def test_verify_checks_pick_the_command_by_family_on_the_node():
     assert "grep -lsE '^enabled *= *1' /etc/yum.repos.d/*.repo | grep -v outpost.repo" in sources
     assert "grep -rhs '^deb ' /etc/apt/sources.list" in sources
     assert "apk update" in index and "dnf makecache" in index and "apt-get update -qq" in index
-    script = verify.script(verify.common_checks(CTX))
+    script = verify.verification_script(verify.node_verifications(CTX))
     assert "CHECK|package sources are gitea only|" in script and "CHECK|package index updates offline|" in script
 
 
 def test_egress_script():
-    script = egress.script("10.0.0.5", ["203.0.113.9", "10.0.0.0/8"])
+    script = egress.seal_script("10.0.0.5", ["203.0.113.9", "10.0.0.0/8"])
     assert 'GITEA_IP="10.0.0.5"' in script
     assert 'ALLOW="10.0.0.0/8 172.16.0.0/12 192.168.0.0/16 203.0.113.9"' in script
     assert "DOCKER-USER" in script and "hook $ipt filter FORWARD" in script and "hook $ipt security FORWARD" in script
     assert "REJECT" in script and "-j DROP" in script and "--dport 53" in script
     host = FakeHost()
-    egress.install(host, "10.0.0.5", [])
+    egress.install_seal(host, "10.0.0.5", [])
     assert (
         host.files[egress.SCRIPT_PATH].startswith("#!/bin/bash")
         and "Before=docker.service" in host.files[egress.UNIT_PATH]
     )
     assert host.ran("systemctl enable outpost-egress")
-    egress.seal(host, "test")
+    egress.seal_host(host, "test")
     assert host.scripts[-1].endswith("outpost-egress seal test")
-    assert egress.status(FakeHost(responses=[(r"status", "sealed")])) == "sealed"
+    assert egress.seal_status(FakeHost(responses=[(r"status", "sealed")])) == "sealed"
 
 
 def test_compose_setup_configures_node_then_installs_docker_from_gitea():
@@ -349,17 +349,17 @@ def test_k3s_server_and_agent():
 
 
 def test_verify_script_and_parse():
-    checks = verify.common_checks(CTX) + compose.extra_checks(CTX)
-    script = verify.script(checks)
+    checks = verify.node_verifications(CTX) + compose.verifications(CTX)
+    script = verify.verification_script(checks)
     assert script.count("CHECK|") == 2 * len(checks)
     output = "CHECK|gitea in /etc/hosts|OK|\nCHECK|public internet rejected|FAIL|curl: (7) Failed\nnoise\n"
-    assert verify.parse(output) == [
+    assert verify.parse_verifications(output) == [
         {"name": "gitea in /etc/hosts", "ok": True, "detail": ""},
         {"name": "public internet rejected", "ok": False, "detail": "curl: (7) Failed"},
     ]
     host = FakeHost(responses=[(r"CHECK", "CHECK|a|OK|x\n")])
-    assert verify.verify_node(host, CTX, []) == [{"name": "a", "ok": True, "detail": "x"}]
-    assert verify.verify_node(FakeHost(), CTX, [])[0]["name"] == "connect"
+    assert verify.run_verifications(host, [("a", "true")]) == [{"name": "a", "ok": True, "detail": "x"}]
+    assert verify.run_verifications(FakeHost(), [("a", "true")])[0]["name"] == "connect"
 
 
 def test_config_image_puts_the_ca_where_openssl_looks_it_up(ca_pem):
@@ -376,9 +376,9 @@ def test_config_image_puts_the_ca_where_openssl_looks_it_up(ca_pem):
         .stdout.decode()
         .strip()
     )
-    image = clients.config_image_files(G, ca_pem, None, [], ca_hash=h)
+    image = client_config.config_image_files(G, ca_pem, None, [], ca_hash=h)
     assert image[f"/etc/ssl/certs/{h}.0"][0] == image["/etc/outpost/ca.crt"][0] == ca_pem.encode()
-    assert not any(p.startswith("/etc/ssl/") for p in clients.config_image_files(G, ca_pem, None, []))
+    assert not any(p.startswith("/etc/ssl/") for p in client_config.config_image_files(G, ca_pem, None, []))
 
 
 def run_sources_check(tmp_path, family: str, files: dict[str, str]):
@@ -391,7 +391,7 @@ def run_sources_check(tmp_path, family: str, files: dict[str, str]):
         target.write_text(content)
     for d in ("etc/apt/sources.list.d", "etc/yum.repos.d", "etc/apk"):
         (tmp_path / d).mkdir(parents=True, exist_ok=True)
-    cmd = verify.source_commands(G)[family].replace("/etc/", f"{tmp_path}/etc/")
+    cmd = verify.gitea_only_sources_by_family(G)[family].replace("/etc/", f"{tmp_path}/etc/")
     out = subprocess.run(["bash", "-c", f"( {cmd} ) 2>&1"], capture_output=True, text=True)
     last = out.stdout.strip().splitlines()[-1] if out.stdout.strip() else ""
     return out.returncode, last.replace(str(tmp_path), "")
@@ -405,33 +405,33 @@ def test_sources_check_fails_without_a_gitea_source(tmp_path):
     assert rc != 0 and detail.startswith(
         "no apt sources point at gitea: /etc/apt/sources.list.d/outpost.list has no deb line"
     )
-    rc, detail = run_sources_check(tmp_path / "apt-ok", "apt", {apt: clients.apt_source_line(G, "noble") + "\n"})
+    rc, detail = run_sources_check(tmp_path / "apt-ok", "apt", {apt: client_config.apt_source_line(G, "noble") + "\n"})
     assert rc == 0 and detail == "apt sources from gitea: 1"
     rc, detail = run_sources_check(
         tmp_path / "apt-foreign",
         "apt",
         {
-            apt: clients.apt_source_line(G, "noble") + "\n",
+            apt: client_config.apt_source_line(G, "noble") + "\n",
             "/etc/apt/sources.list": "deb http://archive.ubuntu.com/ubuntu noble main\n",
         },
     )
     assert rc != 0 and "archive.ubuntu.com" in detail  # a foreign line fails it even with a Gitea one next to it
 
-    rc, detail = run_sources_check(tmp_path / "apk-empty", "apk", {clients.PATH_APK_REPOS: "# nothing\n"})
+    rc, detail = run_sources_check(tmp_path / "apk-empty", "apk", {client_config.PATH_APK_REPOS: "# nothing\n"})
     assert rc != 0 and detail.startswith("no apk repositories point at gitea: /etc/apk/repositories is empty")
     rc, detail = run_sources_check(
-        tmp_path / "apk-ok", "apk", {clients.PATH_APK_REPOS: clients.apk_repository_line(G, "v3.20") + "\n"}
+        tmp_path / "apk-ok", "apk", {client_config.PATH_APK_REPOS: client_config.apk_repository_line(G, "v3.20") + "\n"}
     )
     assert rc == 0 and detail == "apk repositories from gitea: 1"
 
-    rc, detail = run_sources_check(tmp_path / "rpm-empty", "rpm", {clients.PATH_RPM_REPO: "\n"})
+    rc, detail = run_sources_check(tmp_path / "rpm-empty", "rpm", {client_config.PATH_RPM_REPO: "\n"})
     assert rc != 0 and detail.startswith(
         "no rpm repositories point at gitea: /etc/yum.repos.d/outpost.repo has no section"
     )
     rc, detail = run_sources_check(tmp_path / "rpm-missing", "rpm", {})
     assert rc != 0 and detail.startswith("no rpm repositories point at gitea")
-    two = clients.rpm_repo_section(G, "rocky9") + "\n" + clients.rpm_repo_section(G, "fedora40")
-    rc, detail = run_sources_check(tmp_path / "rpm-ok", "rpm", {clients.PATH_RPM_REPO: two})
+    two = client_config.rpm_repo_section(G, "rocky9") + "\n" + client_config.rpm_repo_section(G, "fedora40")
+    rc, detail = run_sources_check(tmp_path / "rpm-ok", "rpm", {client_config.PATH_RPM_REPO: two})
     assert rc == 0 and detail == "rpm repositories from gitea: 2"
 
 
@@ -441,9 +441,34 @@ def test_index_update_check_takes_the_tools_exit_status(tmp_path):
 
     (tmp_path / "apt-get").write_text("#!/bin/sh\necho 'E: Failed to fetch https://gitea.internal/...'\nexit 100\n")
     (tmp_path / "apt-get").chmod(0o755)
-    cmd = dict(verify.common_checks(CTX))["package index updates offline"]
+    cmd = dict(verify.node_verifications(CTX))["package index updates offline"]
     apt = cmd.rsplit(" *) ", 1)[1].rsplit(" ;; esac", 1)[0]  # the apt branch, the case's last
     out = subprocess.run(
         ["bash", "-c", f"( {apt} )"], capture_output=True, text=True, env={"PATH": f"{tmp_path}:/usr/bin:/bin"}
     )
     assert out.returncode != 0 and "E: Failed to fetch" in out.stdout
+
+
+def test_gitea_and_the_layer_below_do_not_load_infra():
+    """egress, hostsfile and client_config sit below gitea, so gitea setup and upload no longer reach
+    into infra/ (layer 3); and infra/verify no longer imports the proxy package inside a function."""
+    import subprocess
+    import sys
+
+    loaded = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            "import sys, outpost.gitea; print(sorted(m for m in sys.modules if m.startswith('outpost.infra')))",
+        ],
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.strip()
+    assert loaded == "[]"
+    import importlib
+    import inspect
+
+    for name in ("outpost.infra.verify", "outpost.infra.proxy.verify", "outpost.infra.proxy.setup"):
+        source = inspect.getsource(importlib.import_module(name))
+        assert "    from outpost" not in source and "    import outpost" not in source, name

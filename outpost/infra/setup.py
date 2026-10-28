@@ -1,23 +1,24 @@
 """`outpost infra setup` and `outpost infra verify`: one infrastructure, from its servers.yml entry.
 
-    set_up_infra(system, system.infra("dev"), log=print)    # every node, the runtime, the runner, then verify
-    verify_infra(system, system.infra("dev"), log=print)    # read-only
-
-infra/__init__.py does not import this module: it imports gitea, which still imports infra.egress.
+set_up_infra(system, system.infra("dev"), log=print)    # every node, the runtime, the runner, then verify
+verify_infra(system, system.infra("dev"), log=print)    # read-only
 """
 
 from outpost import hosts
-from outpost.infra import TYPES
+from outpost.config import InfraConfig
+from outpost.infra import compose, k3s, runner, swarm
 from outpost.infra.context import NodeContext, node_context
-from outpost.infra.runner import extra_checks as runner_extra_checks
-from outpost.infra.runner import install_runner_for
-from outpost.infra.verify import log_verifications, verify_node
+from outpost.infra.proxy import proxy_verifications
+from outpost.infra.verify import log_verifications, node_verifications, run_verifications
 from outpost.system import AirGappedSystem
 from outpost.workspace import infra_state, verify_state
 
+# One module per infrastructure type, each with setup(ctx, hosts, log) and verifications(ctx).
+TYPES = {"compose": compose, "swarm": swarm, "k3s": k3s}
 
-def set_up_infra(system: AirGappedSystem, infra, log=print) -> bool:
-    """Set up every node of an infrastructure (an InfraConfig), install the runner on the first, verify.
+
+def set_up_infra(system: AirGappedSystem, infra: InfraConfig, log=print) -> bool:
+    """Set up every node of an infrastructure, install the runner on the first, record it, then verify.
 
     Returns:
         True when every verification passed.
@@ -30,24 +31,35 @@ def set_up_infra(system: AirGappedSystem, infra, log=print) -> bool:
     nodes = system.nodes(infra.name)
     log(f"Setting up {infra.name} ({infra.type}) on {', '.join(infra.nodes)}")
     result = TYPES[infra.type].setup(ctx, nodes, log=log)
-    result["runner"] = install_runner_for(system, ctx, nodes[0], log=log)
+    result["runner"] = runner.install_runner_for(system, ctx, nodes[0], log=log)
     system.write_state(infra_state(infra.name), {"type": infra.type, **result})
     log()
     return _verify(system, infra, ctx, log)
 
 
-def verify_infra(system: AirGappedSystem, infra, log=print) -> bool:
+def verify_infra(system: AirGappedSystem, infra: InfraConfig, log=print) -> bool:
     """Run the verifications on every node of an infrastructure and record them. True when all passed."""
     return _verify(system, infra, node_context(system, infra), log)
 
 
-def _verify(system: AirGappedSystem, infra, ctx: NodeContext, log) -> bool:
+def verifications_for(infra_type: str, ctx: NodeContext) -> list[tuple[str, str]]:
+    """Every verification a node of this type runs: the node's, the egress proxy's, the type's, the runner's."""
+    return (
+        node_verifications(ctx)
+        + proxy_verifications(ctx)
+        + TYPES[infra_type].verifications(ctx)
+        + runner.verifications()
+    )
+
+
+def _verify(system: AirGappedSystem, infra: InfraConfig, ctx: NodeContext, log) -> bool:
+    """Verify each node, log it, record what it runs; then record the whole in state/verify-<name>.json."""
     log(f"==> verifying {infra.name}")
-    verifications = TYPES[infra.type].extra_checks(ctx) + runner_extra_checks()
+    verifications = verifications_for(infra.type, ctx)
     all_passed = True
     report = {}
     for node in system.nodes(infra.name):
-        results = verify_node(node, ctx, verifications)
+        results = run_verifications(node, verifications)
         report[node.alias] = results
         all_passed &= log_verifications(node.alias, results, log)
         hosts.record(system.workspace, node.alias, hosts.inspect(node))

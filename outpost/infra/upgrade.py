@@ -6,6 +6,7 @@ upload, then run this; the seal stays on throughout.
 """
 
 from outpost import hosts
+from outpost.ssh import Host
 from outpost.system import AirGappedSystem
 
 UPGRADE_SCRIPT = """. /etc/os-release 2>/dev/null
@@ -30,7 +31,7 @@ ERROR_MARKERS = ("E:", "ERROR:", "Error:")  # how apt, apk and dnf start an erro
 REBOOT_REQUIRED = "REBOOT-REQUIRED"
 
 
-def upgrade_nodes(system: AirGappedSystem, nodes: list, log=print) -> bool:
+def upgrade_nodes(system: AirGappedSystem, nodes: list[Host], log=print) -> bool:
     """Upgrade the OS packages of each node from Gitea, then record what it runs now.
 
     Args:
@@ -47,7 +48,7 @@ def upgrade_nodes(system: AirGappedSystem, nodes: list, log=print) -> bool:
     return True
 
 
-def _upgrade_node(system: AirGappedSystem, node, log) -> bool:
+def _upgrade_node(system: AirGappedSystem, node: Host, log) -> bool:
     log(f"==> {node.alias}: package index update and upgrade from Gitea")
     result = node.run(UPGRADE_SCRIPT, timeout=3600)
     for line in result.stdout.strip().splitlines():

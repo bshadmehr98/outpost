@@ -17,13 +17,12 @@ from pathlib import Path
 
 import pytest
 
-from outpost import oci, versions
+from outpost import client_config, oci, versions
 from outpost.config import Mirrors
 from outpost.endpoints import GiteaEndpoint
 from outpost.fetch import apk as apkmod
 from outpost.gitea import GiteaClient
 from outpost.http import Http, HttpError
-from outpost.infra import clients
 
 pytestmark = pytest.mark.skipif(os.environ.get("OUTPOST_INTEGRATION") != "1", reason="set OUTPOST_INTEGRATION=1")
 pytestmark = [pytestmark, pytest.mark.integration]
@@ -282,7 +281,7 @@ def test_docker_daemon_pulls_by_gitea_name(gitea):
 def test_config_image_is_usable_in_a_build(gitea, tmp_path):
     host = URL.split("//")[1]
     info = GiteaEndpoint(name="gitea.internal", ip="10.0.0.5", org="pkgs")
-    files = clients.config_image_files(info, "CA PEM", "APT KEY", ["bookworm"])
+    files = client_config.config_image_files(info, "CA PEM", "APT KEY", ["bookworm"])
     layout = oci.build_layout(files, tmp_path / "config", info.config_image)
     gitea.packages.push_image(layout, "pkgs", "config", "latest")
     (tmp_path / "ctx").mkdir()
@@ -304,7 +303,7 @@ def test_apk_add_from_gitea_with_the_config_image_key(gitea, apk_files):
     with the plain-http URL this test's Gitea answers on; on a real platform client_files writes the https one."""
     host = URL.split("//")[1]
     info = GiteaEndpoint(name="gitea.internal", ip="10.0.0.5", org="pkgs")
-    files = clients.config_image_files(
+    files = client_config.config_image_files(
         info, "CA PEM", None, [], apk_key=gitea.packages.alpine_key(), apk_branches=["v3.20"]
     )
     key_paths = [p for p in files if p.startswith("/etc/apk/keys/")]

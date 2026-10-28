@@ -1,7 +1,7 @@
 """outpost egress <target> seal|open|status: block or allow a server's outbound internet."""
 
+from outpost import egress
 from outpost.cli.output import say
-from outpost.infra import egress
 from outpost.system import AirGappedSystem
 
 
@@ -18,9 +18,9 @@ def run(args) -> int:
     reason = args.reason or ""
     for host in egress.target_hosts(system, args.target):
         if args.action == "status":
-            say(f"  {host.alias}: {egress.status(host)}")
+            say(f"  {host.alias}: {egress.seal_status(host)}")
         elif args.action == "seal":
-            say(f"  {host.alias}: {egress.seal(host, reason)}")
+            say(f"  {host.alias}: {egress.seal_host(host, reason)}")
         else:
-            say(f"  {host.alias}: {egress.open_(host, reason)}  (remember: outpost egress {args.target} seal)")
+            say(f"  {host.alias}: {egress.open_host(host, reason)}  (remember: outpost egress {args.target} seal)")
     return 0

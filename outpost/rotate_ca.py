@@ -12,7 +12,7 @@ import time
 
 from outpost import gitea
 from outpost.endpoints import gitea_endpoint, proxy_endpoint_or_none
-from outpost.infra.setup import set_up_infra
+from outpost.infra import set_up_infra
 from outpost.system import AirGappedSystem
 from outpost.workspace import CA_CERT, CA_KEY, GITEA_CERT, GITEA_KEY, STATE_UPLOAD
 

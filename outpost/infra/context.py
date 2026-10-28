@@ -7,8 +7,8 @@ ctx = proxy_host_context(system)                   # for the egress proxy's own 
 from dataclasses import dataclass, field
 
 from outpost.config import ConfigError, ProxyConfig
+from outpost.egress import PROXY_USER
 from outpost.endpoints import GiteaEndpoint, ProxyEndpoint, gitea_endpoint, make_proxy_endpoint, proxy_endpoint
-from outpost.infra.egress import PROXY_USER
 from outpost.system import AirGappedSystem
 from outpost.workspace import STATE_UPLOAD
 

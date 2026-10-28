@@ -28,7 +28,7 @@ Seven steps, logged as `==> [n/7]` (the dashboard shows them as progress):
     files.py                  APP_INI, UNIT, TOKEN_SCOPES
 """
 
-from outpost import hosts, versions
+from outpost import hosts, hostsfile, versions
 from outpost.gitea.setup.admin import ensure_admin_user, ensure_api_token, ensure_org
 from outpost.gitea.setup.binary import check_box_has_gitea, ensure_git, install_binary
 from outpost.gitea.setup.files import APP_INI, TOKEN_SCOPES, UNIT
@@ -40,7 +40,6 @@ from outpost.gitea.setup.service_config import (
     write_app_ini,
     write_certificate,
 )
-from outpost.infra import hostsfile
 from outpost.system import AirGappedSystem
 from outpost.workspace import STATE_GITEA
 
@@ -71,7 +70,7 @@ def setup(system: AirGappedSystem, log=print) -> dict:
     ensure_git(host, log)
     make_git_user_and_folders(host)
     write_certificate(host, cert, key)
-    hostsfile.install(host, ip, gitea_config.name)  # now, and again at every boot
+    hostsfile.keep_names(host, [(ip, gitea_config.name)])  # now, and again at every boot
 
     log("==> [4/7] configuration and service")
     write_app_ini(host, gitea_config.name, log)

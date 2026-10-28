@@ -10,13 +10,13 @@ from pathlib import Path
 import pytest
 import yaml
 
-from outpost import hosts, report
+from outpost import client_config, egress, hosts, report
 from outpost.checks import load_checks
 from outpost.cli import build_parser, main
 from outpost.cli import proxy as proxy_command
 from outpost.config import ConfigError, ProxyConfig, load_servers
 from outpost.endpoints import GiteaEndpoint, make_proxy_endpoint
-from outpost.infra import clients, common, egress, k3s, proxy, verify
+from outpost.infra import k3s, node, proxy, verify
 from outpost.infra.context import NodeContext
 from outpost.needs import Needs, add_proxy_package
 from outpost.ssh import Result
@@ -216,7 +216,7 @@ def run_seal(tmp_path: Path, script: str, user_exists: bool = True) -> list[str]
 
 
 def test_seal_without_a_proxy_is_unchanged(tmp_path):
-    script = egress.script("10.0.0.5", ["203.0.113.9"])
+    script = egress.seal_script("10.0.0.5", ["203.0.113.9"])
     assert "owner" not in script and "OUTPOST-OUT" not in script and "PROXY_USER" not in script
     calls = run_seal(tmp_path, script)
     assert (
@@ -226,7 +226,7 @@ def test_seal_without_a_proxy_is_unchanged(tmp_path):
 
 
 def test_seal_on_the_proxy_host_exempts_its_user_in_both_tables(tmp_path):
-    script = egress.script("10.0.0.5", [], proxy_user="outpost-proxy")
+    script = egress.seal_script("10.0.0.5", [], proxy_user="outpost-proxy")
     calls = [c for c in run_seal(tmp_path, script) if c.startswith("iptables ")]
     for table, last in (("filter", "-j REJECT --reject-with icmp-admin-prohibited"), ("security", "-j DROP")):
         out_chain = [c for c in calls if f"-t {table} -A OUTPOST-OUT" in c]
@@ -254,10 +254,10 @@ def test_seal_on_the_proxy_host_exempts_its_user_in_both_tables(tmp_path):
 
 def test_installing_the_plain_seal_removes_an_old_exception():
     host = FakeHost("gitea-1")
-    egress.install(host, "10.0.0.5", [])
+    egress.install_seal(host, "10.0.0.5", [])
     assert "OUTPOST-OUT" not in host.files[egress.SCRIPT_PATH] and host.ran("-D OUTPUT -j OUTPOST-OUT")
     host = FakeHost("gitea-1")
-    egress.install(host, "10.0.0.5", [], proxy_user="outpost-proxy")
+    egress.install_seal(host, "10.0.0.5", [], proxy_user="outpost-proxy")
     assert "--uid-owner" in host.files[egress.SCRIPT_PATH] and not host.ran("-D OUTPUT -j OUTPOST-OUT")
 
 
@@ -265,21 +265,23 @@ def test_installing_the_plain_seal_removes_an_old_exception():
 
 
 def test_client_files_with_and_without_a_proxy():
-    plain = {**clients.client_files(G, "CA", None, []), **clients.host_files(G, "CA", "10.0.0.11")}
-    assert clients.PATH_PROXY_ENV not in plain and "PROXY" not in plain[clients.PATH_PROFILE]
-    assert plain[clients.PATH_PROFILE] == (
+    plain = {**client_config.client_files(G, "CA", None, []), **client_config.node_files(G, "CA", "10.0.0.11")}
+    assert client_config.PATH_PROXY_ENV not in plain and "PROXY" not in plain[client_config.PATH_PROFILE]
+    assert plain[client_config.PATH_PROFILE] == (
         "export PIP_INDEX_URL=https://gitea.internal/api/packages/pkgs/pypi/simple\nexport PIP_CERT=/etc/outpost/ca.crt\n"
         "export NPM_CONFIG_REGISTRY=https://gitea.internal/api/packages/pkgs/npm/\nexport NPM_CONFIG_CAFILE=/etc/outpost/ca.crt\n"
     )
     assert not any(
-        "proxy" in p for p in clients.config_image_files(G, "CA", None, [])
-    ) and clients.PATH_PROFILE not in clients.config_image_files(G, "CA", None, [])
+        "proxy" in p for p in client_config.config_image_files(G, "CA", None, [])
+    ) and client_config.PATH_PROFILE not in client_config.config_image_files(G, "CA", None, [])
     files = {
-        **clients.client_files(G, "CA", None, [], proxy=ON_GITEA),
-        **clients.host_files(G, "CA", "10.0.0.11", proxy=ON_GITEA),
+        **client_config.client_files(G, "CA", None, [], proxy=ON_GITEA),
+        **client_config.node_files(G, "CA", "10.0.0.11", proxy=ON_GITEA),
     }
     env = dict(
-        line.split("=", 1) for line in files[clients.PATH_PROXY_ENV].splitlines() if line and not line.startswith("#")
+        line.split("=", 1)
+        for line in files[client_config.PATH_PROXY_ENV].splitlines()
+        if line and not line.startswith("#")
     )
     assert env == {
         "HTTPS_PROXY": "http://10.0.0.5:3128",
@@ -291,44 +293,45 @@ def test_client_files_with_and_without_a_proxy():
         "OUTPOST_PROXY_ALLOWED": "api.twilio.com,*.sendgrid.net",
     }
     assert (
-        "export HTTPS_PROXY=http://10.0.0.5:3128\n" in files[clients.PATH_PROFILE]
-        and "export PIP_CERT" in files[clients.PATH_PROFILE]
+        "export HTTPS_PROXY=http://10.0.0.5:3128\n" in files[client_config.PATH_PROFILE]
+        and "export PIP_CERT" in files[client_config.PATH_PROFILE]
     )
-    image = clients.config_image_files(G, "CA", None, [], proxy=ON_GITEA)
-    assert image[clients.PATH_PROXY_ENV][0].decode() == files[clients.PATH_PROXY_ENV]
-    assert image[clients.PATH_PROFILE][0].decode().startswith("export HTTPS_PROXY=http://10.0.0.5:3128\n")
+    image = client_config.config_image_files(G, "CA", None, [], proxy=ON_GITEA)
+    assert image[client_config.PATH_PROXY_ENV][0].decode() == files[client_config.PATH_PROXY_ENV]
+    assert image[client_config.PATH_PROFILE][0].decode().startswith("export HTTPS_PROXY=http://10.0.0.5:3128\n")
 
 
 def test_docker_client_config_is_merged_and_only_ours_is_removed():
     existing = json.dumps({"auths": {"gitea.internal": {"auth": "eA=="}}})
-    merged = json.loads(clients.docker_client_config(existing, ON_GITEA, G.name))
+    merged = json.loads(client_config.docker_client_config(existing, ON_GITEA, G.name))
     assert merged["auths"] == {"gitea.internal": {"auth": "eA=="}}
     assert merged["proxies"] == {
         "default": {"httpProxy": "http://10.0.0.5:3128", "httpsProxy": "http://10.0.0.5:3128", "noProxy": NO_PROXY}
     }
-    assert clients.docker_client_config(json.dumps(merged), ON_GITEA, G.name) is None  # nothing to change
-    assert clients.docker_client_config("", None, G.name) is None  # no proxy, no file: nothing written
-    assert clients.docker_client_config("not json", ON_GITEA, G.name) is None  # never clobber what we cannot read
-    removed = json.loads(clients.docker_client_config(json.dumps(merged), None, G.name))
+    assert client_config.docker_client_config(json.dumps(merged), ON_GITEA, G.name) is None  # nothing to change
+    assert client_config.docker_client_config("", None, G.name) is None  # no proxy, no file: nothing written
+    assert client_config.docker_client_config("not json", ON_GITEA, G.name) is None  # never clobber what we cannot read
+    removed = json.loads(client_config.docker_client_config(json.dumps(merged), None, G.name))
     assert removed == {"auths": {"gitea.internal": {"auth": "eA=="}}}
     theirs = json.dumps({"proxies": {"default": {"httpsProxy": "http://corp:8080", "noProxy": "corp.local"}}})
-    assert clients.docker_client_config(theirs, None, G.name) is None
+    assert client_config.docker_client_config(theirs, None, G.name) is None
 
 
 def test_environment_lines_are_replaced_in_place():
-    script = clients.environment_script(ON_GITEA)
+    script = client_config.environment_script(ON_GITEA)
     assert (
         "echo HTTPS_PROXY=http://10.0.0.5:3128;" in script
         and "> /etc/environment.outpost && cat /etc/environment.outpost > /etc/environment" in script
     )
-    assert clients.environment_script(None).startswith("if grep -qs '^# Outpost egress proxy' /etc/environment")
+    assert client_config.environment_script(None).startswith("if grep -qs '^# Outpost egress proxy' /etc/environment")
 
 
 def test_prepare_node_without_a_proxy_writes_no_proxy_settings():
     host = FakeHost("dev-1")
-    common.prepare_node(host, NodeContext(gitea=G, ca_pem="CA", infra_name="dev"), log=lambda *_: None)
+    node.prepare_node(host, NodeContext(gitea=G, ca_pem="CA", infra_name="dev"), log=lambda *_: None)
     assert (
-        host.files[clients.PATH_PROXY_ENV] == clients.NO_PROXY_ENV and "PROXY" not in host.files[clients.PATH_PROFILE]
+        host.files[client_config.PATH_PROXY_ENV] == client_config.NO_PROXY_ENV
+        and "PROXY" not in host.files[client_config.PATH_PROFILE]
     )
     assert not any(p.endswith(".docker/config.json") for p in host.files)
     assert "OUTPOST-OUT" not in host.files[egress.SCRIPT_PATH] and "proxy" not in host.files[egress.SCRIPT_PATH]
@@ -338,13 +341,13 @@ def test_prepare_node_without_a_proxy_writes_no_proxy_settings():
 def test_prepare_node_with_a_proxy_elsewhere():
     host = FakeHost("dev-1")
     ctx = NodeContext(gitea=G, ca_pem="CA", allow=["10.0.0.40"], infra_name="dev", proxy=ELSEWHERE)
-    common.prepare_node(host, ctx, log=lambda *_: None)
+    node.prepare_node(host, ctx, log=lambda *_: None)
     assert (
         host.ran("echo '10.0.0.40 proxy.internal'")
         and "10.0.0.40 proxy.internal" in host.files["/usr/local/sbin/outpost-hosts"]
     )
-    assert "HTTPS_PROXY=http://proxy.internal:3128" in host.files[clients.PATH_PROXY_ENV]
-    for home in ("/root", common.RUNNER_HOME):
+    assert "HTTPS_PROXY=http://proxy.internal:3128" in host.files[client_config.PATH_PROXY_ENV]
+    for home in ("/root", client_config.RUNNER_HOME):
         assert (
             json.loads(host.files[f"{home}/.docker/config.json"])["proxies"]["default"]["httpsProxy"]
             == "http://proxy.internal:3128"
@@ -371,8 +374,8 @@ def test_configmap_and_verify_lines():
     assert server.ran("k3s kubectl apply -f -") and server.ran("name: outpost-proxy")
     k3s.apply_configmap(server, None, log=lambda *_: None)
     assert server.ran("delete configmap outpost-proxy --ignore-not-found")
-    assert verify.proxy_checks(NodeContext(gitea=G, ca_pem="CA")) == []
-    checks = dict(verify.proxy_checks(NodeContext(gitea=G, ca_pem="CA", proxy=ON_GITEA)))
+    assert proxy.proxy_verifications(NodeContext(gitea=G, ca_pem="CA")) == []
+    checks = dict(proxy.proxy_verifications(NodeContext(gitea=G, ca_pem="CA", proxy=ON_GITEA)))
     assert set(checks) == {"proxy settings for programs that opt in", "proxy reachable", "proxy refuses unknown names"}
     assert (
         "curl -x http://10.0.0.5:3128" in checks["proxy reachable"]
@@ -384,7 +387,10 @@ def test_configmap_and_verify_lines():
     )
     assert "= 403" in checks["proxy refuses unknown names"]
     # the direct path is tested without the proxy variables a node's ssh session may carry
-    assert "--noproxy '*'" in dict(verify.common_checks(NodeContext(gitea=G, ca_pem="CA")))["public internet rejected"]
+    assert (
+        "--noproxy '*'"
+        in dict(verify.node_verifications(NodeContext(gitea=G, ca_pem="CA")))["public internet rejected"]
+    )
 
 
 # -- setup on a fake host -------------------------------------------------------------
@@ -413,12 +419,12 @@ INSTALLED = [(r"command -v tinyproxy", "/usr/bin/tinyproxy\ntinyproxy 1.11.1\n")
 
 
 def test_setup_on_the_gitea_host_order(monkeypatch):
-    monkeypatch.setattr(common, "prepare_node", lambda *a, **k: pytest.fail("the Gitea host is not prepared as a node"))
+    monkeypatch.setattr(node, "prepare_node", lambda *a, **k: pytest.fail("the Gitea host is not prepared as a node"))
     host = OrderedHost(
         "gitea-1", facts={"id": "ubuntu", "codename": "noble", "arch": "x86_64", "ip": "10.0.0.5"}, responses=INSTALLED
     )
     ctx = NodeContext(gitea=G, ca_pem="CA", distros=["bookworm", "noble"], proxy=ON_GITEA)
-    result = proxy.setup(host, ctx, CFG, egress_allow=[], client_allow=["203.0.113.9"], log=lambda *_: None)
+    result = proxy.set_up_on_host(host, ctx, CFG, egress_allow=[], client_allow=["203.0.113.9"], log=lambda *_: None)
     assert (
         result["tinyproxy"] == "1.11.1"
         and result["ip"] == "10.0.0.5"
@@ -447,7 +453,7 @@ def test_setup_on_the_gitea_host_order(monkeypatch):
 
 def test_setup_on_another_host_prepares_it_first(monkeypatch):
     seen = []
-    monkeypatch.setattr(common, "prepare_node", lambda host, ctx, log=print: seen.append(len(host.events)) or {})
+    monkeypatch.setattr(node, "prepare_node", lambda host, ctx, log=print: seen.append(len(host.events)) or {})
     host = OrderedHost(
         "proxy-1",
         facts={
@@ -461,7 +467,7 @@ def test_setup_on_another_host_prepares_it_first(monkeypatch):
     )
     cfg = ProxyConfig(host="proxy-1", allow=["api.twilio.com"])
     ctx = NodeContext(gitea=G, ca_pem="CA", proxy=ELSEWHERE)
-    result = proxy.setup(host, ctx, cfg, egress_allow=[], client_allow=[], log=lambda *_: None)
+    result = proxy.set_up_on_host(host, ctx, cfg, egress_allow=[], client_allow=[], log=lambda *_: None)
     assert seen and seen[0] <= host.first("dnf install -y -q tinyproxy")
     assert result["family"] == "rpm" and result["distro"] == "rocky9" and not result["on_gitea"]
     assert "Listen 10.0.0.40" in host.files[proxy.CONF_PATH]
@@ -476,7 +482,7 @@ def test_setup_explains_a_missing_package_and_refuses_alpine():
     with pytest.raises(
         RuntimeError, match=r"no tinyproxy for noble\. Run `outpost fetch --only apt` and `outpost upload`"
     ):
-        proxy.setup(
+        proxy.set_up_on_host(
             host,
             NodeContext(gitea=G, ca_pem="CA", proxy=ON_GITEA),
             CFG,
@@ -486,7 +492,7 @@ def test_setup_explains_a_missing_package_and_refuses_alpine():
         )
     alpine = FakeHost("gitea-1", facts={"id": "alpine", "version_id": "3.20.3", "arch": "x86_64"})
     with pytest.raises(RuntimeError, match="Alpine"):
-        proxy.setup(
+        proxy.set_up_on_host(
             alpine,
             NodeContext(gitea=G, ca_pem="CA", proxy=ON_GITEA),
             CFG,
@@ -508,7 +514,7 @@ def test_missing_package_error_shows_what_the_package_manager_saw():
         responses=[(r"apt-cache show", "OUTPOST-NO-TINYPROXY\n"), (r"--- apt-get update", seen)],
     )
     with pytest.raises(RuntimeError) as err:
-        proxy.setup(
+        proxy.set_up_on_host(
             host,
             NodeContext(gitea=G, ca_pem="CA", proxy=ON_GITEA),
             CFG,
@@ -528,7 +534,7 @@ def test_missing_package_error_shows_what_the_package_manager_saw():
     rpm = proxy.diagnose_script("rpm", G, "rocky9")
     assert (
         "dnf makecache" in rpm
-        and f"cat {clients.PATH_RPM_REPO}" in rpm
+        and f"cat {client_config.PATH_RPM_REPO}" in rpm
         and f"{G.rpm_repo}/rocky9/repodata/repomd.xml" in rpm
     )
     assert "dnf info tinyproxy" in rpm
@@ -546,7 +552,7 @@ def test_unreadable_configuration_and_failed_start_say_why():
         RuntimeError,
         match=r"outpost-proxy cannot read its configuration or write its log:\n--- namei -l /etc/tinyproxy/tinyproxy.conf\n drwx------",
     ):
-        proxy.setup(
+        proxy.set_up_on_host(
             host,
             NodeContext(gitea=G, ca_pem="CA", proxy=ON_GITEA),
             CFG,
@@ -571,7 +577,7 @@ def test_unreadable_configuration_and_failed_start_say_why():
         ],
     )
     with pytest.raises(RuntimeError, match=r"did not start:(.|\n)*exit 124"):
-        proxy.setup(
+        proxy.set_up_on_host(
             host,
             NodeContext(gitea=G, ca_pem="CA", proxy=ON_GITEA),
             CFG,
@@ -587,7 +593,7 @@ def test_unreadable_configuration_and_failed_start_say_why():
 
 
 def test_host_checks_cover_the_exception_and_the_log():
-    names = [n for n, _ in proxy.host_checks(NodeContext(gitea=G, ca_pem="CA", proxy=ON_GITEA), CFG)]
+    names = [n for n, _ in proxy.host_verifications(NodeContext(gitea=G, ca_pem="CA", proxy=ON_GITEA), CFG)]
     assert names[:3] == [
         "proxy service active",
         "tinyproxy installed from gitea",
@@ -595,7 +601,7 @@ def test_host_checks_cover_the_exception_and_the_log():
     ]
     assert "proxy exception only for its own user" in names and "public internet rejected for other users" in names
     host = FakeHost("gitea-1", responses=[(r"CHECK\|", "CHECK|proxy service active|OK|active\n")])
-    assert proxy.verify(host, NodeContext(gitea=G, ca_pem="CA", proxy=ON_GITEA), CFG) == [
+    assert proxy.verify_proxy_host(host, NodeContext(gitea=G, ca_pem="CA", proxy=ON_GITEA), CFG) == [
         {"name": "proxy service active", "ok": True, "detail": "active"}
     ]
     # proxy.env is written on nodes, and on a proxy host of its own (prepared like a node), not on the Gitea host
@@ -604,7 +610,7 @@ def test_host_checks_cover_the_exception_and_the_log():
         and "CHECK|proxy refuses unknown names|" in host.scripts[-1]
     )
     elsewhere = FakeHost("proxy-1", responses=[(r"CHECK\|", "CHECK|proxy service active|OK|active\n")])
-    proxy.verify(
+    proxy.verify_proxy_host(
         elsewhere,
         NodeContext(gitea=G, ca_pem="CA", proxy=ELSEWHERE),
         ProxyConfig(host="proxy-1", allow=["api.twilio.com"]),
@@ -810,7 +816,9 @@ def test_proxy_setup_command_records_state_and_updates_set_up_nodes(workspace_di
         and state["allow"] == ["api.twilio.com"]
     )
     assert state["tinyproxy"] == "1.11.1" and state["when"] and state["verify"]["result"] == "ok"
-    assert "HTTPS_PROXY=http://10.0.0.5:3128" in made["dev-1"].files[clients.PATH_PROXY_ENV]  # the node set up before
+    assert (
+        "HTTPS_PROXY=http://10.0.0.5:3128" in made["dev-1"].files[client_config.PATH_PROXY_ENV]
+    )  # the node set up before
     assert "--uid-owner" in made["gitea-1"].files[egress.SCRIPT_PATH] and egress.SCRIPT_PATH not in made["dev-1"].files
     assert (workspace_dir / "state" / "hosts" / "gitea-1.json").exists()
     assert "Next: outpost check hello-proxy" in capsys.readouterr().out

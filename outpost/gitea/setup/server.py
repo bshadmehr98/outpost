@@ -17,11 +17,7 @@ def connect_and_check_arch(host, gitea_config: GiteaConfig, log=print) -> str:
     ip = gitea_config.ip or facts.get("ip")
     if not ip:
         raise RuntimeError("Could not detect the Gitea host's IP. Set gitea.ip in servers.yml.")
-    wanted = versions.arch_names()["uname"]
-    if facts.get("arch") and facts["arch"] != wanted:
-        raise RuntimeError(
-            f"[{host.alias}] is {facts['arch']} but this platform is built for {wanted} (arch: {versions.ARCH} in servers.yml)."
-        )
+    versions.check_server_arch(host.alias, facts)
     log(
         f"[{host.alias}] {facts.get('id', '?')} {facts.get('codename', '')}, Gitea will be https://{gitea_config.name} ({ip})"
     )
