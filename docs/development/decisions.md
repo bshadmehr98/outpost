@@ -231,3 +231,35 @@ at every boot (`manage_etc_hosts`). The line is now written by a oneshot unit, `
 that runs after cloud-init and before CoreDNS, Docker, k3s and Gitea, and `verify` checks that
 the unit is enabled. Lesson: anything a node must have at boot needs a unit, not a one-time edit,
 and the reboot test belongs in the suite.
+
+**A check that only looks for what must not be there passes on nothing.** From 0.1.0, setup wrote
+one line per suite into `outpost.list` only if `curl -fsI` found the suite's `Release` in Gitea.
+Gitea (28.2) routes the Debian registry's `dists/` files for GET only, so every HEAD got 405 and
+every apt node, and the Gitea host, got an empty `outpost.list`. Nothing noticed: `package sources
+are gitea only` looked for lines pointing elsewhere and found none, and `package index updates
+offline` ran `apt-get update | tail -3`, which succeeds with no sources and reports `tail`'s exit
+status anyway. Docker, k3s and the runner come from Gitea's generic registry, so setup itself never
+needed an apt package; the first thing that did was the egress proxy, and it failed with "no
+tinyproxy for noble". Fixes: the probe is a GET (Gitea's Alpine and RPM registries
+answer HEAD too, but a GET is what the client will do), the sources check needs at least one Gitea
+source per family as well as no foreign one, and the index check takes the tool's own exit status.
+Lessons: probe with the request the client will make; every "only X" check needs an "at least one
+X" half; and in a shell check, a pipeline's status is its last command's.
+
+**A program can be confined by path, below every permission bit.** The proxy's configuration was
+`/etc/outpost/proxy.conf`, mode 0644, readable by the proxy's user (`runuser ... head` read it). In
+CI tinyproxy still said "Could not open config file", as that user, as root, and on a copy in
+`/tmp`. The kernel log said why: `apparmor="DENIED" operation="open" profile="tinyproxy"`. The GitHub
+runner moved to Ubuntu 26.04, whose AppArmor profile set has a `tinyproxy` profile for
+`/usr/bin/tinyproxy`; the lab's containers share the runner's kernel, so it applied inside them. It
+allows reading `/etc/tinyproxy/tinyproxy.conf` and `/usr/share/tinyproxy/*` and writing
+`/var/log/tinyproxy/tinyproxy.log` and `/run/tinyproxy/tinyproxy.pid`, and nothing else. Adding
+rules to the profile (`/etc/apparmor.d/local/tinyproxy`) would be one more thing to install and
+keep, and it would not reach a container, whose profiles live on the host. Using the package's own
+paths works with the profile and without it: the configuration replaces the package's, the allow
+list sits next to its error pages, the log is its log and Outpost's logrotate file replaces its
+own. tinyproxy opens the log after dropping to `outpost-proxy`, and the package's postinst gives
+the log directory back to its own user on every upgrade, so the unit hands it over as root before
+each start. Lesson: when a file is readable and a program still cannot open it, look at the
+kernel's denials before the permissions; and a packaged daemon is safest where its package
+expects it to be.
