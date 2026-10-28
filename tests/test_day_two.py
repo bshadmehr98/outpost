@@ -321,7 +321,7 @@ def test_report_says_what_is_proven(workspace_dir):
 
 def test_arm64_changes_every_download_name(amd64):
     versions.use_arch("aarch64")
-    urls = {f["name"]: f["url"] for f in versions.platform_files(Mirrors(), {"compose", "k3s"})}
+    urls = {f["name"]: f["url"] for f in versions.pinned_files(Mirrors(), {"compose", "k3s"})}
     assert (
         urls["gitea"].endswith("linux-arm64")
         and urls["coredns"].endswith("linux_arm64.tgz")
@@ -332,9 +332,9 @@ def test_arm64_changes_every_download_name(amd64):
         "linux-arm64"
     )
     assert urls["k3s"].endswith("/k3s-arm64") and urls["k3s-airgap-images"].endswith("k3s-airgap-images-arm64.tar.gz")
-    assert "manylinux2014_aarch64" in versions.names()["pip"]
+    assert "manylinux2014_aarch64" in versions.arch_names()["pip"]
     versions.use_arch("amd64")
-    assert versions.platform_files(Mirrors(), set())[0]["url"].endswith("linux-amd64")
+    assert versions.pinned_files(Mirrors(), set())[0]["url"].endswith("linux-amd64")
     with pytest.raises(ValueError):
         versions.use_arch("mips")
 

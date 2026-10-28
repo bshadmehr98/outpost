@@ -33,7 +33,7 @@ def wheel_flags(python: str) -> list[str]:
         "none",
         "--only-binary=:all:",
     ]
-    for p in versions.names()["pip"]:
+    for p in versions.arch_names()["pip"]:
         flags += ["--platform", p]
     return flags
 

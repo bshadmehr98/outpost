@@ -1,8 +1,18 @@
 import pytest
 
 from outpost import versions
-from outpost.config import ConfigError, Mirrors
-from outpost.needs import FileNeed, NpmNeed, add_platform_files, load_needs
+from outpost.config import ConfigError, Mirrors, ProxyConfig
+from outpost.needs import (
+    FileNeed,
+    Needs,
+    NpmNeed,
+    add_pinned_files,
+    all_needs,
+    load_needs,
+    proxy_package_need,
+    read_needs_file,
+)
+from outpost.system import AirGappedSystem
 
 
 def test_merge_two_files(tmp_path):
@@ -59,6 +69,7 @@ def test_empty_and_missing(tmp_path):
         ("rpm: [{packages: [curl]}]", "rpm needs `distro:`"),
         ("files: [{url: https://x/y}]", "`name:`"),
         ("pypi: [{file: missing.txt}]", "does not exist"),
+        ("python: 3.10\npypi: [httpx]", 'put the version in quotes, such as python: "3.10"'),
     ],
 )
 def test_errors(tmp_path, text, message):
@@ -68,8 +79,8 @@ def test_errors(tmp_path, text, message):
         load_needs(tmp_path / "needs")
 
 
-def test_platform_files():
-    files = versions.platform_files(Mirrors(), {"compose", "k3s"})
+def test_pinned_files():
+    files = versions.pinned_files(Mirrors(), {"compose", "k3s"})
     names = [f["name"] for f in files]
     assert names == [
         "gitea",
@@ -83,9 +94,40 @@ def test_platform_files():
         "k3s-install",
     ]
     assert "%2B" in next(f["url"] for f in files if f["name"] == "k3s")
-    assert versions.platform_files(Mirrors(github="https://gh.mirror.ir"), {"swarm"})[4]["url"].startswith(
+    assert versions.pinned_files(Mirrors(github="https://gh.mirror.ir"), {"swarm"})[4]["url"].startswith(
         "https://gh.mirror.ir/docker/compose"
     )
-    assert [f["name"] for f in versions.platform_files(Mirrors(), set())] == ["gitea"]
-    needs = add_platform_files(load_needs(__import__("pathlib").Path("/nonexistent")), files)
+    assert [f["name"] for f in versions.pinned_files(Mirrors(), set())] == ["gitea"]
+    needs = add_pinned_files(load_needs(__import__("pathlib").Path("/nonexistent")), files)
     assert [f.name for f in needs.files] == names
+
+
+def test_an_unquoted_python_version_keeps_working_when_yaml_reads_it_right(tmp_path):
+    (tmp_path / "needs").mkdir()
+    (tmp_path / "needs" / "x.yml").write_text("python: 3.12\npypi: [httpx]\n")
+    assert load_needs(tmp_path / "needs").pypi == {"3.12": ["httpx"]}
+
+
+def test_read_needs_file_adds_one_file(tmp_path):
+    path = tmp_path / "x.yml"
+    path.write_text("images: [redis:7]\n")
+    needs = Needs(images=["postgres:16"])
+    read_needs_file(path, needs)
+    assert needs.images == ["postgres:16", "redis:7"] and needs.sources == ["x.yml"]
+
+
+def test_proxy_package_need_from_servers_yml_or_the_cached_facts():
+    proxy = ProxyConfig(host="g", allow=["a.example.com"])
+    assert proxy_package_need(ProxyConfig(host="g", allow=["a.example.com"], distro="noble"), None) == ("apt", "noble")
+    assert proxy_package_need(proxy, {"id": "rocky", "id_like": "rhel", "version_id": "9.4"}) == ("rpm", "rocky9")
+    with pytest.raises(ConfigError, match="outpost hosts --refresh"):
+        proxy_package_need(proxy, {"id": "debian"})  # apt, but no codename
+
+
+def test_all_needs_adds_the_pinned_files_and_tinyproxy(workspace_dir):
+    with open(workspace_dir / "servers.yml", "a") as f:
+        f.write("egress_proxy:\n  host: gitea-1\n  distro: bookworm\n  allow: [api.example.com]\n")
+    needs = all_needs(AirGappedSystem.load(workspace_dir))
+    assert "tinyproxy" in needs.apt["bookworm"] and needs.files[-1].name in {
+        f["name"] for f in versions.pinned_files(Mirrors(), {"compose"})
+    }

@@ -130,7 +130,7 @@ def setup(workspace: Workspace, servers: Servers, log=print) -> dict:  # noqa: C
     ip = cfg.ip or facts.get("ip")
     if not ip:
         raise RuntimeError("Could not detect the Gitea host's IP. Set gitea.ip in servers.yml.")
-    want = versions.names()["uname"]
+    want = versions.arch_names()["uname"]
     if facts.get("arch") and facts["arch"] != want:
         raise RuntimeError(
             f"[{cfg.host}] is {facts['arch']} but this platform is built for {want} (arch: {versions.ARCH} in servers.yml)."

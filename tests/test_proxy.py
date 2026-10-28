@@ -18,7 +18,7 @@ from outpost.config import ConfigError, ProxyConfig, load_servers
 from outpost.endpoints import GiteaEndpoint, make_proxy_endpoint
 from outpost.infra import clients, common, egress, k3s, proxy, verify
 from outpost.infra.context import NodeContext
-from outpost.needs import Needs
+from outpost.needs import Needs, add_proxy_package
 from outpost.ssh import Result
 from outpost.workspace import Workspace
 from tests.conftest import FakeHost
@@ -616,25 +616,25 @@ def test_host_checks_cover_the_exception_and_the_log():
 
 
 def test_needs_get_tinyproxy_for_the_proxy_hosts_distro():
-    needs = proxy.add_package(
+    needs = add_proxy_package(
         Needs(apt={"noble": ["curl"]}), ProxyConfig(host="g", allow=["a.example.com"], distro="noble"), None
     )
     assert needs.apt == {"noble": ["curl", "tinyproxy"]}
-    assert proxy.add_package(Needs(), ProxyConfig(host="g", allow=["a.example.com"], distro="rocky9"), None).rpm == {
+    assert add_proxy_package(Needs(), ProxyConfig(host="g", allow=["a.example.com"], distro="rocky9"), None).rpm == {
         "rocky9": ["tinyproxy"]
     }
     cfg = ProxyConfig(host="g", allow=["a.example.com"])
-    assert proxy.add_package(Needs(), cfg, {"id": "debian", "codename": "bookworm"}).apt == {"bookworm": ["tinyproxy"]}
-    assert proxy.add_package(
+    assert add_proxy_package(Needs(), cfg, {"id": "debian", "codename": "bookworm"}).apt == {"bookworm": ["tinyproxy"]}
+    assert add_proxy_package(
         Needs(), cfg, {"id": "almalinux", "id_like": "rhel centos fedora", "version_id": "9.4"}
     ).rpm == {"alma9": ["tinyproxy"]}
-    assert proxy.add_package(Needs(), None, None).is_empty()
+    assert add_proxy_package(Needs(), None, None).is_empty()
     with pytest.raises(ConfigError, match="outpost hosts --refresh"):
-        proxy.add_package(Needs(), cfg, None)
+        add_proxy_package(Needs(), cfg, None)
     with pytest.raises(ConfigError, match="Alpine"):
-        proxy.add_package(Needs(), cfg, {"id": "alpine", "version_id": "3.20.1"})
+        add_proxy_package(Needs(), cfg, {"id": "alpine", "version_id": "3.20.1"})
     with pytest.raises(ConfigError, match="neither a Debian or Ubuntu codename"):
-        proxy.add_package(Needs(), ProxyConfig(host="g", allow=["a.example.com"], distro="windows"), None)
+        add_proxy_package(Needs(), ProxyConfig(host="g", allow=["a.example.com"], distro="windows"), None)
 
 
 def test_outpost_needs_shows_tinyproxy(workspace_dir, capsys):

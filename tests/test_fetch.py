@@ -37,7 +37,7 @@ def test_pypi_command_flags(tmp_path):
     assert cmd[:3] == ["pip", "download", "-q"]
     assert "--index-url" in cmd and "https://pypi.mirror.ir/simple" in cmd
     assert cmd[cmd.index("--python-version") + 1] == "3.12" and "cp312" in cmd and "--only-binary=:all:" in cmd
-    assert cmd.count("--platform") == len(versions.names()["pip"]) and "manylinux2014_x86_64" in cmd
+    assert cmd.count("--platform") == len(versions.arch_names()["pip"]) and "manylinux2014_x86_64" in cmd
     assert (tmp_path / "pypi" / ".requirements-py3.12.txt").read_text() == "flask==3.0.0\nhttpx\n"
     assert result["failed"] == []
 
@@ -101,9 +101,6 @@ def test_rpm_script_and_image():
     assert rpm.image_for("fedora40") == "fedora:40" and rpm.image_for("stream9") == "quay.io/centos/centos:stream9"
     with pytest.raises(ValueError):
         rpm.image_for("rhel9")
-    assert rpm.distro_for_host("rocky", "9.4") == "rocky9" and rpm.distro_for_host("almalinux", "9.4") == "alma9"
-    assert rpm.distro_for_host("fedora", "40") == "fedora40" and rpm.distro_for_host("centos", "9") == "stream9"
-    assert rpm.distro_for_host("ubuntu", "24.04") is None
     script = rpm.script_for("rocky9", ["curl", "git"], Mirrors(rocky="https://rocky.mirror.ir/rocky"))
     assert (
         "rm -f /etc/yum.repos.d/*.repo" in script

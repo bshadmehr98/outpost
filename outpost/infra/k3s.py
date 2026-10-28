@@ -71,7 +71,7 @@ def _install(host, ctx: NodeContext, exec_args: str, env: str, log) -> None:
     host.write("/etc/rancher/k3s/registries.yaml", registries_yaml(ctx))
     host.run(
         f"mkdir -p {IMAGES_DIR}\n"
-        f"{common.curl(ctx, g.generic('k3s', versions.K3S, versions.names()['k3s']), '/usr/local/bin/k3s')} && chmod 755 /usr/local/bin/k3s\n"
+        f"{common.curl(ctx, g.generic('k3s', versions.K3S, versions.arch_names()['k3s']), '/usr/local/bin/k3s')} && chmod 755 /usr/local/bin/k3s\n"
         f"{common.curl(ctx, g.generic('k3s-airgap-images', versions.K3S, f'k3s-airgap-images-{versions.ARCH}.tar.gz'), IMAGES_DIR + '/k3s-airgap-images.tar.gz')}\n"
         f"{common.curl(ctx, g.generic('k3s-install', versions.K3S, 'install.sh'), '/tmp/k3s-install.sh')}\n"
         f"INSTALL_K3S_SKIP_DOWNLOAD=true INSTALL_K3S_EXEC={exec_args!r} {env} sh /tmp/k3s-install.sh\n"

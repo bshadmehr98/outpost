@@ -17,7 +17,8 @@ import yaml
 
 from .. import oci
 from ..config import ConfigError
-from ..needs import parsers
+from ..distros import kind_for_distro
+from ..needs import read_js_lockfile, read_python_lockfile
 from ..workspace import Workspace
 
 PYTHON_LOCKFILES = ("requirements.txt", "requirements.in", "poetry.lock", "uv.lock", "Pipfile.lock")
@@ -45,27 +46,16 @@ ALPINE_CURRENT = "v3.20"
 _RPM_IMAGES = {"rockylinux": "rocky", "almalinux": "alma", "fedora": "fedora"}
 
 
-def kind_for_distro(distro: str | None) -> str | None:
-    """bookworm -> apt, v3.20 -> apk, rocky9 -> rpm."""
-    if not distro:
-        return None
-    if re.fullmatch(r"v\d+\.\d+", distro):
-        return "apk"
-    if re.fullmatch(r"(rocky|alma|fedora|stream)\d+", distro):
-        return "rpm"
-    return "apt"
-
-
 def describe_lockfile(path: Path) -> dict:
     """{"path", "kind": "python"|"js"|None, "count", "error"} for one file."""
     info = {"path": str(path), "name": path.name, "kind": None, "count": 0, "error": None}
     try:
         if path.name in JS_LOCKFILES:
             info["kind"] = "js"
-            info["count"] = len(parsers.parse_js_file(path))
+            info["count"] = len(read_js_lockfile(path))
         elif path.name in PYTHON_LOCKFILES or path.suffix in (".txt", ".in"):
             info["kind"] = "python"
-            info["count"] = len(parsers.parse_python_file(path))
+            info["count"] = len(read_python_lockfile(path))
         else:
             info["error"] = "not a lockfile I can read: " + ", ".join(PYTHON_LOCKFILES + JS_LOCKFILES)
     except (ConfigError, OSError, ValueError) as e:

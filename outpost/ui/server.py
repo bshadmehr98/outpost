@@ -45,7 +45,7 @@ from .. import report as reportmod
 from ..checks import load_checks
 from ..config import ConfigError, load_mirrors, load_servers
 from ..http import HttpError
-from ..needs import Needs, add_platform_files, load_needs
+from ..needs import Needs, add_pinned_files, add_proxy_package, load_needs, read_needs_file
 from ..ssh import SshError
 from ..workspace import Workspace
 from . import explain, projects, status
@@ -109,10 +109,8 @@ def needs_files(workspace: Workspace) -> list[dict]:
             raw = yaml.safe_load(path.read_text()) or {}
             entry["raw"] = raw if isinstance(raw, dict) else None
             entry["name"] = str(raw.get("name", path.stem)) if isinstance(raw, dict) else path.stem
-            from ..needs import Needs, _parse_one
-
             n = Needs()
-            _parse_one(path, n)
+            read_needs_file(path, n)
             entry["summary"] = n.summary()
         except (ConfigError, yaml.YAMLError) as e:
             entry["error"] = str(e)
@@ -124,12 +122,10 @@ def needs_detail(workspace: Workspace, infra_types: set[str], servers=None) -> d
     """The merged list `outpost fetch` will work from, including Gitea, Docker and k3s themselves, and
     tinyproxy when servers.yml has an egress proxy (left out while its distro is unknown)."""
     needs = load_needs(workspace.needs_dir)
-    add_platform_files(needs, versions.platform_files(load_mirrors(workspace.mirrors_file), infra_types))
+    add_pinned_files(needs, versions.pinned_files(load_mirrors(workspace.mirrors_file), infra_types))
     if servers and servers.egress_proxy:
-        from ..infra import proxy as proxymod
-
         with contextlib.suppress(ConfigError):
-            proxymod.add_package(needs, servers.egress_proxy, hostsmod.cached(workspace).get(servers.egress_proxy.host))
+            add_proxy_package(needs, servers.egress_proxy, hostsmod.cached(workspace).get(servers.egress_proxy.host))
     return {
         "images": needs.images,
         "pypi": {py: specs for py, specs in needs.pypi.items()},
@@ -170,7 +166,7 @@ def overview(workspace: Workspace) -> dict:
         data["needs_detail"] = None
     full = load_needs(workspace.needs_dir) if needs else Needs()
     if needs:
-        add_platform_files(full, versions.platform_files(load_mirrors(workspace.mirrors_file), infra_types))
+        add_pinned_files(full, versions.pinned_files(load_mirrors(workspace.mirrors_file), infra_types))
     data["box_status"] = status.box_status(workspace, full)
     data["box_changes"] = status.box_changes(workspace, full)
     data["sync"] = status.sync(workspace, data["box_status"], list((data["servers"] or {}).get("infrastructures", {})))

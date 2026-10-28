@@ -21,7 +21,6 @@ def test_distro_for_image():
     assert projects.distro_for_image("fedora:40") == "fedora40"
     assert projects.distro_for_image("quay.io/centos/centos:stream9") == "stream9"
     assert projects.distro_for_image("fedora:latest") is None
-    assert [projects.kind_for_distro(d) for d in ("bookworm", "v3.20", "rocky9", None)] == ["apt", "apk", "rpm", None]
 
 
 def test_read_dockerfile_skips_stages_and_args(tmp_path):

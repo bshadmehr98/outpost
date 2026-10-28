@@ -57,10 +57,10 @@ import shlex
 import time
 
 from .. import hosts, versions
-from ..config import ConfigError, ProxyConfig
+from ..config import ProxyConfig
+from ..distros import distro_of_host, os_family
 from ..endpoints import PRIVATE_NETS, GiteaEndpoint, ProxyEndpoint
-from ..fetch import apt as aptmod
-from ..fetch import rpm as rpmmod
+from ..needs import PROXY_PACKAGE
 from ..system import AirGappedSystem
 from ..workspace import STATE_PROXY
 from . import clients, common, egress, k3s
@@ -80,7 +80,6 @@ OLD_PATHS = (
     "/etc/logrotate.d/outpost-proxy",
 )  # written by earlier versions
 STOCK_UNIT = "tinyproxy.service"
-PACKAGE = "tinyproxy"
 REFUSAL_PROBES = ("example.com", "example.net", "example.org")  # documentation domains, IANA reserved
 
 # tinyproxy opens its log after dropping to USER, and the package's postinst gives the directory to its own
@@ -208,71 +207,23 @@ WantedBy=multi-user.target
 """
 
 
-# -- getting tinyproxy into the box ---------------------------------------------------
-
-
-def package_need(cfg: ProxyConfig, facts: dict | None) -> tuple[str, str]:
-    """(kind, distro) of the proxy host: `egress_proxy.distro`, else what `outpost hosts` cached about it."""
-    if cfg.distro:
-        if cfg.distro in aptmod.DEBIAN | aptmod.UBUNTU:
-            return "apt", cfg.distro
-        try:
-            rpmmod.split(cfg.distro)
-        except ValueError:
-            raise ConfigError(
-                f"egress_proxy.distro {cfg.distro!r} is neither a Debian or Ubuntu codename (bookworm, noble) "
-                "nor an rpm distro (rocky9, alma9, fedora40, stream9)"
-            ) from None
-        return "rpm", cfg.distro
-    if facts and facts.get("id"):
-        family = common.os_family(facts)
-        if family == "apk":
-            raise ConfigError(
-                f"the egress proxy host {cfg.host} runs Alpine, which Outpost does not support as a proxy host; "
-                "put the proxy on a Debian, Ubuntu or RHEL-family host (egress_proxy.host)"
-            )
-        if family == "apt" and facts.get("codename"):
-            return "apt", facts["codename"]
-        if family == "rpm":
-            distro = rpmmod.distro_for_host(facts.get("id", ""), facts.get("version_id", ""))
-            if distro:
-                return "rpm", distro
-    raise ConfigError(
-        f"Outpost does not know which system the egress proxy host {cfg.host} runs, so it cannot fetch tinyproxy "
-        "for it. Set `distro:` under egress_proxy in servers.yml (noble, bookworm, rocky9...) or run "
-        "`outpost hosts --refresh` once so Outpost can ask the host."
-    )
-
-
-def add_package(needs, cfg: ProxyConfig | None, facts: dict | None):
-    """Add tinyproxy to the apt or rpm needs of the proxy host's distro, as a platform package."""
-    if cfg:
-        kind, distro = package_need(cfg, facts)
-        pkgs = getattr(needs, kind).setdefault(distro, [])
-        if PACKAGE not in pkgs:
-            pkgs.append(PACKAGE)
-    return needs
-
-
 # -- setup --------------------------------------------------------------------------
 
 
-def _distro_of(family: str, facts: dict) -> str:
-    if family == "rpm":
-        return rpmmod.distro_for_host(facts.get("id", ""), facts.get("version_id", "")) or facts.get("id", "?")
-    return facts.get("codename") or facts.get("id", "?")
+def _distro_of(facts: dict) -> str:
+    return distro_of_host(facts) or facts.get("id", "?")
 
 
 INSTALL = {
     "apt": (
         "apt-get update -qq 2>&1 | tail -3\n"
-        f"if ! apt-cache show {PACKAGE} >/dev/null 2>&1; then echo OUTPOST-NO-TINYPROXY; exit 0; fi\n"
-        f"DEBIAN_FRONTEND=noninteractive apt-get install -y -q -o Dpkg::Options::=--force-confold {PACKAGE} 2>&1 | tail -3\n"
+        f"if ! apt-cache show {PROXY_PACKAGE} >/dev/null 2>&1; then echo OUTPOST-NO-TINYPROXY; exit 0; fi\n"
+        f"DEBIAN_FRONTEND=noninteractive apt-get install -y -q -o Dpkg::Options::=--force-confold {PROXY_PACKAGE} 2>&1 | tail -3\n"
     ),
     "rpm": (
         "dnf -q makecache 2>&1 | tail -3\n"
-        f"if ! dnf -q info {PACKAGE} >/dev/null 2>&1; then echo OUTPOST-NO-TINYPROXY; exit 0; fi\n"
-        f"dnf install -y -q {PACKAGE} 2>&1 | tail -3\n"
+        f"if ! dnf -q info {PROXY_PACKAGE} >/dev/null 2>&1; then echo OUTPOST-NO-TINYPROXY; exit 0; fi\n"
+        f"dnf install -y -q {PROXY_PACKAGE} 2>&1 | tail -3\n"
     ),
 }
 REGISTRY = {"apt": ("Debian", "apt"), "rpm": ("RPM", "rpm")}
@@ -290,7 +241,7 @@ def diagnose_script(family: str, gitea: GiteaEndpoint, distro: str) -> str:
             keep_going + f"echo '--- dnf makecache'; dnf makecache 2>&1 | tail -20\n"
             f"echo '--- {clients.PATH_RPM_REPO}'; cat {clients.PATH_RPM_REPO} 2>&1\n"
             f"echo '--- dnf repolist'; dnf repolist -v 2>&1 | tail -20\n"
-            f"echo '--- dnf info {PACKAGE}'; dnf info {PACKAGE} 2>&1 | tail -10\n"
+            f"echo '--- dnf info {PROXY_PACKAGE}'; dnf info {PROXY_PACKAGE} 2>&1 | tail -10\n"
             f"echo '--- {url}'; curl --cacert {clients.PATH_CA} -sS -o /dev/null -w '%{{http_code}}\\n' --max-time 10 {shlex.quote(url)} 2>&1\n"
         )
     url = f"{gitea.apt_repo}/dists/{distro}/Release"
@@ -298,7 +249,7 @@ def diagnose_script(family: str, gitea: GiteaEndpoint, distro: str) -> str:
         keep_going + f"echo '--- apt-get update'; apt-get update 2>&1 | tail -20\n"
         f"echo '--- /etc/apt/sources.list.d/outpost.list'; cat /etc/apt/sources.list.d/outpost.list 2>&1\n"
         f"echo '--- other sources'; ls /etc/apt/sources.list /etc/apt/sources.list.d/ 2>&1\n"
-        f"echo '--- apt-cache policy {PACKAGE}'; apt-cache policy {PACKAGE} 2>&1\n"
+        f"echo '--- apt-cache policy {PROXY_PACKAGE}'; apt-cache policy {PROXY_PACKAGE} 2>&1\n"
         f"echo '--- {url}'; curl --cacert {clients.PATH_CA} -sS -o /dev/null -w '%{{http_code}}\\n' --max-time 10 {shlex.quote(url)} 2>&1\n"
         f"echo '--- getent hosts {gitea.name}'; getent hosts {shlex.quote(gitea.name)} 2>&1\n"
     )
@@ -316,18 +267,18 @@ def setup(
     g = ctx.gitea
     log(f"==> [1/6] connecting to {host.alias}")
     facts = host.facts()
-    family = common.os_family(facts)
+    family = os_family(facts)
     if family == "apk":
         raise RuntimeError(
             f"[{host.alias}] runs Alpine, which Outpost does not support as an egress proxy host. "
             "Put the proxy on a Debian, Ubuntu or RHEL-family host (egress_proxy.host in servers.yml)."
         )
-    want = versions.names()["uname"]
+    want = versions.arch_names()["uname"]
     if facts.get("arch") and facts["arch"] != want:
         raise RuntimeError(
             f"[{host.alias}] is {facts['arch']} but this platform is built for {want} (arch: {versions.ARCH} in servers.yml)."
         )
-    distro = _distro_of(family, facts)
+    distro = _distro_of(facts)
     log(
         f"  [{host.alias}] {facts.get('id', '?')} {distro}, proxy {p.url} ({'on the Gitea host' if p.on_gitea else 'its own host'})"
     )
@@ -342,30 +293,30 @@ def setup(
     else:
         common.prepare_node(host, ctx, log)
 
-    log(f"==> [3/6] {PACKAGE} from Gitea")
+    log(f"==> [3/6] {PROXY_PACKAGE} from Gitea")
     out = host.run(f"systemctl mask {STOCK_UNIT} >/dev/null 2>&1 || true\n" + INSTALL[family], timeout=900)
     if "OUTPOST-NO-TINYPROXY" in out.stdout:
         name, kind = REGISTRY[family]
         seen = host.run(diagnose_script(family, g, distro), timeout=300)
         detail = (seen.stdout + seen.stderr).strip()[-3000:]
         raise RuntimeError(
-            f"Gitea's {name} registry has no {PACKAGE} for {distro}. Run `outpost fetch --only {kind}` and "
-            f"`outpost upload` (with egress_proxy in servers.yml, fetch adds {PACKAGE} for {distro} by itself), "
+            f"Gitea's {name} registry has no {PROXY_PACKAGE} for {distro}. Run `outpost fetch --only {kind}` and "
+            f"`outpost upload` (with egress_proxy in servers.yml, fetch adds {PROXY_PACKAGE} for {distro} by itself), "
             f"then `outpost proxy setup` again.\nWhat [{host.alias}] sees:\n{detail}"
         )
     if not out.ok:
         raise RuntimeError(
-            f"[{host.alias}] installing {PACKAGE} from Gitea failed: {(out.stderr or out.stdout).strip()[-400:]}"
+            f"[{host.alias}] installing {PROXY_PACKAGE} from Gitea failed: {(out.stderr or out.stdout).strip()[-400:]}"
         )
     found = host.run(
         f"systemctl disable --now {STOCK_UNIT} >/dev/null 2>&1 || true\n"
-        f"command -v {PACKAGE} || ls /usr/sbin/{PACKAGE} /usr/bin/{PACKAGE} 2>/dev/null | head -1 || true\n"
-        f"{PACKAGE} -v 2>&1 | head -1 || true",
+        f"command -v {PROXY_PACKAGE} || ls /usr/sbin/{PROXY_PACKAGE} /usr/bin/{PROXY_PACKAGE} 2>/dev/null | head -1 || true\n"
+        f"{PROXY_PACKAGE} -v 2>&1 | head -1 || true",
         raise_on_failure=True,
     ).stdout.split()
-    binary = next((w for w in found if w.startswith("/")), f"/usr/bin/{PACKAGE}")
+    binary = next((w for w in found if w.startswith("/")), f"/usr/bin/{PROXY_PACKAGE}")
     version = next((w for w in reversed(found) if re.fullmatch(r"\d+\.\d+(\.\d+)?\S*", w)), "")
-    log(f"  [{host.alias}] {PACKAGE} {version or '(version unknown)'} at {binary}, stock {STOCK_UNIT} masked")
+    log(f"  [{host.alias}] {PROXY_PACKAGE} {version or '(version unknown)'} at {binary}, stock {STOCK_UNIT} masked")
 
     log(f"==> [4/6] user {USER}, configuration, allow list")
     host.run(
@@ -470,9 +421,9 @@ def host_checks(ctx: NodeContext, cfg: ProxyConfig) -> list[tuple[str, str]]:
         (
             "tinyproxy installed from gitea",
             by_family(
-                apt=f"dpkg -s {PACKAGE} >/dev/null 2>&1 && apt-cache policy {PACKAGE} | grep -q {shlex.quote(g.apt_repo)} && {PACKAGE} -v",
+                apt=f"dpkg -s {PROXY_PACKAGE} >/dev/null 2>&1 && apt-cache policy {PROXY_PACKAGE} | grep -q {shlex.quote(g.apt_repo)} && {PROXY_PACKAGE} -v",
                 apk="echo 'Alpine is not supported as a proxy host'; false",
-                rpm=f"rpm -q {PACKAGE} && dnf -q list --installed {PACKAGE} 2>/dev/null | grep -q '@outpost-'",
+                rpm=f"rpm -q {PROXY_PACKAGE} && dnf -q list --installed {PROXY_PACKAGE} 2>/dev/null | grep -q '@outpost-'",
             ),
         ),
         (

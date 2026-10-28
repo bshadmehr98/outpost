@@ -135,27 +135,6 @@ def test_config_image_blanks_stock_os_sources_and_stays_text_only():
     )
 
 
-def test_os_family_from_os_release_facts():
-    assert (
-        common.os_family({"id": "ubuntu", "id_like": "debian"}) == "apt" and common.os_family({"id": "debian"}) == "apt"
-    )
-    assert common.os_family({"id": "alpine"}) == "apk"
-    assert (
-        common.os_family({"id": "rocky", "id_like": "rhel centos fedora"}) == "rpm"
-        and common.os_family({"id": "fedora"}) == "rpm"
-    )
-    assert (
-        common.os_family({"id": "almalinux", "id_like": "rhel centos fedora"}) == "rpm"
-        and common.os_family({"id": "centos", "id_like": "rhel fedora"}) == "rpm"
-    )
-    assert (
-        common.os_family({"codename": "noble"}) == "apt" and common.os_family({}) == "apt"
-    )  # unknown: what every node was before
-    assert (
-        common.apk_branch_of({"version_id": "3.20.3"}) == "v3.20" and common.apk_branch_of({"version_id": ""}) is None
-    )
-
-
 def test_prepare_node_on_alpine_configures_apk_and_parks_the_stock_repositories():
     ctx = NodeContext(gitea=G, ca_pem="CA", distros=["bookworm"], apk_branches=["v3.19"], infra_name="dev")
     host = FakeHost(

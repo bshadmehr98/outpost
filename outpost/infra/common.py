@@ -20,7 +20,7 @@ name in /etc/hosts when it is not on the Gitea host, /etc/outpost/proxy.env, the
 import shlex
 
 from .. import versions
-from ..fetch import rpm as rpmmod
+from ..distros import apk_branch_of, os_family, rpm_distro_of_host
 from . import clients, egress, hostsfile
 from .context import NodeContext
 
@@ -68,23 +68,6 @@ def curl(ctx: NodeContext, url: str, out: str) -> str:
     return f"curl --cacert {clients.PATH_CA} -fsSL {shlex.quote(url)} -o {shlex.quote(out)}"
 
 
-def os_family(facts: dict) -> str:
-    """apt, apk or rpm, from /etc/os-release's ID and ID_LIKE. Anything unrecognised is treated as apt,
-    which is what every node was assumed to be before Alpine and the RHEL family were supported."""
-    ids = f"{facts.get('id', '')} {facts.get('id_like', '')}".lower().split()
-    if "alpine" in ids:
-        return "apk"
-    if any(i in ("rhel", "fedora", "centos", "rocky", "almalinux") for i in ids):
-        return "rpm"
-    return "apt"
-
-
-def apk_branch_of(facts: dict) -> str | None:
-    """An Alpine host's own branch: VERSION_ID 3.20.3 -> v3.20."""
-    parts = str(facts.get("version_id", "")).split(".")
-    return f"v{parts[0]}.{parts[1]}" if len(parts) >= 2 and all(x.isdigit() for x in parts[:2]) else None
-
-
 def registry_check(ctx: NodeContext) -> str:
     """Docker has the CA for Gitea's registry and the registry answers /v2/ (200, or 401 asking for a token).
     Pulls nothing, so it holds on a sealed node with an empty registry."""
@@ -103,7 +86,7 @@ def prepare_node(host, ctx: NodeContext, log=print) -> dict:
     log(
         f"  [{host.alias}] {facts.get('id', '?')} {facts.get('codename', '')} {facts.get('arch', '')} ip={facts.get('ip', '?')}"
     )
-    want = versions.names()["uname"]
+    want = versions.arch_names()["uname"]
     if facts.get("arch") and facts["arch"] != want:
         raise RuntimeError(
             f"[{host.alias}] is {facts['arch']} but this platform is built for {want} (arch: {versions.ARCH} in servers.yml)."
@@ -219,7 +202,7 @@ def _configure_apk(host, ctx: NodeContext, facts: dict) -> None:
     """Alpine: the key goes to /etc/apk/keys under the name Gitea sends (curl -J keeps it), the stock
     /etc/apk/repositories is parked as repositories.disabled, and only branches Gitea serves are written."""
     g = ctx.gitea
-    arch = versions.names()["uname"]
+    arch = versions.arch_names()["uname"]
     own = apk_branch_of(facts)
     branches = list(dict.fromkeys(ctx.apk_branches + ([own] if own else [])))
     lines = "\n".join(
@@ -242,7 +225,7 @@ def _configure_rpm(host, ctx: NodeContext, facts: dict) -> None:
     """RHEL family: Gitea's key to /etc/outpost/gitea-rpm.asc, the stock *.repo files parked in
     /etc/yum.repos.d.disabled/, and outpost.repo with one section per distro (Gitea group) that exists."""
     g = ctx.gitea
-    own = rpmmod.distro_for_host(facts.get("id", ""), facts.get("version_id", ""))
+    own = rpm_distro_of_host(facts)
     distros = list(dict.fromkeys(ctx.rpm_distros + ([own] if own else [])))
     lines = "\n".join(
         f"if curl --cacert {clients.PATH_CA} -fsI --max-time 10 {g.rpm_repo}/{d}/repodata/repomd.xml >/dev/null 2>&1; then printf '%s\\n' {shlex.quote(clients.rpm_repo_section(g, d))}; fi"
