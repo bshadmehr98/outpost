@@ -122,4 +122,6 @@ command's output. The list is in `outpost/infra/verify.py` (common) and in each 
 (`extra_checks`). It only reads; it never fixes. If a line is not `ok`, run setup again and
 read its log. Two checks, `package sources are gitea only` and `package index updates offline`,
 pick their command on the node from `/etc/os-release` (`apt-get update`, `apk update` or
-`dnf makecache`), so the table reads the same on every family.
+`dnf makecache`), so the table reads the same on every family. The first needs at least one source
+that points at Gitea as well as none that points elsewhere (an empty `outpost.list` fails it), and
+the second takes the exit status of apt-get, apk or dnf itself.

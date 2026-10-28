@@ -3,7 +3,7 @@
 Output is a list of {name, ok, detail}. The checks that matter most:
   - the node reaches Gitea over TLS it trusts
   - the public internet is rejected, and the seal comes back after a reboot
-  - every package client is configured to use Gitea only (apt, apk or dnf, whichever the node has)
+  - every package client is configured to use Gitea, and only Gitea (apt, apk or dnf, whichever the node has)
   - with an egress proxy: the proxy lets an allowed name through and refuses any other
 """
 
@@ -21,17 +21,33 @@ def by_family(apt: str, apk: str, rpm: str) -> str:
             f"*alpine*) {apk} ;; *rhel*|*fedora*|*centos*|*rocky*|*almalinux*) {rpm} ;; *) {apt} ;; esac")
 
 
+def source_commands(g: clients.GiteaInfo) -> dict[str, str]:
+    """At least one source points at Gitea, and none points anywhere else. Both halves matter: from 0.1.0
+    the apt probe in setup used HEAD, which Gitea's Debian registry does not answer, so outpost.list was
+    empty on every apt node, and a check that only looked for foreign sources passed on an empty list."""
+    def gitea_count(what: str, count: str, fix: str) -> str:
+        return (f"{{ n=$({count}); if [ \"$n\" -gt 0 ]; then echo \"{what} from gitea: $n\"; "
+                f"else echo {shlex.quote(f'no {what} point at gitea: {fix}')}; false; fi; }}")
+    fix = "is this release uploaded to Gitea? `outpost fetch` and `outpost upload` it, then `outpost infra setup` again"
+    apt_lines = "grep -rhsE '^(deb |URIs:)' /etc/apt/sources.list /etc/apt/sources.list.d/"
+    return dict(
+        apt=(f"! grep -rhs '^deb ' /etc/apt/sources.list /etc/apt/sources.list.d/ | grep -v {g.url} && "
+             f"! grep -rhs '^URIs:' /etc/apt/sources.list.d/ | grep -v {g.url} && "
+             + gitea_count("apt sources", f"{apt_lines} | grep -c {shlex.quote(g.apt_repo)}", f"/etc/apt/sources.list.d/outpost.list has no deb line; {fix}")),
+        apk=(f"! grep -v '^#' {clients.PATH_APK_REPOS} | grep -v '^$' | grep -v {g.url} && "
+             + gitea_count("apk repositories", f"grep -v '^#' {clients.PATH_APK_REPOS} | grep -c {shlex.quote(g.apk_repo)}", f"{clients.PATH_APK_REPOS} is empty; {fix}")),
+        rpm=("! grep -lsE '^enabled *= *1' /etc/yum.repos.d/*.repo | grep -v outpost.repo && "
+             + gitea_count("rpm repositories", f"grep -csE '^baseurl *= *{g.rpm_repo}/' {clients.PATH_RPM_REPO}", f"{clients.PATH_RPM_REPO} has no section; {fix}")),
+    )
+
+
 def common_checks(ctx: common.NodeContext) -> list[tuple[str, str]]:
     g = ctx.gitea
-    sources_only_gitea = by_family(
-        apt=f"! grep -rhs '^deb ' /etc/apt/sources.list /etc/apt/sources.list.d/ | grep -v {g.url}; ! grep -rhs '^URIs:' /etc/apt/sources.list.d/ | grep -v {g.url}",
-        apk=f"! grep -v '^#' {clients.PATH_APK_REPOS} | grep -v '^$' | grep -v {g.url}",
-        rpm="! grep -lsE '^enabled *= *1' /etc/yum.repos.d/*.repo | grep -v outpost.repo",
-    )
+    # the tool's own exit status, not tail's: a source that fails to download fails the check
     index_updates = by_family(
-        apt="apt-get update -qq 2>&1 | tail -3",
-        apk="apk update 2>&1 | tail -3",
-        rpm="dnf makecache -q 2>&1 | tail -3",
+        apt="out=$(apt-get update -qq 2>&1); rc=$?; echo \"$out\" | tail -3; test $rc -eq 0",
+        apk="out=$(apk update 2>&1); rc=$?; echo \"$out\" | tail -3; test $rc -eq 0",
+        rpm="out=$(dnf makecache -q 2>&1); rc=$?; echo \"$out\" | tail -3; test $rc -eq 0",
     )
     return [
         ("gitea in /etc/hosts", f"getent hosts {g.name} | grep -q {g.ip}"),
@@ -40,7 +56,7 @@ def common_checks(ctx: common.NodeContext) -> list[tuple[str, str]]:
         ("system trust store has the CA", f"curl -fsS --max-time 10 {g.url}/api/v1/version"),
         ("pip points at gitea", f"grep -q {g.url} /etc/pip.conf && ! grep -rqs extra-index-url /etc/pip.conf /root/.pip /root/.config/pip"),
         ("npm points at gitea", f"grep -q {g.url} /etc/npmrc"),
-        ("package sources are gitea only", sources_only_gitea),
+        ("package sources are gitea only", by_family(**source_commands(g))),
         ("node dns for containers running", "systemctl is-active outpost-dns"),
         ("package index updates offline", index_updates),
         ("egress sealed", "test \"$(/usr/local/sbin/outpost-egress status)\" = sealed"),

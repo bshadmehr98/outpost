@@ -239,3 +239,55 @@ def test_config_image_puts_the_ca_where_openssl_looks_it_up(ca_pem):
     image = clients.config_image_files(G, ca_pem, None, [], ca_hash=h)
     assert image[f"/etc/ssl/certs/{h}.0"][0] == image["/etc/outpost/ca.crt"][0] == ca_pem.encode()
     assert not any(p.startswith("/etc/ssl/") for p in clients.config_image_files(G, ca_pem, None, []))
+
+
+def run_sources_check(tmp_path, family: str, files: dict[str, str]):
+    """Run one family's sources check against a fake root: every /etc/ path is moved under tmp_path."""
+    import subprocess
+    for path, content in files.items():
+        target = tmp_path / path.lstrip("/")
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(content)
+    for d in ("etc/apt/sources.list.d", "etc/yum.repos.d", "etc/apk"):
+        (tmp_path / d).mkdir(parents=True, exist_ok=True)
+    cmd = verify.source_commands(G)[family].replace("/etc/", f"{tmp_path}/etc/")
+    out = subprocess.run(["bash", "-c", f"( {cmd} ) 2>&1"], capture_output=True, text=True)
+    last = out.stdout.strip().splitlines()[-1] if out.stdout.strip() else ""
+    return out.returncode, last.replace(str(tmp_path), "")
+
+
+def test_sources_check_fails_without_a_gitea_source(tmp_path):
+    """From 0.1.0 outpost.list was empty on every apt node (the setup probe used HEAD, which Gitea's
+    Debian registry refuses) and the check, which only looked for foreign sources, passed."""
+    apt = "/etc/apt/sources.list.d/outpost.list"
+    rc, detail = run_sources_check(tmp_path / "apt-empty", "apt", {apt: ""})
+    assert rc != 0 and detail.startswith("no apt sources point at gitea: /etc/apt/sources.list.d/outpost.list has no deb line")
+    rc, detail = run_sources_check(tmp_path / "apt-ok", "apt", {apt: clients.apt_source_line(G, "noble") + "\n"})
+    assert rc == 0 and detail == "apt sources from gitea: 1"
+    rc, detail = run_sources_check(tmp_path / "apt-foreign", "apt", {apt: clients.apt_source_line(G, "noble") + "\n",
+                                                                     "/etc/apt/sources.list": "deb http://archive.ubuntu.com/ubuntu noble main\n"})
+    assert rc != 0 and "archive.ubuntu.com" in detail   # a foreign line fails it even with a Gitea one next to it
+
+    rc, detail = run_sources_check(tmp_path / "apk-empty", "apk", {clients.PATH_APK_REPOS: "# nothing\n"})
+    assert rc != 0 and detail.startswith("no apk repositories point at gitea: /etc/apk/repositories is empty")
+    rc, detail = run_sources_check(tmp_path / "apk-ok", "apk", {clients.PATH_APK_REPOS: clients.apk_repository_line(G, "v3.20") + "\n"})
+    assert rc == 0 and detail == "apk repositories from gitea: 1"
+
+    rc, detail = run_sources_check(tmp_path / "rpm-empty", "rpm", {clients.PATH_RPM_REPO: "\n"})
+    assert rc != 0 and detail.startswith("no rpm repositories point at gitea: /etc/yum.repos.d/outpost.repo has no section")
+    rc, detail = run_sources_check(tmp_path / "rpm-missing", "rpm", {})
+    assert rc != 0 and detail.startswith("no rpm repositories point at gitea")
+    two = clients.rpm_repo_section(G, "rocky9") + "\n" + clients.rpm_repo_section(G, "fedora40")
+    rc, detail = run_sources_check(tmp_path / "rpm-ok", "rpm", {clients.PATH_RPM_REPO: two})
+    assert rc == 0 and detail == "rpm repositories from gitea: 2"
+
+
+def test_index_update_check_takes_the_tools_exit_status(tmp_path):
+    """`apt-get update | tail -3` was the check before: tail's status, so a failed update passed."""
+    import subprocess
+    (tmp_path / "apt-get").write_text("#!/bin/sh\necho 'E: Failed to fetch https://gitea.internal/...'\nexit 100\n")
+    (tmp_path / "apt-get").chmod(0o755)
+    cmd = dict(verify.common_checks(CTX))["package index updates offline"]
+    apt = cmd.rsplit(" *) ", 1)[1].rsplit(" ;; esac", 1)[0]   # the apt branch, the case's last
+    out = subprocess.run(["bash", "-c", f"( {apt} )"], capture_output=True, text=True, env={"PATH": f"{tmp_path}:/usr/bin:/bin"})
+    assert out.returncode != 0 and "E: Failed to fetch" in out.stdout
