@@ -219,6 +219,19 @@ def test_8_k3s(rig):
     assert main(["--dir", str(rig), "check", "--infra", "k8s"]) == 0
 
 
+def job_logs(token: str, run_id: int) -> str:
+    """The failed jobs of a Gitea Actions run with the end of each log, so a red run says why."""
+    api = f"https://{GITEA_IP}/api/v1/repos/pkgs/demo/actions"
+    jobs = json.loads(sh("curl", "-sk", "-u", f"outpost:{token}", f"{api}/runs/{run_id}/jobs", check=False).stdout or "{}").get("jobs") or []
+    parts = []
+    for job in jobs:
+        parts.append(f"--- job {job.get('name')}: {job.get('conclusion')}")
+        if job.get("conclusion") != "success":
+            log = sh("curl", "-sk", "-u", f"outpost:{token}", f"{api}/jobs/{job['id']}/logs", check=False).stdout
+            parts.append(log[-3000:])
+    return "\n".join(parts) or f"no jobs for run {run_id}"
+
+
 def test_9_demo_through_gitea_actions(rig):
     """Push the demo; the runners on the nodes build it and deploy it to dev, prod and k8s; every
     deployment answers with the pushed commit and reports no internet at build time or now."""
@@ -232,7 +245,7 @@ def test_9_demo_through_gitea_actions(rig):
         if runs and runs[0]["status"] == "completed":
             break
         time.sleep(10)
-    assert runs and runs[0]["conclusion"] == "success", out
+    assert runs and runs[0]["conclusion"] == "success", job_logs(token, runs[0]["id"]) if runs else out
     for name, port in (("dev", 8000), ("prod", 8080), ("k8s", 30080)):
         ip = state["infras"][name]["ip"]
         health = json.loads(sh("curl", "-fsS", "--max-time", "15", f"http://{ip}:{port}/healthz").stdout)
