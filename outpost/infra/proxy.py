@@ -250,6 +250,25 @@ INSTALL = {
 REGISTRY = {"apt": ("Debian", "apt"), "rpm": ("RPM", "rpm")}
 
 
+def diagnose_script(family: str, gitea: GiteaInfo, distro: str) -> str:
+    """What the package manager saw when it found no tinyproxy: the refresh in full, the package source
+    Outpost wrote, what the index says about tinyproxy, and whether Gitea answers for the distro at all."""
+    if family == "rpm":
+        url = f"{gitea.rpm_repo}/{distro}/repodata/repomd.xml"
+        return (f"echo '--- dnf makecache'; dnf makecache 2>&1 | tail -20\n"
+                f"echo '--- {clients.PATH_RPM_REPO}'; cat {clients.PATH_RPM_REPO} 2>&1\n"
+                f"echo '--- dnf repolist'; dnf repolist -v 2>&1 | tail -20\n"
+                f"echo '--- dnf info {PACKAGE}'; dnf info {PACKAGE} 2>&1 | tail -10\n"
+                f"echo '--- {url}'; curl --cacert {clients.PATH_CA} -sS -o /dev/null -w '%{{http_code}}\\n' --max-time 10 {shlex.quote(url)} 2>&1\n")
+    url = f"{gitea.apt_repo}/dists/{distro}/Release"
+    return (f"echo '--- apt-get update'; apt-get update 2>&1 | tail -20\n"
+            f"echo '--- /etc/apt/sources.list.d/outpost.list'; cat /etc/apt/sources.list.d/outpost.list 2>&1\n"
+            f"echo '--- other sources'; ls /etc/apt/sources.list /etc/apt/sources.list.d/ 2>&1\n"
+            f"echo '--- apt-cache policy {PACKAGE}'; apt-cache policy {PACKAGE} 2>&1\n"
+            f"echo '--- {url}'; curl --cacert {clients.PATH_CA} -sS -o /dev/null -w '%{{http_code}}\\n' --max-time 10 {shlex.quote(url)} 2>&1\n"
+            f"echo '--- getent hosts {gitea.name}'; getent hosts {shlex.quote(gitea.name)} 2>&1\n")
+
+
 def setup(host, ctx: common.NodeContext, cfg: ProxyConfig, *, egress_allow: list[str], client_allow: list[str], log=print) -> dict:
     """Install and seal the proxy on `host`. ctx.proxy says where it is; on the Gitea host nothing of a
     node is prepared (it already resolves its own name, and reaches Gitea on itself), elsewhere the host
@@ -284,9 +303,11 @@ def setup(host, ctx: common.NodeContext, cfg: ProxyConfig, *, egress_allow: list
     out = host.run(f"systemctl mask {STOCK_UNIT} >/dev/null 2>&1 || true\n" + INSTALL[family], check=False, timeout=900)
     if "OUTPOST-NO-TINYPROXY" in out.stdout:
         name, kind = REGISTRY[family]
+        seen = host.run(diagnose_script(family, g, distro), check=False, timeout=300)
+        detail = (seen.stdout + seen.stderr).strip()[-3000:]
         raise RuntimeError(f"Gitea's {name} registry has no {PACKAGE} for {distro}. Run `outpost fetch --only {kind}` and "
                            f"`outpost upload` (with egress_proxy in servers.yml, fetch adds {PACKAGE} for {distro} by itself), "
-                           "then `outpost proxy setup` again.")
+                           f"then `outpost proxy setup` again.\nWhat [{host.alias}] sees:\n{detail}")
     if not out.ok:
         raise RuntimeError(f"[{host.alias}] installing {PACKAGE} from Gitea failed: {(out.stderr or out.stdout).strip()[-400:]}")
     found = host.run(f"systemctl disable --now {STOCK_UNIT} >/dev/null 2>&1 || true\n"

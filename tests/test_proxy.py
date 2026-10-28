@@ -328,6 +328,23 @@ def test_setup_explains_a_missing_package_and_refuses_alpine():
         proxy.setup(alpine, NodeContext(gitea=G, ca_pem="CA", proxy=ON_GITEA), CFG, egress_allow=[], client_allow=[], log=lambda *_: None)
 
 
+def test_missing_package_error_shows_what_the_package_manager_saw():
+    seen = ("--- apt-get update\nErr:1 https://gitea.internal noble InRelease\n"
+            "--- /etc/apt/sources.list.d/outpost.list\ndeb [signed-by=/etc/outpost/gitea-apt.asc] x bookworm main\n"
+            "--- apt-cache policy tinyproxy\nN: Unable to locate package tinyproxy\n")
+    host = FakeHost("gitea-1", facts={"id": "ubuntu", "codename": "noble", "arch": "x86_64"},
+                    responses=[(r"apt-cache show", "OUTPOST-NO-TINYPROXY\n"), (r"--- apt-get update", seen)])
+    with pytest.raises(RuntimeError) as err:
+        proxy.setup(host, NodeContext(gitea=G, ca_pem="CA", proxy=ON_GITEA), CFG, egress_allow=[], client_allow=[], log=lambda *_: None)
+    assert "Err:1 https://gitea.internal noble InRelease" in str(err.value) and "Unable to locate package" in str(err.value)
+    script = host.scripts[-1]
+    assert "apt-get update 2>&1" in script and "cat /etc/apt/sources.list.d/outpost.list" in script
+    assert "apt-cache policy tinyproxy" in script and f"{G.apt_repo}/dists/noble/Release" in script
+    rpm = proxy.diagnose_script("rpm", G, "rocky9")
+    assert "dnf makecache" in rpm and f"cat {clients.PATH_RPM_REPO}" in rpm and f"{G.rpm_repo}/rocky9/repodata/repomd.xml" in rpm
+    assert "dnf info tinyproxy" in rpm
+
+
 def test_host_checks_cover_the_exception_and_the_log():
     names = [n for n, _ in proxy.host_checks(NodeContext(gitea=G, ca_pem="CA", proxy=ON_GITEA), CFG)]
     assert names[:3] == ["proxy service active", "tinyproxy installed from gitea", "proxy allow list is the current one"]
