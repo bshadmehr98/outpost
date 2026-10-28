@@ -38,20 +38,38 @@ from urllib.parse import parse_qs, urlparse
 
 import yaml
 
-from .. import demo, hosts as hostsmod, report as reportmod, ssh, versions
+from .. import demo, ssh, versions
+from .. import hosts as hostsmod
+from .. import report as reportmod
 from ..checks import load_checks
 from ..config import ConfigError, load_mirrors, load_servers
 from ..http import HttpError
-from ..ssh import SshError
 from ..needs import Needs, add_platform_files, load_needs
 from ..paths import Platform
+from ..ssh import SshError
 from . import explain, projects, status
 
-ALLOWED_COMMANDS = {"needs", "fetch", "pack", "gitea", "upload", "infra", "check", "egress", "proxy", "lab", "demo", "hosts", "report", "pki"}
+ALLOWED_COMMANDS = {
+    "needs",
+    "fetch",
+    "pack",
+    "gitea",
+    "upload",
+    "infra",
+    "check",
+    "egress",
+    "proxy",
+    "lab",
+    "demo",
+    "hosts",
+    "report",
+    "pki",
+}
 RUNS: dict[str, dict] = {}
 
 
 # -- what the page shows -------------------------------------------------------
+
 
 def ssh_aliases() -> list[str]:
     """Host aliases from ~/.ssh/config, for the dropdowns. Wildcards are left out."""
@@ -66,11 +84,16 @@ def ssh_aliases() -> list[str]:
 
 def lab_status() -> dict:
     from .. import lab
+
     if not shutil.which("docker"):
         return {"docker": False, "running": []}
     try:
-        out = subprocess.run(["docker", "ps", "--format", "{{.Names}}", "--filter", "name=^lab-"],
-                             capture_output=True, text=True, timeout=5).stdout.split()
+        out = subprocess.run(
+            ["docker", "ps", "--format", "{{.Names}}", "--filter", "name=^lab-"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        ).stdout.split()
     except (subprocess.SubprocessError, OSError):
         out = []
     return {"docker": True, "running": sorted(n for n in out if n in lab.SERVERS)}
@@ -86,6 +109,7 @@ def needs_files(platform: Platform) -> list[dict]:
             entry["raw"] = raw if isinstance(raw, dict) else None
             entry["name"] = str(raw.get("name", path.stem)) if isinstance(raw, dict) else path.stem
             from ..needs import Needs, _parse_one
+
             n = Needs()
             _parse_one(path, n)
             entry["summary"] = n.summary()
@@ -102,6 +126,7 @@ def needs_detail(platform: Platform, infra_types: set[str], servers=None) -> dic
     add_platform_files(needs, versions.platform_files(load_mirrors(platform.mirrors_file), infra_types))
     if servers and servers.egress_proxy:
         from ..infra import proxy as proxymod
+
         try:
             proxymod.add_package(needs, servers.egress_proxy, hostsmod.cached(platform).get(servers.egress_proxy.host))
         except ConfigError:
@@ -157,11 +182,21 @@ def overview(platform: Platform) -> dict:
     data["box"] = json.loads(manifest.read_text()) if manifest.exists() else None
     if data["box"]:
         data["box"].pop("items", None)
-    data["state"] = {p.stem: json.loads(p.read_text()) for p in sorted(platform.state_dir.glob("*.json"))} if platform.state_dir.exists() else {}
-    data["files"] = ["servers.yml", "mirrors.yml"] + [f"needs/{p.name}" for p in sorted(platform.needs_dir.glob("*.yml"))] \
+    data["state"] = (
+        {p.stem: json.loads(p.read_text()) for p in sorted(platform.state_dir.glob("*.json"))}
+        if platform.state_dir.exists()
+        else {}
+    )
+    data["files"] = (
+        ["servers.yml", "mirrors.yml"]
+        + [f"needs/{p.name}" for p in sorted(platform.needs_dir.glob("*.yml"))]
         + [f"checks/{p.name}" for p in sorted(platform.checks_dir.glob("*.yml"))]
+    )
     try:
-        data["checks"] = [{"name": c.name, "description": c.description, "infra": c.infra, "requires": c.requires} for c in load_checks(platform.checks_dir)]
+        data["checks"] = [
+            {"name": c.name, "description": c.description, "infra": c.infra, "requires": c.requires}
+            for c in load_checks(platform.checks_dir)
+        ]
     except ConfigError as e:
         data["checks"] = [{"name": "error", "description": str(e), "infra": []}]
     data["secrets"] = {"gitea-token": (platform.secrets_dir / "gitea-token").exists()}
@@ -169,9 +204,12 @@ def overview(platform: Platform) -> dict:
     data["lab"] = lab_status()
     data["versions"] = hostsmod.expected_versions()
     data["running"] = [{"id": rid, "args": r["args"]} for rid, r in RUNS.items() if r["proc"].poll() is None]
-    data["demo"] = {"local": (platform.root / "demo").exists(), "urls": demo.urls(platform, servers) if data["servers"] else {},
-                    "files": sorted(demo.project_files(platform.root / "demo")) if (platform.root / "demo").exists() else [],
-                    "status": platform.read_state("demo-status")}
+    data["demo"] = {
+        "local": (platform.root / "demo").exists(),
+        "urls": demo.urls(platform, servers) if data["servers"] else {},
+        "files": sorted(demo.project_files(platform.root / "demo")) if (platform.root / "demo").exists() else [],
+        "status": platform.read_state("demo-status"),
+    }
     data["hosts"] = hostsmod.cached(platform)
     data["roles"] = hostsmod.roles(servers) if servers else {}
     data["drift"] = {a: hostsmod.drift(h) for a, h in data["hosts"].items() if hostsmod.drift(h)}
@@ -187,8 +225,13 @@ def list_backups(platform: Platform) -> list[dict]:
     out = []
     for p in sorted(folder.glob("*.tar.gz"), reverse=True):
         st = p.stat()
-        out.append({"file": str(p.relative_to(platform.root)), "bytes": st.st_size,
-                    "when": time.strftime("%Y-%m-%dT%H:%M:%S", time.localtime(st.st_mtime))})
+        out.append(
+            {
+                "file": str(p.relative_to(platform.root)),
+                "bytes": st.st_size,
+                "when": time.strftime("%Y-%m-%dT%H:%M:%S", time.localtime(st.st_mtime)),
+            }
+        )
     return out
 
 
@@ -197,15 +240,21 @@ def refresh_hosts(platform: Platform, aliases: list[str] | None) -> dict:
     servers = load_servers(platform.servers_file)
     ssh.use_config(servers.ssh_config)
     wanted = [a for a in (aliases or []) if re.fullmatch(r"[A-Za-z0-9._-]+", a)] or None
-    return hostsmod.refresh(platform, servers, wanted, log=lambda *_: None, make_host=lambda a: ssh.Host(a, connect_timeout=8))
+    return hostsmod.refresh(
+        platform, servers, wanted, log=lambda *_: None, make_host=lambda a: ssh.Host(a, connect_timeout=8)
+    )
 
 
 # -- writing files -------------------------------------------------------------
 
+
 def safe_file(platform: Platform, name: str) -> Path:
     path = (platform.root / name).resolve()
-    allowed = path == platform.servers_file or path == platform.mirrors_file or \
-        (path.parent in (platform.needs_dir, platform.checks_dir) and path.suffix in (".yml", ".yaml"))
+    allowed = (
+        path == platform.servers_file
+        or path == platform.mirrors_file
+        or (path.parent in (platform.needs_dir, platform.checks_dir) and path.suffix in (".yml", ".yaml"))
+    )
     if not allowed or ".." in name:
         raise PermissionError(f"not an editable file: {name}")
     return path
@@ -237,7 +286,7 @@ def write_servers(platform: Platform, form: dict) -> None:
         data["infrastructures"][key] = entry
     if "egress_proxy" in form:
         proxy = _proxy_form(form.get("egress_proxy"))
-    else:   # a form without the card keeps what servers.yml has
+    else:  # a form without the card keeps what servers.yml has
         try:
             current = yaml.safe_load(platform.servers_file.read_text()) if platform.servers_file.exists() else None
         except yaml.YAMLError:
@@ -245,9 +294,11 @@ def write_servers(platform: Platform, form: dict) -> None:
         proxy = current.get("egress_proxy") if isinstance(current, dict) else None
     if proxy:
         data["egress_proxy"] = proxy
-    text = "# Which servers play which role. Hosts are aliases from your ~/.ssh/config.\n" \
-           "# The SSH user must be root or have passwordless sudo. Written by the Outpost dashboard.\n" \
-           + yaml.safe_dump(data, sort_keys=False, default_flow_style=None)
+    text = (
+        "# Which servers play which role. Hosts are aliases from your ~/.ssh/config.\n"
+        "# The SSH user must be root or have passwordless sudo. Written by the Outpost dashboard.\n"
+        + yaml.safe_dump(data, sort_keys=False, default_flow_style=None)
+    )
     tmp = platform.servers_file.with_suffix(".yml.tmp")
     tmp.write_text(text)
     try:
@@ -273,7 +324,7 @@ def _proxy_form(p) -> dict | None:
         out["host"] = str(p["host"]).strip()
     port = str(p.get("port") or "").strip()
     if port and port != "3128":
-        out["port"] = int(port) if port.isdigit() else port   # load_servers explains a bad one
+        out["port"] = int(port) if port.isdigit() else port  # load_servers explains a bad one
     out["allow"] = [str(a).strip() for a in allow]
     if str(p.get("distro") or "").strip():
         out["distro"] = str(p["distro"]).strip()
@@ -298,6 +349,7 @@ def ssh_check(platform: Platform, alias: str) -> dict:
     """Reach a host the way Outpost will: ssh, then become root. Says what is missing in plain words."""
     from ..ssh import Host, SshError
     from ..ssh.options import ssh_options
+
     if not re.fullmatch(r"[A-Za-z0-9._-]+", alias or ""):
         return {"ok": False, "message": "that is not an SSH alias"}
     problem = _choose_ssh_config(platform)
@@ -310,15 +362,24 @@ def ssh_check(platform: Platform, alias: str) -> dict:
     try:
         facts = Host(alias, connect_timeout=8).facts()
     except SshError as e:
-        return {"ok": False, "user": user, "message": f"connected as {user}, but could not become root: {str(e).splitlines()[-1]}"}
-    return {"ok": True, "user": user, "facts": facts,
-            "message": f"connected as {user}; {facts.get('id', '?')} {facts.get('codename', '')} {facts.get('arch', '')} at {facts.get('ip', '?')}"}
+        return {
+            "ok": False,
+            "user": user,
+            "message": f"connected as {user}, but could not become root: {str(e).splitlines()[-1]}",
+        }
+    return {
+        "ok": True,
+        "user": user,
+        "facts": facts,
+        "message": f"connected as {user}; {facts.get('id', '?')} {facts.get('codename', '')} {facts.get('arch', '')} at {facts.get('ip', '?')}",
+    }
 
 
 def server_status(platform: Platform, alias: str) -> dict:
     """Egress state and the egress log of one server, read over SSH."""
     from ..infra import egress
     from ..ssh import Host, SshError
+
     if not re.fullmatch(r"[A-Za-z0-9._-]+", alias or ""):
         return {"ok": False, "message": "that is not an SSH alias"}
     problem = _choose_ssh_config(platform)
@@ -328,10 +389,20 @@ def server_status(platform: Platform, alias: str) -> dict:
     try:
         state = egress.status(host)
         log = host.run("tail -n 40 /var/log/outpost-egress.log 2>/dev/null || true").stdout
-        facts = host.run("uptime -p 2>/dev/null; df -h / | awk 'NR==2{print $4\" free of \"$2}'").stdout.strip().splitlines()
+        facts = (
+            host.run("uptime -p 2>/dev/null; df -h / | awk 'NR==2{print $4\" free of \"$2}'")
+            .stdout.strip()
+            .splitlines()
+        )
     except SshError as e:
         return {"ok": False, "message": str(e).splitlines()[-1]}
-    return {"ok": True, "egress": state, "log": log, "uptime": facts[0] if facts else "", "disk": facts[1] if len(facts) > 1 else ""}
+    return {
+        "ok": True,
+        "egress": state,
+        "log": log,
+        "uptime": facts[0] if facts else "",
+        "disk": facts[1] if len(facts) > 1 else "",
+    }
 
 
 def save_lockfile(platform: Platform, project: str, filename: str, body: bytes) -> dict:
@@ -347,6 +418,7 @@ def save_lockfile(platform: Platform, project: str, filename: str, body: bytes) 
 
 
 # -- running commands ----------------------------------------------------------
+
 
 def start_run(platform: Platform, args: list[str]) -> str:
     if not args or args[0] not in ALLOWED_COMMANDS:
@@ -369,6 +441,7 @@ def start_run(platform: Platform, args: list[str]) -> str:
         code = proc.wait()
         with open(log_file, "a") as out:
             out.write(f"\n[outpost exit {code} after {int(time.time() - RUNS[run_id]['started'])}s]\n")
+
     threading.Thread(target=trailer, daemon=True).start()
     return run_id
 
@@ -383,12 +456,20 @@ def run_status(run_id: str) -> dict:
         raise KeyError(run_id)
     code = run["proc"].poll()
     log = run["log"].read_text()
-    return {"id": run_id, "args": run["args"], "running": code is None, "exit": code,
-            "seconds": int(time.time() - run["started"]), "log": log[-30000:],
-            "steps": status.steps(log), "explain": explain.explain(log) if code not in (None, 0) else None}
+    return {
+        "id": run_id,
+        "args": run["args"],
+        "running": code is None,
+        "exit": code,
+        "seconds": int(time.time() - run["started"]),
+        "log": log[-30000:],
+        "steps": status.steps(log),
+        "explain": explain.explain(log) if code not in (None, 0) else None,
+    }
 
 
 # -- HTTP ----------------------------------------------------------------------
+
 
 class Handler(BaseHTTPRequestHandler):
     platform: Platform = None  # set by serve()
@@ -458,8 +539,14 @@ class Handler(BaseHTTPRequestHandler):
                 log = self.platform.state_dir / "runs" / f"{run_id}.log"
                 text = log.read_text(errors="replace") if log.exists() else ""
                 code = re.search(r"\[outpost exit (\d+)", text[-200:])
-                self._json({"id": run_id, "log": text[-60000:], "steps": status.steps(text),
-                            "explain": explain.explain(text) if code and code.group(1) != "0" else None})
+                self._json(
+                    {
+                        "id": run_id,
+                        "log": text[-60000:],
+                        "steps": status.steps(text),
+                        "explain": explain.explain(text) if code and code.group(1) != "0" else None,
+                    }
+                )
             else:
                 self._json({"error": "not found"}, 404)
         except (PermissionError, KeyError, ConfigError) as e:
@@ -477,7 +564,9 @@ class Handler(BaseHTTPRequestHandler):
                 file.write_text(content)
                 self._json({"saved": name})
             elif path == "/api/lockfile":
-                self._json(save_lockfile(self.platform, self._query("project"), self._query("filename"), self._body_bytes()))
+                self._json(
+                    save_lockfile(self.platform, self._query("project"), self._query("filename"), self._body_bytes())
+                )
             else:
                 self._json({"error": "not found"}, 404)
         except (PermissionError, yaml.YAMLError, ConfigError) as e:
@@ -513,7 +602,7 @@ class Handler(BaseHTTPRequestHandler):
                 ssh.use_config(servers.ssh_config)
                 self._json(demo.status(self.platform, servers))
             elif path == "/api/project/scan":
-                try:   # the Gitea name and org let a literal gitea.internal/pkgs/... FROM be read back into its need
+                try:  # the Gitea name and org let a literal gitea.internal/pkgs/... FROM be read back into its need
                     g = load_servers(self.platform.servers_file).gitea
                     gitea = f"{g.name}/{g.org}"
                 except (ConfigError, yaml.YAMLError):

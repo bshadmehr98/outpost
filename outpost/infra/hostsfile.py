@@ -30,12 +30,13 @@ WantedBy=multi-user.target
 def script(ip: str, name: str, extra: list[tuple[str, str]] | tuple = ()) -> str:
     """`extra` holds more (ip, name) pairs to keep, such as the egress proxy's."""
     # append rather than rewrite: /etc/hosts can be a bind mount that only allows writing in place
-    lines = "".join(f"grep -q {shlex.quote(f' {n}$')} /etc/hosts || echo {shlex.quote(f'{i} {n}')} >> /etc/hosts\n"
-                    for i, n in [(ip, name), *extra])
+    lines = "".join(
+        f"grep -q {shlex.quote(f' {n}$')} /etc/hosts || echo {shlex.quote(f'{i} {n}')} >> /etc/hosts\n"
+        for i, n in [(ip, name), *extra]
+    )
     return (
         "#!/bin/bash\n"
-        "# Installed by Outpost. Makes sure the Gitea name resolves, whatever rewrote /etc/hosts.\n"
-        + lines
+        "# Installed by Outpost. Makes sure the Gitea name resolves, whatever rewrote /etc/hosts.\n" + lines
     )
 
 
@@ -49,4 +50,7 @@ def rewrite(entries: list[tuple[str, str]]) -> str:
 def install(host, ip: str, name: str, extra: list[tuple[str, str]] | tuple = ()) -> None:
     host.write(SCRIPT_PATH, script(ip, name, extra), mode="0755")
     host.write(UNIT_PATH, UNIT)
-    host.run(f"systemctl daemon-reload && systemctl enable outpost-hosts.service >/dev/null 2>&1; {SCRIPT_PATH}", raise_on_failure=True)
+    host.run(
+        f"systemctl daemon-reload && systemctl enable outpost-hosts.service >/dev/null 2>&1; {SCRIPT_PATH}",
+        raise_on_failure=True,
+    )

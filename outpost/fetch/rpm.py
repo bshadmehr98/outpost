@@ -19,10 +19,26 @@ from .. import versions
 
 # distro -> (image, mirror key, the repositories under that mirror, relative to it)
 DISTROS = {
-    "rocky": ("rockylinux", "rocky", ("{major}/BaseOS/{arch}/os", "{major}/AppStream/{arch}/os", "{major}/extras/{arch}/os")),
-    "alma": ("almalinux", "alma", ("{major}/BaseOS/{arch}/os", "{major}/AppStream/{arch}/os", "{major}/extras/{arch}/os")),
+    "rocky": (
+        "rockylinux",
+        "rocky",
+        ("{major}/BaseOS/{arch}/os", "{major}/AppStream/{arch}/os", "{major}/extras/{arch}/os"),
+    ),
+    "alma": (
+        "almalinux",
+        "alma",
+        ("{major}/BaseOS/{arch}/os", "{major}/AppStream/{arch}/os", "{major}/extras/{arch}/os"),
+    ),
     "fedora": ("fedora", "fedora", ("releases/{major}/Everything/{arch}/os", "updates/{major}/Everything/{arch}")),
-    "stream": ("quay.io/centos/centos", "centos_stream", ("{major}-stream/BaseOS/{arch}/os", "{major}-stream/AppStream/{arch}/os", "{major}-stream/extras-common/{arch}/os")),
+    "stream": (
+        "quay.io/centos/centos",
+        "centos_stream",
+        (
+            "{major}-stream/BaseOS/{arch}/os",
+            "{major}-stream/AppStream/{arch}/os",
+            "{major}-stream/extras-common/{arch}/os",
+        ),
+    ),
 }
 # /etc/os-release ID of a host -> distro family above
 OS_IDS = {"rocky": "rocky", "almalinux": "alma", "fedora": "fedora", "centos": "stream"}
@@ -32,7 +48,9 @@ def split(distro: str) -> tuple[str, str]:
     """rocky9 -> (rocky, 9); fedora40 -> (fedora, 40)."""
     m = re.fullmatch(r"(rocky|alma|fedora|stream)(\d+)", distro)
     if not m:
-        raise ValueError(f"rpm distro '{distro}' is not one of rocky9, alma9, fedora40, stream9 (family + major version)")
+        raise ValueError(
+            f"rpm distro '{distro}' is not one of rocky9, alma9, fedora40, stream9 (family + major version)"
+        )
     return m.group(1), m.group(2)
 
 
@@ -82,7 +100,19 @@ def fetch(rpm: dict[str, list[str]], box: Path, mirrors, log=print, run=subproce
         out.mkdir(parents=True, exist_ok=True)
         image = image_for(distro)
         log(f"    {distro}: {len(packages)} package(s) via {image}")
-        cmd = ["docker", "run", "--rm", "--platform", f"linux/{versions.ARCH}", "-v", f"{out.resolve()}:/out", image, "bash", "-c", script_for(distro, packages, mirrors)]
+        cmd = [
+            "docker",
+            "run",
+            "--rm",
+            "--platform",
+            f"linux/{versions.ARCH}",
+            "-v",
+            f"{out.resolve()}:/out",
+            image,
+            "bash",
+            "-c",
+            script_for(distro, packages, mirrors),
+        ]
         proc = run(cmd, capture_output=True, text=True)
         if proc.returncode != 0:
             tail = (proc.stderr or proc.stdout).strip().splitlines()[-5:]

@@ -23,7 +23,11 @@ def test_manifest_write_and_verify(tmp_path):
     box = make_box(tmp_path / "box")
     manifest = boxmod.write_manifest(box)
     assert manifest["files"] == 3 and manifest["bytes"] == 7
-    assert [i["path"] for i in manifest["items"]] == ["pypi/a-1.0-py3-none-any.whl", "apt/bookworm/curl.deb", "files/gitea/1.0/gitea"]
+    assert [i["path"] for i in manifest["items"]] == [
+        "pypi/a-1.0-py3-none-any.whl",
+        "apt/bookworm/curl.deb",
+        "files/gitea/1.0/gitea",
+    ]
     assert boxmod.verify_manifest(box) == []
     (box / "pypi" / "a-1.0-py3-none-any.whl").write_bytes(b"changed")
     (box / "apt" / "bookworm" / "curl.deb").unlink()
@@ -47,6 +51,7 @@ def test_pack_unpack_roundtrip(tmp_path):
 
 def test_unpack_rejects_escaping_paths(tmp_path):
     import tarfile
+
     evil = tmp_path / "evil.tar.xz"
     with tarfile.open(evil, "w:xz") as tar:
         tar.add(__file__, arcname="../../escape.py")
@@ -71,7 +76,9 @@ def test_signing(tmp_path):
 def test_ca_and_server_cert(tmp_path):
     ca = pki.ensure_ca(tmp_path / "pki", tmp_path / "secrets")
     cert, key = pki.ensure_server_cert(tmp_path / "pki", tmp_path / "secrets", "gitea.internal", "10.0.0.5")
-    text = subprocess.run(["openssl", "x509", "-in", str(cert), "-noout", "-text"], capture_output=True, text=True).stdout
+    text = subprocess.run(
+        ["openssl", "x509", "-in", str(cert), "-noout", "-text"], capture_output=True, text=True
+    ).stdout
     assert "DNS:gitea.internal" in text and "IP Address:10.0.0.5" in text
     assert subprocess.run(["openssl", "verify", "-CAfile", str(ca), str(cert)], capture_output=True).returncode == 0
     assert pki.ensure_server_cert(tmp_path / "pki", tmp_path / "secrets", "gitea.internal", "10.0.0.5") == (cert, key)

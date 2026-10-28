@@ -48,7 +48,19 @@ def fetch(apk: dict[str, list[str]], box: Path, mirrors, log=print, run=subproce
         out.mkdir(parents=True, exist_ok=True)
         image = image_for(branch)
         log(f"    {branch}: {len(packages)} package(s) via {image}")
-        cmd = ["docker", "run", "--rm", "--platform", f"linux/{versions.ARCH}", "-v", f"{out.resolve()}:/out", image, "sh", "-c", script_for(branch, packages, mirrors)]
+        cmd = [
+            "docker",
+            "run",
+            "--rm",
+            "--platform",
+            f"linux/{versions.ARCH}",
+            "-v",
+            f"{out.resolve()}:/out",
+            image,
+            "sh",
+            "-c",
+            script_for(branch, packages, mirrors),
+        ]
         proc = run(cmd, capture_output=True, text=True)
         if proc.returncode != 0:
             tail = (proc.stderr or proc.stdout).strip().splitlines()[-5:]

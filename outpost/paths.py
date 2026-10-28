@@ -1,14 +1,14 @@
 """The platform folder. Everything Outpost knows about your setup lives in one directory.
 
-    my-platform/
-      servers.yml     which SSH hosts play which role
-      mirrors.yml     where to download from (optional)
-      needs/          what your projects need: images, pip, npm, apt, files
-      checks/         smoke tests to run on an infrastructure
-      box/            downloaded artifacts, produced by `outpost fetch`
-      pki/            public certificates (safe to commit)
-      secrets/        private keys and tokens (never commit)
-      state/          what Outpost did last (safe to commit or ignore)
+my-platform/
+  servers.yml     which SSH hosts play which role
+  mirrors.yml     where to download from (optional)
+  needs/          what your projects need: images, pip, npm, apt, files
+  checks/         smoke tests to run on an infrastructure
+  box/            downloaded artifacts, produced by `outpost fetch`
+  pki/            public certificates (safe to commit)
+  secrets/        private keys and tokens (never commit)
+  state/          what Outpost did last (safe to commit or ignore)
 """
 
 import json

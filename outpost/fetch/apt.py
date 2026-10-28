@@ -26,12 +26,16 @@ def image_for(distro: str) -> str:
 
 def sources_for(distro: str, mirrors) -> str:
     if distro in DEBIAN:
-        return (f"deb {mirrors.debian} {distro} main\n"
-                f"deb {mirrors.debian} {distro}-updates main\n"
-                f"deb {mirrors.debian_security} {distro}-security main\n")
-    return (f"deb {mirrors.ubuntu} {distro} main universe\n"
-            f"deb {mirrors.ubuntu} {distro}-updates main universe\n"
-            f"deb {mirrors.ubuntu} {distro}-security main universe\n")
+        return (
+            f"deb {mirrors.debian} {distro} main\n"
+            f"deb {mirrors.debian} {distro}-updates main\n"
+            f"deb {mirrors.debian_security} {distro}-security main\n"
+        )
+    return (
+        f"deb {mirrors.ubuntu} {distro} main universe\n"
+        f"deb {mirrors.ubuntu} {distro}-updates main universe\n"
+        f"deb {mirrors.ubuntu} {distro}-security main universe\n"
+    )
 
 
 def script_for(distro: str, packages: list[str], mirrors) -> str:
@@ -56,7 +60,19 @@ def fetch(apt: dict[str, list[str]], box: Path, mirrors, log=print, run=subproce
         out.mkdir(parents=True, exist_ok=True)
         image = image_for(distro)
         log(f"    {distro}: {len(packages)} package(s) via {image}")
-        cmd = ["docker", "run", "--rm", "--platform", f"linux/{versions.ARCH}", "-v", f"{out.resolve()}:/out", image, "bash", "-c", script_for(distro, packages, mirrors)]
+        cmd = [
+            "docker",
+            "run",
+            "--rm",
+            "--platform",
+            f"linux/{versions.ARCH}",
+            "-v",
+            f"{out.resolve()}:/out",
+            image,
+            "bash",
+            "-c",
+            script_for(distro, packages, mirrors),
+        ]
         proc = run(cmd, capture_output=True, text=True)
         if proc.returncode != 0:
             tail = (proc.stderr or proc.stdout).strip().splitlines()[-5:]

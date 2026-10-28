@@ -15,8 +15,8 @@ import yaml
 
 from ..config import ConfigError
 
-
 # -- Python ------------------------------------------------------------------
+
 
 def parse_requirements(path: Path, _seen: set | None = None) -> list[str]:
     seen = _seen if _seen is not None else set()
@@ -42,7 +42,11 @@ def parse_requirements(path: Path, _seen: set | None = None) -> list[str]:
 
 def parse_poetry_lock(path: Path) -> list[str]:
     data = tomllib.loads(path.read_text())
-    return [f"{p['name']}=={p['version']}" for p in data.get("package", []) if p.get("source", {}).get("type") not in ("directory", "file", "git", "url")]
+    return [
+        f"{p['name']}=={p['version']}"
+        for p in data.get("package", [])
+        if p.get("source", {}).get("type") not in ("directory", "file", "git", "url")
+    ]
 
 
 def parse_uv_lock(path: Path) -> list[str]:
@@ -79,13 +83,17 @@ def parse_python_file(path: Path) -> list[str]:
         return parse_pipfile_lock(path)
     if name.endswith(".txt") or name.endswith(".in"):
         return parse_requirements(path)
-    raise ConfigError(f"Don't know how to read {name}. Supported: requirements*.txt, poetry.lock, uv.lock, Pipfile.lock")
+    raise ConfigError(
+        f"Don't know how to read {name}. Supported: requirements*.txt, poetry.lock, uv.lock, Pipfile.lock"
+    )
 
 
 # -- JavaScript --------------------------------------------------------------
 
+
 def parse_package_lock(path: Path) -> list:
     from . import NpmNeed
+
     data = json.loads(path.read_text())
     needs: list[NpmNeed] = []
     if "packages" in data:  # lockfileVersion 2 and 3
@@ -93,13 +101,26 @@ def parse_package_lock(path: Path) -> list:
             if not key or meta.get("link") or not meta.get("version") or "node_modules/" not in key:
                 continue
             name = meta.get("name") or key.rsplit("node_modules/", 1)[-1]
-            needs.append(NpmNeed(name=name, version=meta["version"], resolved=meta.get("resolved"), integrity=meta.get("integrity")))
+            needs.append(
+                NpmNeed(
+                    name=name, version=meta["version"], resolved=meta.get("resolved"), integrity=meta.get("integrity")
+                )
+            )
     else:  # lockfileVersion 1
+
         def walk(deps: dict):
             for name, meta in deps.items():
                 if meta.get("version") and not str(meta.get("version")).startswith("file:"):
-                    needs.append(NpmNeed(name=name, version=meta["version"], resolved=meta.get("resolved"), integrity=meta.get("integrity")))
+                    needs.append(
+                        NpmNeed(
+                            name=name,
+                            version=meta["version"],
+                            resolved=meta.get("resolved"),
+                            integrity=meta.get("integrity"),
+                        )
+                    )
                 walk(meta.get("dependencies") or {})
+
         walk(data.get("dependencies") or {})
     return _dedupe(needs)
 
@@ -109,6 +130,7 @@ _PNPM_KEY = re.compile(r"^/?(?P<name>@?[^@/]+(?:/[^@/]+)?)@(?P<version>[^(]+)")
 
 def parse_pnpm_lock(path: Path) -> list:
     from . import NpmNeed
+
     data = yaml.safe_load(path.read_text()) or {}
     needs: list[NpmNeed] = []
     for key, meta in (data.get("packages") or {}).items():
@@ -118,7 +140,14 @@ def parse_pnpm_lock(path: Path) -> list:
         resolution = (meta or {}).get("resolution") or {}
         if "tarball" in resolution and not resolution["tarball"].startswith("http"):
             continue
-        needs.append(NpmNeed(name=m["name"], version=m["version"].strip(), resolved=resolution.get("tarball"), integrity=resolution.get("integrity")))
+        needs.append(
+            NpmNeed(
+                name=m["name"],
+                version=m["version"].strip(),
+                resolved=resolution.get("tarball"),
+                integrity=resolution.get("integrity"),
+            )
+        )
     return _dedupe(needs)
 
 
@@ -128,6 +157,7 @@ _YARN_HEADER = re.compile(r'^"?(@?[^@"]+)@')
 def parse_yarn_lock(path: Path) -> list:
     """yarn.lock v1 (classic). Blocks look like:  name@^1.0.0:\\n  version "1.2.3"\\n  resolved "url#sha"\\n  integrity sha512-..."""
     from . import NpmNeed
+
     needs: list[NpmNeed] = []
     name = version = resolved = integrity = None
     lines = path.read_text().splitlines() + [""]

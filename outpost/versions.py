@@ -9,10 +9,20 @@ from urllib.parse import quote
 # One box serves one CPU architecture. `arch:` in servers.yml picks it (default amd64) and the CLI
 # calls use_arch() once after reading servers.yml, so every download name below follows.
 ARCHES = {
-    "amd64": {"uname": "x86_64", "docker": "x86_64", "compose": "x86_64", "k3s": "k3s",
-              "pip": ["manylinux2014_x86_64", "manylinux_2_28_x86_64", "manylinux_2_17_x86_64", "linux_x86_64"]},
-    "arm64": {"uname": "aarch64", "docker": "aarch64", "compose": "aarch64", "k3s": "k3s-arm64",
-              "pip": ["manylinux2014_aarch64", "manylinux_2_28_aarch64", "manylinux_2_17_aarch64", "linux_aarch64"]},
+    "amd64": {
+        "uname": "x86_64",
+        "docker": "x86_64",
+        "compose": "x86_64",
+        "k3s": "k3s",
+        "pip": ["manylinux2014_x86_64", "manylinux_2_28_x86_64", "manylinux_2_17_x86_64", "linux_x86_64"],
+    },
+    "arm64": {
+        "uname": "aarch64",
+        "docker": "aarch64",
+        "compose": "aarch64",
+        "k3s": "k3s-arm64",
+        "pip": ["manylinux2014_aarch64", "manylinux_2_28_aarch64", "manylinux_2_17_aarch64", "linux_aarch64"],
+    },
 }
 ALIASES = {"x86_64": "amd64", "amd64": "amd64", "aarch64": "arm64", "arm64": "arm64"}
 ARCH = "amd64"
@@ -34,20 +44,21 @@ def use_arch(arch: str) -> str:
 def names(arch: str | None = None) -> dict:
     return ARCHES[arch or ARCH]
 
+
 GITEA = "28.2.0"
 DOCKER = "29.9.2"
 COMPOSE = "5.6.1"
 BUILDX = "0.38.1"
 COREDNS = "1.15.0"
 K3S = "v1.37.1+k3s1"
-RUNNER = "5.2.2"            # Gitea Actions runner, installed on the first node of each infrastructure
+RUNNER = "5.2.2"  # Gitea Actions runner, installed on the first node of each infrastructure
 
 
 def platform_files(mirrors, infra_types: set[str]) -> list[dict]:
     """Files every platform needs, as plain dicts: name, version, url, filename."""
     n = names()
     docker_static = mirrors.docker_static
-    if not docker_static.endswith(("/x86_64", "/aarch64")):   # older mirrors.yml files name the arch themselves
+    if not docker_static.endswith(("/x86_64", "/aarch64")):  # older mirrors.yml files name the arch themselves
         docker_static = f"{docker_static}/{n['docker']}"
     files = [
         {

@@ -60,8 +60,15 @@ INSTALLED = ("gitea", "docker", "compose", "buildx", "k3s", "coredns", "runner",
 
 def expected_versions() -> dict:
     """Pinned versions. tinyproxy is not pinned: it is the distro's own package, at whatever version Gitea has."""
-    return {"gitea": versions.GITEA, "docker": versions.DOCKER, "compose": versions.COMPOSE, "buildx": versions.BUILDX,
-            "k3s": versions.K3S, "coredns": versions.COREDNS, "runner": versions.RUNNER}
+    return {
+        "gitea": versions.GITEA,
+        "docker": versions.DOCKER,
+        "compose": versions.COMPOSE,
+        "buildx": versions.BUILDX,
+        "k3s": versions.K3S,
+        "coredns": versions.COREDNS,
+        "runner": versions.RUNNER,
+    }
 
 
 def inspect(host) -> dict:
@@ -78,7 +85,7 @@ def inspect(host) -> dict:
             key, value = line.split("=", 1)
             data[key.strip()] = value.strip()
     data["installed"] = {k: data.pop(k, "") for k in INSTALLED}
-    if "proxy_log_tail" in data:   # base64 on the wire, so a log line cannot break the key=value format
+    if "proxy_log_tail" in data:  # base64 on the wire, so a log line cannot break the key=value format
         try:
             data["proxy_log_tail"] = base64.b64decode(data["proxy_log_tail"]).decode("utf-8", "replace").splitlines()
         except ValueError:
@@ -123,7 +130,9 @@ def record(platform: Platform, alias: str, data: dict) -> dict:
     return data
 
 
-def refresh(platform: Platform, servers: Servers, aliases: list[str] | None = None, log=print, make_host=Host) -> dict[str, dict]:
+def refresh(
+    platform: Platform, servers: Servers, aliases: list[str] | None = None, log=print, make_host=Host
+) -> dict[str, dict]:
     wanted = aliases or list(roles(servers))
     out = {}
     for alias in wanted:

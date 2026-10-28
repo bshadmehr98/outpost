@@ -7,13 +7,16 @@ from outpost import oci
 from outpost.http import Http
 
 
-@pytest.mark.parametrize("ref,expected", [
-    ("python:3.12-slim", ("docker.io", "library/python", "3.12-slim")),
-    ("python", ("docker.io", "library/python", "latest")),
-    ("grafana/grafana:10.2", ("docker.io", "grafana/grafana", "10.2")),
-    ("ghcr.io/org/app:v1", ("ghcr.io", "org/app", "v1")),
-    ("localhost:5000/x/y:1", ("localhost:5000", "x/y", "1")),
-])
+@pytest.mark.parametrize(
+    "ref,expected",
+    [
+        ("python:3.12-slim", ("docker.io", "library/python", "3.12-slim")),
+        ("python", ("docker.io", "library/python", "latest")),
+        ("grafana/grafana:10.2", ("docker.io", "grafana/grafana", "10.2")),
+        ("ghcr.io/org/app:v1", ("ghcr.io", "org/app", "v1")),
+        ("localhost:5000/x/y:1", ("localhost:5000", "x/y", "1")),
+    ],
+)
 def test_parse_ref(ref, expected):
     r = oci.parse_ref(ref)
     assert (r.registry, r.repo, r.tag) == expected
@@ -28,16 +31,20 @@ def test_ref_names():
         oci.parse_ref("python@sha256:abc")
 
 
-@pytest.mark.parametrize("ref,mirror_name,full", [
-    ("python:3.12-slim", "library/python", "gitea.internal/pkgs/library/python:3.12-slim"),
-    ("bitnami/redis:7", "bitnami/redis", "gitea.internal/pkgs/bitnami/redis:7"),
-    ("ghcr.io/org/app:1.4", "org/app", "gitea.internal/pkgs/org/app:1.4"),
-    ("ghcr.io/org/team/app:1", "org/team/app", "gitea.internal/pkgs/org/team/app:1"),
-    ("alpine", "library/alpine", "gitea.internal/pkgs/library/alpine:latest"),
-])
+@pytest.mark.parametrize(
+    "ref,mirror_name,full",
+    [
+        ("python:3.12-slim", "library/python", "gitea.internal/pkgs/library/python:3.12-slim"),
+        ("bitnami/redis:7", "bitnami/redis", "gitea.internal/pkgs/bitnami/redis:7"),
+        ("ghcr.io/org/app:1.4", "org/app", "gitea.internal/pkgs/org/app:1.4"),
+        ("ghcr.io/org/team/app:1", "org/team/app", "gitea.internal/pkgs/org/team/app:1"),
+        ("alpine", "library/alpine", "gitea.internal/pkgs/library/alpine:latest"),
+    ],
+)
 def test_every_image_lives_under_the_organisation(ref, mirror_name, full):
     """library/redis and bitnami/redis must not collide, so the original path stays below the organisation."""
     from outpost.infra.clients import GiteaInfo
+
     r = oci.parse_ref(ref)
     assert r.mirror_name == mirror_name
     assert oci.gitea_ref(GiteaInfo(name="gitea.internal", ip="10.0.0.5", org="pkgs"), r) == full
@@ -60,11 +67,22 @@ def test_original_ref_inverts_mirror_name():
 GITEA_IMAGE_NAME = re.compile(r"\A[a-z0-9]+([._-][a-z0-9]+)*(/[a-z0-9]+([._-][a-z0-9]+)*)*\Z")
 
 
-@pytest.mark.parametrize("ref", [
-    "python:3.12-slim", "alpine:3.20", "postgres:16", "rockylinux:9", "bitnami/redis:7", "grafana/grafana:10.2",
-    "ghcr.io/org/app:1.4", "ghcr.io/my-org/team/app:1", "quay.io/my_org/my.app:1", "registry.k8s.io/pause:3.9",
-    "localhost:5000/a/b:1",
-])
+@pytest.mark.parametrize(
+    "ref",
+    [
+        "python:3.12-slim",
+        "alpine:3.20",
+        "postgres:16",
+        "rockylinux:9",
+        "bitnami/redis:7",
+        "grafana/grafana:10.2",
+        "ghcr.io/org/app:1.4",
+        "ghcr.io/my-org/team/app:1",
+        "quay.io/my_org/my.app:1",
+        "registry.k8s.io/pause:3.9",
+        "localhost:5000/a/b:1",
+    ],
+)
 def test_every_generated_name_passes_giteas_rule(ref):
     assert GITEA_IMAGE_NAME.match(oci.parse_ref(ref).mirror_name), oci.parse_ref(ref).mirror_name
     assert oci.GITEA_IMAGE_NAME.pattern == GITEA_IMAGE_NAME.pattern

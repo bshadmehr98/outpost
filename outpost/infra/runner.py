@@ -62,7 +62,9 @@ def labels_for(servers, alias: str) -> list[str]:
     return labels
 
 
-def install(host, ctx: common.NodeContext, labels: list[str], registration_token: str, registered: set[str], log=print) -> dict:
+def install(
+    host, ctx: common.NodeContext, labels: list[str], registration_token: str, registered: set[str], log=print
+) -> dict:
     """Install, register (once) and start the runner. `registered` holds the runner names Gitea
     already knows, so a node that was set up before is not registered twice, and one whose Gitea
     was reinstalled is registered again."""
@@ -71,7 +73,10 @@ def install(host, ctx: common.NodeContext, labels: list[str], registration_token
     log(f"==> {host.alias}: Actions runner")
     if versions.RUNNER not in host.run(f"{BIN} --version 2>/dev/null || true", raise_on_failure=True).stdout:
         log(f"  [{host.alias}] installing gitea-runner {versions.RUNNER} from Gitea")
-        host.run(f"systemctl stop outpost-runner 2>/dev/null || true\n{common.curl(ctx, url, BIN)} && chmod 755 {BIN}", raise_on_failure=True)
+        host.run(
+            f"systemctl stop outpost-runner 2>/dev/null || true\n{common.curl(ctx, url, BIN)} && chmod 755 {BIN}",
+            raise_on_failure=True,
+        )
     host.run(f"mkdir -p {HOME}/work /etc/outpost", raise_on_failure=True)
     host.write(CONFIG, RUNNER_CONFIG)
     name = host.alias
@@ -79,14 +84,24 @@ def install(host, ctx: common.NodeContext, labels: list[str], registration_token
         host.run(
             f"systemctl stop outpost-runner 2>/dev/null || true\nrm -f {HOME}/.runner\ncd {HOME}\n"
             f"HOME={HOME} {BIN} register --config {CONFIG} --no-interactive --instance {g.url} "
-            f"--token {shlex.quote(registration_token)} --name {shlex.quote(name)} --labels {shlex.quote(','.join(labels))}", raise_on_failure=True)
+            f"--token {shlex.quote(registration_token)} --name {shlex.quote(name)} --labels {shlex.quote(','.join(labels))}",
+            raise_on_failure=True,
+        )
         log(f"  [{host.alias}] registered runner {name} with Gitea")
     host.write("/etc/systemd/system/outpost-runner.service", UNIT.format(labels=shlex.quote(",".join(labels))))
-    host.run("systemctl daemon-reload && systemctl enable outpost-runner >/dev/null 2>&1; systemctl restart outpost-runner && sleep 1 && systemctl is-active outpost-runner", raise_on_failure=True)
+    host.run(
+        "systemctl daemon-reload && systemctl enable outpost-runner >/dev/null 2>&1; systemctl restart outpost-runner && sleep 1 && systemctl is-active outpost-runner",
+        raise_on_failure=True,
+    )
     log(f"  [{host.alias}] actions runner active, labels: {', '.join(labels)}")
     return {"node": host.alias, "labels": labels}
 
 
 def extra_checks() -> list[tuple[str, str]]:
-    return [("actions runner active", f"test ! -s {HOME}/.runner || systemctl is-active outpost-runner"),
-            (f"runner at pinned version {versions.RUNNER}", f"test ! -s {HOME}/.runner || {BIN} --version | grep -q {versions.RUNNER}")]
+    return [
+        ("actions runner active", f"test ! -s {HOME}/.runner || systemctl is-active outpost-runner"),
+        (
+            f"runner at pinned version {versions.RUNNER}",
+            f"test ! -s {HOME}/.runner || {BIN} --version | grep -q {versions.RUNNER}",
+        ),
+    ]

@@ -70,7 +70,7 @@ def box_status(platform: Platform, needs: Needs) -> dict:
         for pkg in pkgs:
             if not any(d.startswith(pkg + "_") for d in debs):
                 missing["apt"].append(f"{pkg} ({distro})")
-    for kind, wanted, ext in (("apk", needs.apk, "*.apk"), ("rpm", needs.rpm, "*.rpm")):   # name-version-... files
+    for kind, wanted, ext in (("apk", needs.apk, "*.apk"), ("rpm", needs.rpm, "*.rpm")):  # name-version-... files
         for distro, pkgs in wanted.items():
             have = [p.name for p in (box / kind / distro).glob(ext)] if (box / kind / distro).exists() else []
             for pkg in pkgs:
@@ -79,8 +79,13 @@ def box_status(platform: Platform, needs: Needs) -> dict:
     for f in needs.files:
         if not (box / "files" / f.name / f.version / f.filename).exists():
             missing["files"].append(f"{f.name} {f.version}")
-    return {"kinds": kinds, "missing": missing, "missing_total": sum(len(v) for v in missing.values()),
-            "bytes": sum(k["bytes"] for k in kinds.values()), "files": sum(k["files"] for k in kinds.values())}
+    return {
+        "kinds": kinds,
+        "missing": missing,
+        "missing_total": sum(len(v) for v in missing.values()),
+        "bytes": sum(k["bytes"] for k in kinds.values()),
+        "files": sum(k["files"] for k in kinds.values()),
+    }
 
 
 def _mtime(path: Path) -> float | None:
@@ -104,7 +109,10 @@ def sync(platform: Platform, box: dict, infra_names: list[str]) -> dict:
     if not fetched_at:
         arrows["fetch"] = ("none", "nothing fetched yet")
     elif box["missing_total"]:
-        arrows["fetch"] = ("stale", f"{box['missing_total']} item{'s' if box['missing_total'] > 1 else ''} in the needs are not in the box")
+        arrows["fetch"] = (
+            "stale",
+            f"{box['missing_total']} item{'s' if box['missing_total'] > 1 else ''} in the needs are not in the box",
+        )
     else:
         arrows["fetch"] = ("ok", "every need is in the box")
     if not uploaded_at:
@@ -125,27 +133,42 @@ def sync(platform: Platform, box: dict, infra_names: list[str]) -> dict:
         arrows["setup"] = ("ok", "all nodes verified")
     return {
         "arrows": {k: {"state": s, "why": w} for k, (s, w) in arrows.items()},
-        "times": {"needs": _iso(needs_at), "fetch": _iso(fetched_at), "gitea": _iso(gitea_at), "upload": _iso(uploaded_at),
-                  "verify": {n: _iso(t) for n, t in verified.items()}},
+        "times": {
+            "needs": _iso(needs_at),
+            "fetch": _iso(fetched_at),
+            "gitea": _iso(gitea_at),
+            "upload": _iso(uploaded_at),
+            "verify": {n: _iso(t) for n, t in verified.items()},
+        },
     }
 
 
 def preflight(platform: Platform) -> list[dict]:
     """Things this computer needs, each {"name", "ok", "detail", "need"}; `need` says which step cares."""
     checks = []
-    for tool, need, why in (("ssh", "all server steps", "talks to the servers"), ("openssl", "gitea setup", "makes the CA and certificates"),
-                            ("docker", "fetch (apt, apk, rpm) and the lab", "resolves OS packages in a container")):
+    for tool, need, why in (
+        ("ssh", "all server steps", "talks to the servers"),
+        ("openssl", "gitea setup", "makes the CA and certificates"),
+        ("docker", "fetch (apt, apk, rpm) and the lab", "resolves OS packages in a container"),
+    ):
         path = shutil.which(tool)
         checks.append({"name": tool, "ok": bool(path), "detail": path or f"not found; {why}", "need": need})
     try:
         usage = shutil.disk_usage(platform.root)
         free_gb = usage.free / 1e9
-        checks.append({"name": "free disk here", "ok": free_gb > 5, "detail": f"{free_gb:.0f} GB free of {usage.total / 1e9:.0f} GB",
-                       "need": "fetch and the lab"})
+        checks.append(
+            {
+                "name": "free disk here",
+                "ok": free_gb > 5,
+                "detail": f"{free_gb:.0f} GB free of {usage.total / 1e9:.0f} GB",
+                "need": "fetch and the lab",
+            }
+        )
     except OSError:
         pass
     try:
         from ..fetch.pypi import pip_command
+
         out = subprocess.run(pip_command() + ["--version"], capture_output=True, text=True).stdout.strip()
         checks.append({"name": "pip", "ok": True, "detail": out.split(" from ")[0][:40], "need": "fetch (pypi)"})
     except RuntimeError as e:
@@ -176,10 +199,21 @@ def runs(platform: Platform, limit: int = 50, live: set[str] | None = None) -> l
         args = command.split()[1:] if command.startswith("outpost ") else command.split()
         exit_code = int(m.group(1)) if m else None
         running = m is None and log.stem in (live or set())
-        out.append({"id": log.stem, "when": stamp, "command": command, "args": args,
-                    "exit": exit_code, "running": running, "bytes": log.stat().st_size,
-                    "summary": "running" if running else explain.summarize(args, text, exit_code),
-                    "seconds": int(re.search(r"after (\d+)s", tail).group(1)) if m and re.search(r"after (\d+)s", tail) else None})
+        out.append(
+            {
+                "id": log.stem,
+                "when": stamp,
+                "command": command,
+                "args": args,
+                "exit": exit_code,
+                "running": running,
+                "bytes": log.stat().st_size,
+                "summary": "running" if running else explain.summarize(args, text, exit_code),
+                "seconds": int(re.search(r"after (\d+)s", tail).group(1))
+                if m and re.search(r"after (\d+)s", tail)
+                else None,
+            }
+        )
     return out
 
 
@@ -190,8 +224,14 @@ def steps(log: str) -> list[dict]:
     out = []
     for i, text in enumerate(found):
         m = re.match(r"\[(\d+)/(\d+)\]\s*(.*)", text)
-        out.append({"text": m.group(3) if m else text, "n": int(m.group(1)) if m else None, "of": int(m.group(2)) if m else None,
-                    "done": i < len(found) - 1 or ended})
+        out.append(
+            {
+                "text": m.group(3) if m else text,
+                "n": int(m.group(1)) if m else None,
+                "of": int(m.group(2)) if m else None,
+                "done": i < len(found) - 1 or ended,
+            }
+        )
     return out
 
 
@@ -215,7 +255,11 @@ def box_changes(platform: Platform, needs: Needs) -> dict:
     except ValueError:
         wanted_images = set()
     if (box / "images").exists():
-        unneeded += [f"image {p.name}" for p in (box / "images").iterdir() if p.is_dir() and p.name not in wanted_images and p.name != "config"]
+        unneeded += [
+            f"image {p.name}"
+            for p in (box / "images").iterdir()
+            if p.is_dir() and p.name not in wanted_images and p.name != "config"
+        ]
     wanted_npm = {tarball_name(n.name, n.version) for n in needs.npm}
     if (box / "npm").exists():
         unneeded += [f"npm {p.name}" for p in (box / "npm").glob("*.tgz") if p.name not in wanted_npm]
@@ -230,10 +274,19 @@ def box_changes(platform: Platform, needs: Needs) -> dict:
         for p in (box / "pypi").iterdir():
             if p.suffix in (".whl", ".gz", ".zip"):
                 name = _norm(re.split(r"-\d", p.name, 1)[0])
-                if wanted_pypi and name not in wanted_pypi and not any(w.startswith(name) or name.startswith(w) for w in wanted_pypi):
+                if (
+                    wanted_pypi
+                    and name not in wanted_pypi
+                    and not any(w.startswith(name) or name.startswith(w) for w in wanted_pypi)
+                ):
                     pass  # dependencies pulled along are not in the needs; do not call them unneeded
-    return {"new_files": new_files, "new_bytes": new_bytes, "unneeded": unneeded[:50], "unneeded_total": len(unneeded),
-            "uploaded_at": _iso(uploaded_at)}
+    return {
+        "new_files": new_files,
+        "new_bytes": new_bytes,
+        "unneeded": unneeded[:50],
+        "unneeded_total": len(unneeded),
+        "uploaded_at": _iso(uploaded_at),
+    }
 
 
 def search(platform: Platform, needs: Needs, q: str, limit: int = 40) -> dict:

@@ -31,15 +31,17 @@ import sys
 import time
 from pathlib import Path
 
-from . import __version__, box as boxmod, hosts as hostsmod, pki, report as reportmod, versions
+from . import __version__, pki, ssh, versions
+from . import box as boxmod
+from . import hosts as hostsmod
+from . import report as reportmod
 from .config import ConfigError, load_mirrors, load_servers
 from .http import HttpError
-from .infra import TYPES
+from .infra import TYPES, egress, runner
+from .infra import verify as verifymod
 from .infra.common import NodeContext
-from .infra import egress, runner, verify as verifymod
 from .needs import add_platform_files, load_needs
 from .paths import Platform
-from . import ssh
 from .ssh import Host, SshError
 
 TEMPLATE = Path(__file__).parent / "templates" / "platform"
@@ -50,6 +52,7 @@ def log(msg: str = "") -> None:
 
 
 # -- helpers -------------------------------------------------------------------
+
 
 def _platform(args) -> Platform:
     platform = Platform(args.dir)
@@ -85,18 +88,23 @@ def _proxy_info(platform: Platform, servers, gitea=None, make_host=Host):
         return None
     from .gitea.connect import gitea_info
     from .infra import proxy as proxymod
+
     gitea = gitea or gitea_info(platform, servers)
     ip = None
     if cfg.host != servers.gitea.host:
         state = platform.read_state("proxy") or {}
-        ip = (state.get("ip") if state.get("host") == cfg.host else None) \
-            or (_cached_facts(platform, cfg.host) or {}).get("ip") or make_host(cfg.host).ip()
+        ip = (
+            (state.get("ip") if state.get("host") == cfg.host else None)
+            or (_cached_facts(platform, cfg.host) or {}).get("ip")
+            or make_host(cfg.host).ip()
+        )
     return proxymod.info(cfg, gitea, servers.gitea.host, ip)
 
 
 def _add_proxy_package(platform: Platform, servers, needs) -> None:
     """With an egress proxy, tinyproxy joins the apt or rpm needs of the proxy host's distro."""
     from .infra import proxy as proxymod
+
     cfg = servers.egress_proxy
     if cfg:
         proxymod.add_package(needs, cfg, None if cfg.distro else _cached_facts(platform, cfg.host))
@@ -104,6 +112,7 @@ def _add_proxy_package(platform: Platform, servers, needs) -> None:
 
 def _node_context(platform: Platform, servers, infra, hosts: list[Host]) -> NodeContext:
     from .gitea.connect import gitea_info
+
     info = gitea_info(platform, servers)
     uploaded = platform.read_state("upload") or {}
     node_ips = [h.ip() for h in hosts] if len(hosts) > 1 else []
@@ -144,6 +153,7 @@ def _print_results(node: str, results: list[dict]) -> bool:
 
 # -- commands ------------------------------------------------------------------
 
+
 def cmd_init(args) -> int:
     target = Path(args.folder or args.dir).resolve()
     if (target / "servers.yml").exists():
@@ -174,7 +184,9 @@ def cmd_needs(args) -> int:
     for python, specs in needs.pypi.items():
         log(f"  pypi   (python {python}) {len(specs)} specs: {', '.join(specs[:6])}{' ...' if len(specs) > 6 else ''}")
     if needs.npm:
-        log(f"  npm    {len(needs.npm)} packages: {', '.join(f'{n.name}@{n.version}' for n in needs.npm[:6])}{' ...' if len(needs.npm) > 6 else ''}")
+        log(
+            f"  npm    {len(needs.npm)} packages: {', '.join(f'{n.name}@{n.version}' for n in needs.npm[:6])}{' ...' if len(needs.npm) > 6 else ''}"
+        )
     for distro, pkgs in needs.apt.items():
         log(f"  apt    ({distro}) {', '.join(pkgs)}")
     for branch, pkgs in needs.apk.items():
@@ -191,6 +203,7 @@ def cmd_needs(args) -> int:
 
 def cmd_fetch(args) -> int:
     from .fetch import fetch_all
+
     platform = _platform(args)
     needs = load_needs(platform.needs_dir)
     mirrors = load_mirrors(platform.mirrors_file)
@@ -226,6 +239,7 @@ def cmd_gitea(args) -> int:
     servers = _servers(platform)
     if args.action == "setup":
         from .gitea.setup import setup
+
         info = setup(platform, servers, log=log)
         log()
         log(f"Gitea {info['version']} is up at https://{info['name']} ({info['ip']})")
@@ -234,10 +248,12 @@ def cmd_gitea(args) -> int:
         return 0
     if args.action == "backup":
         from .gitea.backup import backup
+
         backup(platform, servers, Path(args.out), keep_on_server=args.keep_on_server, log=log)
         return 0
     if args.action == "restore":
         from .gitea.backup import restore
+
         if not args.archive:
             raise RuntimeError("gitea restore needs the archive: outpost gitea restore backups/gitea-....tar.gz")
         restore(platform, servers, Path(args.archive), log=log)
@@ -255,26 +271,39 @@ def cmd_gitea(args) -> int:
 def cmd_upload(args) -> int:
     from .gitea.connect import connect, gitea_info
     from .gitea.upload import upload_box
+
     platform = _platform(args)
     servers = _servers(platform)
     sources = [Path(s) for s in args.source] or [platform.box_dir]
     for src in sources:
         if not src.exists():
-            raise RuntimeError(f"{src} does not exist. Run `outpost fetch` first, or pass the box folder or tar.xz files.")
+            raise RuntimeError(
+                f"{src} does not exist. Run `outpost fetch` first, or pass the box folder or tar.xz files."
+            )
     box, keep = boxmod.open_box(sources[0] if len(sources) == 1 and sources[0].is_dir() else sources)
     try:
         sig, pub = box / "manifest.sig", platform.pki_dir / "box.pub"
         if sig.exists() and pub.exists():
             if not pki.verify(box / "manifest.json", sig, pub):
-                raise RuntimeError("manifest.sig does not match pki/box.pub. The box was altered or signed with another key.")
+                raise RuntimeError(
+                    "manifest.sig does not match pki/box.pub. The box was altered or signed with another key."
+                )
             log("Signature OK")
         info = gitea_info(platform, servers)
         proxy = _proxy_info_or_warn(platform, servers, info)
         with connect(platform, servers) as client:
             stats = upload_box(box, client, info, _ca_pem(platform), log=log, proxy=proxy)
         config = stats.get("config_image", {})
-        platform.write_state("upload", {"distros": config.get("distros", []), "apk_branches": config.get("apk_branches", []),
-                                        "rpm_distros": config.get("rpm_distros", []), "stats": stats, "source": [str(s) for s in sources]})
+        platform.write_state(
+            "upload",
+            {
+                "distros": config.get("distros", []),
+                "apk_branches": config.get("apk_branches", []),
+                "rpm_distros": config.get("rpm_distros", []),
+                "stats": stats,
+                "source": [str(s) for s in sources],
+            },
+        )
     finally:
         if keep:
             keep.cleanup()
@@ -288,7 +317,9 @@ def cmd_infra(args) -> int:
     if args.action == "list":
         for name, infra in servers.infrastructures.items():
             state = platform.read_state(f"verify-{name}") or {}
-            log(f"  {name:12} {infra.type:8} nodes: {', '.join(infra.nodes)}   last verify: {state.get('result', 'never')}")
+            log(
+                f"  {name:12} {infra.type:8} nodes: {', '.join(infra.nodes)}   last verify: {state.get('result', 'never')}"
+            )
         return 0
     infra = servers.infra(args.name)
     hosts = [Host(n) for n in infra.nodes]
@@ -316,7 +347,9 @@ def _infra_setup(platform: Platform, servers, infra, hosts: list[Host], setup: b
         hostsmod.record(platform, host.alias, hostsmod.inspect(host))
     platform.write_state(f"verify-{infra.name}", {"result": "ok" if all_ok else "problems", "nodes": report})
     if all_ok and setup:
-        log(f"Next: outpost check --infra {infra.name}   (smoke check)   or   outpost demo push   (deploy the demo through Gitea Actions)")
+        log(
+            f"Next: outpost check --infra {infra.name}   (smoke check)   or   outpost demo push   (deploy the demo through Gitea Actions)"
+        )
     return 0 if all_ok else 1
 
 
@@ -350,7 +383,7 @@ def _infra_upgrade(platform: Platform, servers, infra, hosts: list[Host]) -> int
         out = host.run(UPGRADE_SCRIPT, timeout=3600)
         for line in out.stdout.strip().splitlines():
             log(f"  [{host.alias}] {line}")
-        if not out.ok or any(marker in out.stdout for marker in ("E:", "ERROR:", "Error:")):   # apt, apk, dnf
+        if not out.ok or any(marker in out.stdout for marker in ("E:", "ERROR:", "Error:")):  # apt, apk, dnf
             failed.append(host.alias)
             log(f"  [{host.alias}] FAILED: {out.stderr.strip()[-300:]}")
         elif "REBOOT-REQUIRED" in out.stdout:
@@ -366,6 +399,7 @@ def _infra_upgrade(platform: Platform, servers, infra, hosts: list[Host]) -> int
 def _install_runner(platform: Platform, servers, ctx: NodeContext, host: Host) -> dict:
     """A Gitea Actions runner on the first node, so `outpost demo push` (or your own workflows) can deploy here."""
     from .gitea.connect import connect
+
     with connect(platform, servers) as client:
         token = client.runner_registration_token()
         known = {r["name"] for r in client.runners()}
@@ -374,6 +408,7 @@ def _install_runner(platform: Platform, servers, ctx: NodeContext, host: Host) -
 
 def cmd_demo(args) -> int:
     from . import demo
+
     platform = _platform(args)
     servers = _servers(platform)
     if args.action == "push":
@@ -399,11 +434,16 @@ def cmd_demo(args) -> int:
 def cmd_check(args) -> int:
     from .checks import load_checks, run_check
     from .gitea.connect import gitea_info
+
     platform = _platform(args)
     servers = _servers(platform)
     infra = servers.infra(args.infra)
     info = gitea_info(platform, servers)
-    checks = [c for c in load_checks(platform.checks_dir) if c.applies_to(infra.type) and (not args.name or c.name == args.name)]
+    checks = [
+        c
+        for c in load_checks(platform.checks_dir)
+        if c.applies_to(infra.type) and (not args.name or c.name == args.name)
+    ]
     if not checks:
         log(f"No checks for {infra.type} in {platform.checks_dir}" + (f" named {args.name}" if args.name else ""))
         return 1
@@ -412,15 +452,20 @@ def cmd_check(args) -> int:
     results = []
     for check in checks:
         if "proxy" in check.requires and "PROXY_URL" not in env:
-            log(f"check {check.name}: skipped, it needs the egress proxy and none is set up "
-                "(egress_proxy in servers.yml, then `outpost proxy setup`)")
+            log(
+                f"check {check.name}: skipped, it needs the egress proxy and none is set up "
+                "(egress_proxy in servers.yml, then `outpost proxy setup`)"
+            )
             continue
         log(f"check {check.name} on {host.alias}: {check.description}")
         results.append(run_check(check, host, env, log=log))
     platform.write_state(f"check-{infra.name}", {"results": results})
     failed = [r["name"] for r in results if not r["ok"]]
     log()
-    log(f"{len(results) - len(failed)}/{len(results)} checks passed" + (f"; failed: {', '.join(failed)}" if failed else ""))
+    log(
+        f"{len(results) - len(failed)}/{len(results)} checks passed"
+        + (f"; failed: {', '.join(failed)}" if failed else "")
+    )
     return 1 if failed else 0
 
 
@@ -428,24 +473,32 @@ def _proxy_check_env(platform: Platform, servers) -> dict[str, str]:
     """PROXY_URL, PROXY_ALLOWED (a name the proxy lets through) and PROXY_REFUSED (one it must refuse) for the
     smoke checks, from state/proxy.json; empty when no proxy is configured or it was never set up."""
     from .infra import proxy as proxymod
+
     state = platform.read_state("proxy") or {}
     if not servers.egress_proxy or not state.get("url") or not state.get("allow"):
         return {}
-    return {"PROXY_URL": state["url"], "PROXY_ALLOWED": proxymod.probe_name(state["allow"]),
-            "PROXY_REFUSED": proxymod.refused_name(state["allow"])}
+    return {
+        "PROXY_URL": state["url"],
+        "PROXY_ALLOWED": proxymod.probe_name(state["allow"]),
+        "PROXY_REFUSED": proxymod.refused_name(state["allow"]),
+    }
 
 
 def cmd_proxy(args) -> int:
     """The egress proxy: install and seal it on its host, bring already set-up nodes up to date, verify."""
     from .gitea.connect import gitea_info
-    from .infra import k3s, proxy as proxymod
+    from .infra import k3s
+    from .infra import proxy as proxymod
     from .infra.common import apply_proxy
+
     platform = _platform(args)
     servers = _servers(platform)
     cfg = servers.egress_proxy
     if not cfg:
-        raise ConfigError("servers.yml has no egress_proxy section. Add one (allow: [api.twilio.com]) to give sealed "
-                          "nodes named exceptions; see docs/architecture/proxy.md.")
+        raise ConfigError(
+            "servers.yml has no egress_proxy section. Add one (allow: [api.twilio.com]) to give sealed "
+            "nodes named exceptions; see docs/architecture/proxy.md."
+        )
     info = gitea_info(platform, servers)
     host = Host(cfg.host)
     on_gitea = cfg.host == servers.gitea.host
@@ -454,11 +507,20 @@ def cmd_proxy(args) -> int:
     # the infrastructure it belongs to, if any, plus its fellow nodes
     member = next((i for i in servers.infrastructures.values() if cfg.host in i.nodes), None)
     egress_allow = list(servers.gitea.allow) if on_gitea else list(member.allow) if member else []
-    client_allow = list(dict.fromkeys(servers.gitea.allow + [a for i in servers.infrastructures.values() for a in i.allow]))
+    client_allow = list(
+        dict.fromkeys(servers.gitea.allow + [a for i in servers.infrastructures.values() for a in i.allow])
+    )
     uploaded = platform.read_state("upload") or {}
-    ctx = NodeContext(gitea=info, ca_pem=_ca_pem(platform), distros=uploaded.get("distros", []),
-                      apk_branches=uploaded.get("apk_branches", []), rpm_distros=uploaded.get("rpm_distros", []),
-                      allow=egress_allow, infra_name="egress proxy", proxy=proxy)
+    ctx = NodeContext(
+        gitea=info,
+        ca_pem=_ca_pem(platform),
+        distros=uploaded.get("distros", []),
+        apk_branches=uploaded.get("apk_branches", []),
+        rpm_distros=uploaded.get("rpm_distros", []),
+        allow=egress_allow,
+        infra_name="egress proxy",
+        proxy=proxy,
+    )
     if args.action == "setup":
         log(f"Setting up the egress proxy on {cfg.host}: {proxy.url}, allowing {', '.join(cfg.allow)}")
         result = proxymod.setup(host, ctx, cfg, egress_allow=egress_allow, client_allow=client_allow, log=log)
@@ -479,12 +541,23 @@ def cmd_proxy(args) -> int:
     results = proxymod.verify(host, ctx, cfg)
     ok = _print_results(cfg.host, results)
     state = platform.read_state("proxy") or {}
-    platform.write_state("proxy", {**state, "verify": {"result": "ok" if ok else "problems", "checks": results,
-                                                         "when": time.strftime("%Y-%m-%dT%H:%M:%S")}})
+    platform.write_state(
+        "proxy",
+        {
+            **state,
+            "verify": {
+                "result": "ok" if ok else "problems",
+                "checks": results,
+                "when": time.strftime("%Y-%m-%dT%H:%M:%S"),
+            },
+        },
+    )
     hostsmod.record(platform, cfg.host, hostsmod.inspect(host))
     if ok and args.action == "setup":
-        log(f"Programs opt in with HTTPS_PROXY={proxy.url} (see /etc/outpost/proxy.env on every node); "
-            "those that do not still have no internet. Next: outpost check hello-proxy --infra <name>")
+        log(
+            f"Programs opt in with HTTPS_PROXY={proxy.url} (see /etc/outpost/proxy.env on every node); "
+            "those that do not still have no internet. Next: outpost check hello-proxy --infra <name>"
+        )
     return 0 if ok else 1
 
 
@@ -510,6 +583,7 @@ def cmd_egress(args) -> int:
 
 def cmd_lab(args) -> int:
     from . import lab
+
     platform = _platform(args)
     if args.action == "up":
         lab.up(platform, k3s=not args.small, log=log)
@@ -521,6 +595,7 @@ def cmd_lab(args) -> int:
 
 def cmd_ui(args) -> int:
     from .ui.server import serve
+
     platform = _platform(args)
     return serve(platform, args.port)
 
@@ -536,13 +611,17 @@ def cmd_hosts(args) -> int:
         for alias, h in data.items():
             if h.get("reachable"):
                 inst = ", ".join(f"{k} {v}" for k, v in h["installed"].items() if v) or "nothing installed yet"
-                log(f"  {alias:14} {h.get('pretty', '?'):24} {h.get('ip', '?'):15} {h.get('egress', '?'):14} {inst}   (seen {h.get('seen', '?')})")
+                log(
+                    f"  {alias:14} {h.get('pretty', '?'):24} {h.get('ip', '?'):15} {h.get('egress', '?'):14} {inst}   (seen {h.get('seen', '?')})"
+                )
             else:
                 log(f"  {alias:14} unreachable: {h.get('error', '')}   (seen {h.get('seen', '?')})")
         log("From state/hosts/. `outpost hosts --refresh` asks the servers again.")
     drift = {a: hostsmod.drift(h) for a, h in data.items() if hostsmod.drift(h)}
     for alias, items in drift.items():
-        log(f"  {alias}: not at the pinned version: {', '.join(items)}; run `outpost infra setup` (or `gitea setup`) to bring it up to date")
+        log(
+            f"  {alias}: not at the pinned version: {', '.join(items)}; run `outpost infra setup` (or `gitea setup`) to bring it up to date"
+        )
     return 0
 
 
@@ -563,6 +642,7 @@ def cmd_pki(args) -> int:
     """Rotate the CA: new CA and Gitea certificate, then push them everywhere the old one went."""
     import shutil
     import time
+
     platform = _platform(args)
     servers = _servers(platform)
     if not platform.read_state("gitea"):
@@ -571,22 +651,37 @@ def cmd_pki(args) -> int:
     old_pki, old_secrets = platform.pki_dir / "archive" / stamp, platform.secrets_dir / "archive" / stamp
     old_pki.mkdir(parents=True, exist_ok=True)
     old_secrets.mkdir(parents=True, exist_ok=True)
-    for name, folder, archive in (("ca.crt", platform.pki_dir, old_pki), ("gitea.crt", platform.pki_dir, old_pki),
-                                  ("ca.key", platform.secrets_dir, old_secrets), ("gitea.key", platform.secrets_dir, old_secrets)):
+    for name, folder, archive in (
+        ("ca.crt", platform.pki_dir, old_pki),
+        ("gitea.crt", platform.pki_dir, old_pki),
+        ("ca.key", platform.secrets_dir, old_secrets),
+        ("gitea.key", platform.secrets_dir, old_secrets),
+    ):
         if (folder / name).exists():
             shutil.move(folder / name, archive / name)
-    log(f"==> [1/3] old CA and certificate moved to pki/archive/{stamp} and secrets/archive/{stamp}; making new ones and installing them on Gitea")
+    log(
+        f"==> [1/3] old CA and certificate moved to pki/archive/{stamp} and secrets/archive/{stamp}; making new ones and installing them on Gitea"
+    )
     from .gitea.setup import setup
+
     setup(platform, servers, log=log)
     log("==> [2/3] config image with the new CA")
     from .gitea.connect import connect, gitea_info
     from .gitea.upload import push_config_image
+
     uploaded = platform.read_state("upload") or {}
     with connect(platform, servers) as client:
         info = gitea_info(platform, servers)
-        push_config_image(client, info, _ca_pem(platform), uploaded.get("distros", []),
-                          apk_branches=uploaded.get("apk_branches", []), rpm_distros=uploaded.get("rpm_distros", []), log=log,
-                          proxy=_proxy_info_or_warn(platform, servers, info))
+        push_config_image(
+            client,
+            info,
+            _ca_pem(platform),
+            uploaded.get("distros", []),
+            apk_branches=uploaded.get("apk_branches", []),
+            rpm_distros=uploaded.get("rpm_distros", []),
+            log=log,
+            proxy=_proxy_info_or_warn(platform, servers, info),
+        )
     done = [n for n in servers.infrastructures if platform.read_state(f"infra-{n}")]
     log(f"==> [3/3] nodes of {', '.join(done) or 'no infrastructure yet'}: trust the new CA")
     rc = 0
@@ -594,16 +689,21 @@ def cmd_pki(args) -> int:
         infra = servers.infra(name)
         hosts = [Host(n) for n in infra.nodes]
         rc |= _infra_setup(platform, servers, infra, hosts, setup=True)
-        for host in hosts:   # Docker and containerd read the CA file when they next connect; the runner needs a restart
+        for host in hosts:  # Docker and containerd read the CA file when they next connect; the runner needs a restart
             host.run("systemctl try-restart outpost-runner 2>/dev/null || true")
-    log("rotation done. Images built before today still work; rebuild anything that baked the old pki/ca.crt into itself.")
+    log(
+        "rotation done. Images built before today still work; rebuild anything that baked the old pki/ca.crt into itself."
+    )
     return rc
 
 
 # -- parser --------------------------------------------------------------------
 
+
 def build_parser() -> argparse.ArgumentParser:
-    p = argparse.ArgumentParser(prog="outpost", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    p = argparse.ArgumentParser(
+        prog="outpost", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
     p.add_argument("--dir", default=".", help="platform folder (default: current directory)")
     p.add_argument("--version", action="version", version=f"outpost {__version__}")
     sub = p.add_subparsers(dest="command", required=True)
@@ -625,7 +725,11 @@ def build_parser() -> argparse.ArgumentParser:
     g.add_argument("action", choices=["setup", "info", "backup", "restore"])
     g.add_argument("archive", nargs="?", help="restore: the backups/*.tar.gz to restore")
     g.add_argument("--out", default="backups", help="backup: folder for the archive (default: backups)")
-    g.add_argument("--keep-on-server", action="store_true", help="backup: also leave the archive in /var/tmp/outpost-backups on the server")
+    g.add_argument(
+        "--keep-on-server",
+        action="store_true",
+        help="backup: also leave the archive in /var/tmp/outpost-backups on the server",
+    )
     g.set_defaults(func=cmd_gitea)
 
     u = sub.add_parser("upload", help="push the box into Gitea")

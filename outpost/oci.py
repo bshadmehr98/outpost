@@ -41,9 +41,9 @@ GITEA_IMAGE_NAME = re.compile(r"\A[a-z0-9]+([._-][a-z0-9]+)*(/[a-z0-9]+([._-][a-
 
 @dataclass(frozen=True)
 class Ref:
-    registry: str   # docker.io, ghcr.io, gitea.internal
-    repo: str       # library/python, grafana/grafana
-    tag: str        # 3.12-slim
+    registry: str  # docker.io, ghcr.io, gitea.internal
+    repo: str  # library/python, grafana/grafana
+    tag: str  # 3.12-slim
 
     def __str__(self) -> str:
         return f"{self.registry}/{self.repo}:{self.tag}"
@@ -79,7 +79,7 @@ def parse_ref(ref: str) -> Ref:
     """python:3.12-slim -> docker.io/library/python:3.12-slim. Digest references are not supported."""
     if "@" in ref:
         raise ValueError(f"{ref}: use a tag, not a digest")
-    name, tag = (ref.rsplit(":", 1) if ":" in ref.rsplit("/", 1)[-1] else (ref, "latest"))
+    name, tag = ref.rsplit(":", 1) if ":" in ref.rsplit("/", 1)[-1] else (ref, "latest")
     parts = name.split("/")
     if len(parts) > 1 and ("." in parts[0] or ":" in parts[0] or parts[0] == "localhost"):
         registry, repo = parts[0], "/".join(parts[1:])
@@ -103,7 +103,7 @@ def original_ref(name: str) -> str:
 
     `name` is the path below the organisation, without the tag. The registry is not kept in Gitea, so
     `org/app` reads back as the Docker Hub name; a need for another registry names it in full."""
-    return name[len("library/"):] if name.startswith("library/") and name.count("/") == 1 else name
+    return name[len("library/") :] if name.startswith("library/") and name.count("/") == 1 else name
 
 
 def digest_of(data: bytes) -> str:
@@ -163,11 +163,19 @@ class Registry:
         media_type = manifest.get("mediaType") or resp.headers.get("Content-Type", "").split(";")[0]
 
         if media_type in INDEX_TYPES or "manifests" in manifest:
-            chosen = next((m for m in manifest["manifests"]
-                           if m.get("platform", {}).get("os") == "linux" and m["platform"].get("architecture") == arch), None)
+            chosen = next(
+                (
+                    m
+                    for m in manifest["manifests"]
+                    if m.get("platform", {}).get("os") == "linux" and m["platform"].get("architecture") == arch
+                ),
+                None,
+            )
             if not chosen:
                 raise ValueError(f"{ref}: no linux/{arch} image in the manifest list")
-            resp = self.call("GET", f"/v2/{ref.repo}/manifests/{chosen['digest']}", ref.repo, headers={"Accept": ACCEPT})
+            resp = self.call(
+                "GET", f"/v2/{ref.repo}/manifests/{chosen['digest']}", ref.repo, headers={"Accept": ACCEPT}
+            )
             if resp.status != 200:
                 raise HttpError(resp.status, resp.text, f"{ref} manifest {chosen['digest']}")
             manifest_bytes = resp.body
@@ -187,12 +195,14 @@ class Registry:
         index = {
             "schemaVersion": 2,
             "mediaType": "application/vnd.oci.image.index.v1+json",
-            "manifests": [{
-                "mediaType": media_type,
-                "digest": manifest_digest,
-                "size": len(manifest_bytes),
-                "annotations": {REF_ANNOTATION: ref.short},
-            }],
+            "manifests": [
+                {
+                    "mediaType": media_type,
+                    "digest": manifest_digest,
+                    "size": len(manifest_bytes),
+                    "annotations": {REF_ANNOTATION: ref.short},
+                }
+            ],
         }
         (dest / "index.json").write_text(json.dumps(index, indent=2) + "\n")
         return dest
@@ -217,8 +227,9 @@ class Registry:
             self._push_blob(repo, blob["digest"], blobs / blob["digest"][7:])
 
         media_type = entry.get("mediaType") or manifest.get("mediaType") or MANIFEST_TYPES[0]
-        resp = self.call("PUT", f"/v2/{repo}/manifests/{tag}", repo, data=manifest_bytes,
-                         headers={"Content-Type": media_type})
+        resp = self.call(
+            "PUT", f"/v2/{repo}/manifests/{tag}", repo, data=manifest_bytes, headers={"Content-Type": media_type}
+        )
         if resp.status not in (200, 201):
             raise HttpError(resp.status, resp.text, f"push {repo}:{tag}")
         return entry["digest"]
@@ -231,13 +242,19 @@ class Registry:
             raise HttpError(start.status, start.text, f"start upload {repo}")
         location = start.headers.get("Location")
         sep = "&" if "?" in location else "?"
-        resp = self.call("PUT", f"{location}{sep}digest={quote(digest, safe=':')}", repo,
-                         data=path.read_bytes(), headers={"Content-Type": "application/octet-stream"})
+        resp = self.call(
+            "PUT",
+            f"{location}{sep}digest={quote(digest, safe=':')}",
+            repo,
+            data=path.read_bytes(),
+            headers={"Content-Type": "application/octet-stream"},
+        )
         if resp.status not in (201, 204):
             raise HttpError(resp.status, resp.text, f"upload blob {digest}")
 
 
 # -- building a small image from files, no Docker needed ----------------------
+
 
 def build_layout(files: dict[str, tuple[bytes, int]], dest: Path, ref_name: str) -> Path:
     """Create a one-layer image from {path: (content, mode)}. Used for the config image."""
@@ -252,6 +269,7 @@ def build_layout(files: dict[str, tuple[bytes, int]], dest: Path, ref_name: str)
             tar.addfile(info, io.BytesIO(content))
     layer_tar = layer_io.getvalue()
     import gzip
+
     layer_gz = gzip.compress(layer_tar, mtime=0)
 
     config = {
@@ -265,8 +283,18 @@ def build_layout(files: dict[str, tuple[bytes, int]], dest: Path, ref_name: str)
     manifest = {
         "schemaVersion": 2,
         "mediaType": MANIFEST_TYPES[0],
-        "config": {"mediaType": "application/vnd.oci.image.config.v1+json", "digest": digest_of(config_bytes), "size": len(config_bytes)},
-        "layers": [{"mediaType": "application/vnd.oci.image.layer.v1.tar+gzip", "digest": digest_of(layer_gz), "size": len(layer_gz)}],
+        "config": {
+            "mediaType": "application/vnd.oci.image.config.v1+json",
+            "digest": digest_of(config_bytes),
+            "size": len(config_bytes),
+        },
+        "layers": [
+            {
+                "mediaType": "application/vnd.oci.image.layer.v1.tar+gzip",
+                "digest": digest_of(layer_gz),
+                "size": len(layer_gz),
+            }
+        ],
     }
     manifest_bytes = json.dumps(manifest, sort_keys=True).encode()
 
@@ -275,12 +303,24 @@ def build_layout(files: dict[str, tuple[bytes, int]], dest: Path, ref_name: str)
     for data in (layer_gz, config_bytes, manifest_bytes):
         (blobs / digest_of(data)[7:]).write_bytes(data)
     (dest / "oci-layout").write_text('{"imageLayoutVersion": "1.0.0"}\n')
-    (dest / "index.json").write_text(json.dumps({
-        "schemaVersion": 2,
-        "mediaType": "application/vnd.oci.image.index.v1+json",
-        "manifests": [{"mediaType": MANIFEST_TYPES[0], "digest": digest_of(manifest_bytes), "size": len(manifest_bytes),
-                       "annotations": {REF_ANNOTATION: ref_name}}],
-    }, indent=2) + "\n")
+    (dest / "index.json").write_text(
+        json.dumps(
+            {
+                "schemaVersion": 2,
+                "mediaType": "application/vnd.oci.image.index.v1+json",
+                "manifests": [
+                    {
+                        "mediaType": MANIFEST_TYPES[0],
+                        "digest": digest_of(manifest_bytes),
+                        "size": len(manifest_bytes),
+                        "annotations": {REF_ANNOTATION: ref_name},
+                    }
+                ],
+            },
+            indent=2,
+        )
+        + "\n"
+    )
     return dest
 
 

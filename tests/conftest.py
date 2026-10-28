@@ -22,7 +22,13 @@ class FakeHost:
 
     def __init__(self, alias="node-1", facts=None, responses=None):
         self.alias = alias
-        self._facts = facts or {"id": "ubuntu", "codename": "noble", "arch": "x86_64", "ip": "10.0.0.11", "hostname": alias}
+        self._facts = facts or {
+            "id": "ubuntu",
+            "codename": "noble",
+            "arch": "x86_64",
+            "ip": "10.0.0.11",
+            "hostname": alias,
+        }
         self.responses = list(responses or [])
         self.scripts: list[str] = []
         self.files: dict[str, str] = {}
@@ -35,7 +41,10 @@ class FakeHost:
             if re.search(pattern, script, re.S):
                 if isinstance(stdout, Result):
                     if raise_on_failure and not stdout.ok:
-                        raise CommandFailed(f"[{self.alias}] command failed (exit {stdout.returncode}):\n{stdout.stderr.strip()}", stdout)
+                        raise CommandFailed(
+                            f"[{self.alias}] command failed (exit {stdout.returncode}):\n{stdout.stderr.strip()}",
+                            stdout,
+                        )
                     return stdout
                 return Result(0, stdout, "")
         return Result(0, "", "")
@@ -72,9 +81,9 @@ class FakeGitea:
         self.pypi: list[dict] = []
         self.npm: dict[str, dict] = {}
         self.debian: dict[str, list[str]] = {}
-        self.alpine: dict[str, list[str]] = {}      # "branch/repository" -> uploaded files
-        self.rpm: dict[str, list[str]] = {}         # group ("" for none) -> uploaded files
-        self.alpine_key_name = "pkgs@6f2a9c1e.rsa.pub"   # Gitea names the key <owner>@<fingerprint>.rsa.pub
+        self.alpine: dict[str, list[str]] = {}  # "branch/repository" -> uploaded files
+        self.rpm: dict[str, list[str]] = {}  # group ("" for none) -> uploaded files
+        self.alpine_key_name = "pkgs@6f2a9c1e.rsa.pub"  # Gitea names the key <owner>@<fingerprint>.rsa.pub
         self.blobs: dict[tuple[str, str], bytes] = {}
         self.manifests: dict[tuple[str, str], tuple[bytes, str]] = {}
         self.uploads: dict[str, str] = {}
@@ -93,10 +102,24 @@ class FakeGitea:
             self.blobs[(repo, blob["digest"])] = (blobs / blob["digest"][7:]).read_bytes()
         self.manifests[(repo, entry["digest"])] = (manifest_bytes, entry["mediaType"])
         if add_index:
-            index_doc = {"schemaVersion": 2, "mediaType": "application/vnd.oci.image.index.v1+json", "manifests": [
-                {"mediaType": entry["mediaType"], "digest": "sha256:" + "0" * 64, "size": 1, "platform": {"os": "linux", "architecture": "arm64"}},
-                {"mediaType": entry["mediaType"], "digest": entry["digest"], "size": entry["size"], "platform": {"os": "linux", "architecture": "amd64"}},
-            ]}
+            index_doc = {
+                "schemaVersion": 2,
+                "mediaType": "application/vnd.oci.image.index.v1+json",
+                "manifests": [
+                    {
+                        "mediaType": entry["mediaType"],
+                        "digest": "sha256:" + "0" * 64,
+                        "size": 1,
+                        "platform": {"os": "linux", "architecture": "arm64"},
+                    },
+                    {
+                        "mediaType": entry["mediaType"],
+                        "digest": entry["digest"],
+                        "size": entry["size"],
+                        "platform": {"os": "linux", "architecture": "amd64"},
+                    },
+                ],
+            }
             self.manifests[(repo, tag)] = (json.dumps(index_doc).encode(), index_doc["mediaType"])
         else:
             self.manifests[(repo, tag)] = (manifest_bytes, entry["mediaType"])
@@ -124,8 +147,13 @@ class _Handler(BaseHTTPRequestHandler):
         auth = self.headers.get("Authorization", "")
         if self.path.startswith("/v2/") and self.path not in ("/v2/token",) and not self.path.startswith("/token"):
             if self.gitea.require_token and not auth.startswith("Bearer good-token"):
-                self._send(401, b'{"errors":[{"code":"UNAUTHORIZED"}]}',
-                           {"WWW-Authenticate": f'Bearer realm="{self.gitea.url}/token",service="fake",scope="repository:x:pull,push"'})
+                self._send(
+                    401,
+                    b'{"errors":[{"code":"UNAUTHORIZED"}]}',
+                    {
+                        "WWW-Authenticate": f'Bearer realm="{self.gitea.url}/token",service="fake",scope="repository:x:pull,push"'
+                    },
+                )
                 return False
         return True
 
@@ -147,14 +175,22 @@ class _Handler(BaseHTTPRequestHandler):
             return self._send(200 if m[2] in g.debian else 404, b"Release")
         m = re.match(r"^/api/packages/([^/]+)/alpine/key$", self.path)
         if m:
-            return self._send(200, b"-----BEGIN PUBLIC KEY-----\nfake-rsa\n-----END PUBLIC KEY-----\n",
-                              {"Content-Type": "application/x-pem-file", "Content-Disposition": f'attachment; filename="{g.alpine_key_name}"'})
+            return self._send(
+                200,
+                b"-----BEGIN PUBLIC KEY-----\nfake-rsa\n-----END PUBLIC KEY-----\n",
+                {
+                    "Content-Type": "application/x-pem-file",
+                    "Content-Disposition": f'attachment; filename="{g.alpine_key_name}"',
+                },
+            )
         m = re.match(r"^/api/packages/([^/]+)/alpine/([^/]+)/([^/]+)/([^/]+)/APKINDEX.tar.gz$", self.path)
         if m:
             return self._send(200 if f"{m[2]}/{m[3]}" in g.alpine else 404, b"APKINDEX")
         m = re.match(r"^/api/packages/([^/]+)/rpm(?:/(.+?))?/repository.key$", self.path)
         if m:
-            return self._send(200, b"-----BEGIN PGP PUBLIC KEY BLOCK-----\nfake-rpm\n-----END PGP PUBLIC KEY BLOCK-----\n")
+            return self._send(
+                200, b"-----BEGIN PGP PUBLIC KEY BLOCK-----\nfake-rpm\n-----END PGP PUBLIC KEY BLOCK-----\n"
+            )
         m = re.match(r"^/api/packages/([^/]+)/rpm(?:/(.+?))?/repodata/repomd.xml$", self.path)
         if m:
             return self._send(200 if (m[2] or "") in g.rpm else 404, b"<repomd/>")
@@ -163,7 +199,14 @@ class _Handler(BaseHTTPRequestHandler):
         m = re.match(r"^/v2/(.+)/manifests/([^/]+)$", self.path)
         if m and (m[1], m[2]) in g.manifests:
             body, mt = g.manifests[(m[1], m[2])]
-            return self._send(200, body, {"Content-Type": mt, "Docker-Content-Digest": "sha256:" + __import__("hashlib").sha256(body).hexdigest()})
+            return self._send(
+                200,
+                body,
+                {
+                    "Content-Type": mt,
+                    "Docker-Content-Digest": "sha256:" + __import__("hashlib").sha256(body).hexdigest(),
+                },
+            )
         m = re.match(r"^/v2/(.+)/blobs/(sha256:[0-9a-f]+)$", self.path)
         if m and (m[1], m[2]) in g.blobs:
             return self._send(200, g.blobs[(m[1], m[2])], {"Content-Type": "application/octet-stream"})
@@ -188,12 +231,17 @@ class _Handler(BaseHTTPRequestHandler):
             return self._send(201, b"{}")
         m = re.match(r"^/api/packages/([^/]+)/pypi$", self.path)
         if m:
-            msg = BytesParser(policy=email_default).parsebytes(b"Content-Type: " + self.headers["Content-Type"].encode() + b"\r\n\r\n" + body)
+            msg = BytesParser(policy=email_default).parsebytes(
+                b"Content-Type: " + self.headers["Content-Type"].encode() + b"\r\n\r\n" + body
+            )
             fields = {}
             for part in msg.iter_parts():
                 name = part.get_param("name", header="content-disposition")
                 fields[name] = part.get_filename() if part.get_filename() else part.get_payload(decode=True).decode()
-            if any(p["name"] == fields["name"] and p["version"] == fields["version"] and p["content"] == fields["content"] for p in g.pypi):
+            if any(
+                p["name"] == fields["name"] and p["version"] == fields["version"] and p["content"] == fields["content"]
+                for p in g.pypi
+            ):
                 return self._send(409, b"exists")
             g.pypi.append(fields)
             return self._send(201, b"")
@@ -202,7 +250,7 @@ class _Handler(BaseHTTPRequestHandler):
         m = re.match(r"^/v2/(.+)/blobs/uploads/$", self.path)
         if m:
             owner, _, image = m[1].partition("/")
-            if not GITEA_IMAGE_NAME.match(image):   # what real Gitea answers for library--python
+            if not GITEA_IMAGE_NAME.match(image):  # what real Gitea answers for library--python
                 return self._send(400, b'{"errors":[{"code":"NAME_INVALID","message":""}]}')
             uid = str(len(g.uploads) + 1)
             g.uploads[uid] = m[1]
@@ -281,6 +329,7 @@ def fake_gitea():
 def platform_dir(tmp_path):
     """A platform folder made with `outpost init`."""
     from outpost.cli import main
+
     assert main(["--dir", str(tmp_path), "init"]) == 0
     return tmp_path
 
@@ -289,5 +338,6 @@ def platform_dir(tmp_path):
 def ca_pem(tmp_path_factory):
     """A real CA certificate (openssl is required anyway), for code that hashes or parses the CA."""
     from outpost import pki
+
     d = tmp_path_factory.mktemp("pki")
     return pki.ensure_ca(d / "pki", d / "secrets").read_text()

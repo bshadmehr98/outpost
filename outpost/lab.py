@@ -64,7 +64,8 @@ def ssh_config(key: Path, aliases) -> str:
     return "".join(
         f"Host {alias}\n  HostName {SERVERS[alias][0]}\n  User root\n  IdentityFile {key}\n"
         "  StrictHostKeyChecking no\n  UserKnownHostsFile /dev/null\n  LogLevel ERROR\n"
-        for alias in aliases)
+        for alias in aliases
+    )
 
 
 def _docker(*args, check=True) -> subprocess.CompletedProcess:
@@ -92,22 +93,50 @@ def up(platform: Platform, k3s: bool = True, log=print) -> list[str]:
     _docker("network", "create", "--subnet", SUBNET, NETWORK)
     for alias in aliases:
         ip, extra = SERVERS[alias]
-        _docker("run", "-d", "--privileged", "--cgroupns=host", "-v", "/sys/fs/cgroup:/sys/fs/cgroup:rw",
-                "--tmpfs", "/run", "--tmpfs", "/run/lock", "--tmpfs", "/tmp",
-                "--name", alias, "--hostname", alias, "--network", NETWORK, "--ip", ip, *extra, IMAGE)
+        _docker(
+            "run",
+            "-d",
+            "--privileged",
+            "--cgroupns=host",
+            "-v",
+            "/sys/fs/cgroup:/sys/fs/cgroup:rw",
+            "--tmpfs",
+            "/run",
+            "--tmpfs",
+            "/run/lock",
+            "--tmpfs",
+            "/tmp",
+            "--name",
+            alias,
+            "--hostname",
+            alias,
+            "--network",
+            NETWORK,
+            "--ip",
+            ip,
+            *extra,
+            IMAGE,
+        )
         log(f"started {alias} at {ip}")
 
     (lab / "ssh_config").write_text(ssh_config(key, aliases))
     platform.servers_file.write_text(servers_yml(k3s))
     # the servers are brand new, so what Outpost remembered about the old ones is wrong
-    for stale in [platform.secrets_dir / "gitea-token", platform.secrets_dir / "gitea-admin-password",
-                  *platform.state_dir.glob("*.json")]:
+    for stale in [
+        platform.secrets_dir / "gitea-token",
+        platform.secrets_dir / "gitea-admin-password",
+        *platform.state_dir.glob("*.json"),
+    ]:
         stale.unlink(missing_ok=True)
 
     for alias in aliases:
         for _ in range(60):
-            if subprocess.run(["ssh", "-F", str(lab / "ssh_config"), "-o", "ConnectTimeout=2", alias, "true"],
-                              capture_output=True).returncode == 0:
+            if (
+                subprocess.run(
+                    ["ssh", "-F", str(lab / "ssh_config"), "-o", "ConnectTimeout=2", alias, "true"], capture_output=True
+                ).returncode
+                == 0
+            ):
                 break
             time.sleep(1)
         else:

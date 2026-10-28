@@ -6,10 +6,10 @@ one kind does not stop the others; the summary at the end says what to look at.
 
 from pathlib import Path
 
+from .. import box as boxmod
 from ..config import Mirrors
 from ..needs import Needs
 from . import apk, apt, files, images, npm, pypi, rpm
-from .. import box as boxmod
 
 
 def fetch_all(needs: Needs, box: Path, mirrors: Mirrors, only: set[str] | None = None, log=print) -> dict:

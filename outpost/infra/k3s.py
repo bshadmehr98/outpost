@@ -26,10 +26,10 @@ def registries_yaml(ctx: common.NodeContext) -> str:
     g = ctx.gitea
     return (
         "mirrors:\n"
-        f"  \"{g.name}\":\n"
-        f"    endpoint:\n      - \"{g.url}\"\n"
+        f'  "{g.name}":\n'
+        f'    endpoint:\n      - "{g.url}"\n'
         "configs:\n"
-        f"  \"{g.name}\":\n"
+        f'  "{g.name}":\n'
         f"    tls:\n      ca_file: {clients.PATH_CA}\n"
     )
 
@@ -37,23 +37,32 @@ def registries_yaml(ctx: common.NodeContext) -> str:
 def configmap_yaml(proxy: clients.ProxyInfo) -> str:
     """The proxy variables as a ConfigMap. JSON strings are valid YAML scalars, so values are quoted safely."""
     data = {**proxy.env(), "OUTPOST_PROXY_ALLOWED": ",".join(proxy.allowed)}
-    return ("apiVersion: v1\nkind: ConfigMap\nmetadata:\n"
-            f"  name: {CONFIGMAP}\n  namespace: default\n  labels:\n    app.kubernetes.io/managed-by: outpost\n"
-            "data:\n" + "".join(f"  {k}: {json.dumps(v)}\n" for k, v in data.items()))
+    return (
+        "apiVersion: v1\nkind: ConfigMap\nmetadata:\n"
+        f"  name: {CONFIGMAP}\n  namespace: default\n  labels:\n    app.kubernetes.io/managed-by: outpost\n"
+        "data:\n" + "".join(f"  {k}: {json.dumps(v)}\n" for k, v in data.items())
+    )
 
 
 def apply_configmap(server, proxy: clients.ProxyInfo | None, log=print) -> None:
     """Idempotent: `kubectl apply` of the same ConfigMap changes nothing; without a proxy it is removed."""
     if proxy:
-        server.run(f"cat <<'OUTPOST_EOF' | k3s kubectl apply -f -\n{configmap_yaml(proxy)}OUTPOST_EOF\n", raise_on_failure=True)
+        server.run(
+            f"cat <<'OUTPOST_EOF' | k3s kubectl apply -f -\n{configmap_yaml(proxy)}OUTPOST_EOF\n", raise_on_failure=True
+        )
         log(f"  [{server.alias}] ConfigMap default/{CONFIGMAP}: pods opt in with envFrom configMapRef {CONFIGMAP}")
     else:
-        server.run(f"k3s kubectl -n default delete configmap {CONFIGMAP} --ignore-not-found >/dev/null", raise_on_failure=True)
+        server.run(
+            f"k3s kubectl -n default delete configmap {CONFIGMAP} --ignore-not-found >/dev/null", raise_on_failure=True
+        )
 
 
 def _install(host, ctx: common.NodeContext, exec_args: str, env: str, log) -> None:
     g = ctx.gitea
-    if versions.K3S.split("+")[0] in host.run("k3s --version 2>/dev/null | head -1 || true", raise_on_failure=True).stdout:
+    if (
+        versions.K3S.split("+")[0]
+        in host.run("k3s --version 2>/dev/null | head -1 || true", raise_on_failure=True).stdout
+    ):
         log(f"  [{host.alias}] k3s {versions.K3S} already installed")
         return
     log(f"==> {host.alias}: installing k3s {versions.K3S} from Gitea")
@@ -74,19 +83,29 @@ def setup(ctx: common.NodeContext, hosts: list, log=print) -> dict:
     server = hosts[0]
     facts[server.alias] = common.prepare_node(server, ctx, log)
     server_ip = facts[server.alias]["ip"]
-    _install(server, ctx, f"server --node-ip {server_ip} --resolv-conf /etc/outpost/resolv.conf {ctx.args}".strip(), "", log)
+    _install(
+        server, ctx, f"server --node-ip {server_ip} --resolv-conf /etc/outpost/resolv.conf {ctx.args}".strip(), "", log
+    )
     # ready means: the node reports Ready and the default service account exists, so pods can be created
     server.run(
         "for i in $(seq 1 90); do "
         "k3s kubectl get nodes --no-headers 2>/dev/null | grep -q ' Ready' && k3s kubectl -n default get serviceaccount default >/dev/null 2>&1 && break; "
-        "sleep 2; done; k3s kubectl get nodes", raise_on_failure=True)
+        "sleep 2; done; k3s kubectl get nodes",
+        raise_on_failure=True,
+    )
     token = server.run("cat /var/lib/rancher/k3s/server/node-token", raise_on_failure=True).stdout.strip()
     log(f"  [{server.alias}] k3s server ready")
     apply_configmap(server, ctx.proxy, log)
 
     for host in hosts[1:]:
         facts[host.alias] = common.prepare_node(host, ctx, log)
-        _install(host, ctx, "agent --resolv-conf /etc/outpost/resolv.conf", f"K3S_URL=https://{server_ip}:6443 K3S_TOKEN={token}", log)
+        _install(
+            host,
+            ctx,
+            "agent --resolv-conf /etc/outpost/resolv.conf",
+            f"K3S_URL=https://{server_ip}:6443 K3S_TOKEN={token}",
+            log,
+        )
         log(f"  [{host.alias}] k3s agent joined")
     return {"nodes": facts, "server": server.alias}
 

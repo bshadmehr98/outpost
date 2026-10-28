@@ -27,6 +27,7 @@ class Response:
 
     def json(self):
         import json
+
         return json.loads(self.body or b"null")
 
     @property
@@ -42,8 +43,16 @@ class HttpError(Exception):
 
 
 class Http:
-    def __init__(self, base: str = "", *, ca_file: str | Path | None = None, verify_hostname: bool = True,
-                 host_header: str | None = None, basic: tuple[str, str] | None = None, timeout: int = 120):
+    def __init__(
+        self,
+        base: str = "",
+        *,
+        ca_file: str | Path | None = None,
+        verify_hostname: bool = True,
+        host_header: str | None = None,
+        basic: tuple[str, str] | None = None,
+        timeout: int = 120,
+    ):
         self.base = base.rstrip("/")
         self.host_header = host_header
         self.timeout = timeout
@@ -66,8 +75,14 @@ class Http:
         headers.update(extra or {})
         return headers
 
-    def request(self, method: str, path: str, data: bytes | None = None, headers: dict | None = None,
-                ok: tuple[int, ...] | None = None) -> Response:
+    def request(
+        self,
+        method: str,
+        path: str,
+        data: bytes | None = None,
+        headers: dict | None = None,
+        ok: tuple[int, ...] | None = None,
+    ) -> Response:
         url = path if path.startswith("http") else self.base + path
         req = urllib.request.Request(url, data=data, method=method, headers=self._headers(headers))
         if self.host_header:
@@ -93,7 +108,11 @@ class Http:
 
     def _retry(self, attempt: int, url: str, why: str) -> None:
         wait = RETRY_WAIT[attempt]
-        print(f"    {why} from {url.split('?')[0][:80]}; retrying in {wait}s ({attempt + 1}/{len(RETRY_WAIT)})", file=sys.stderr, flush=True)
+        print(
+            f"    {why} from {url.split('?')[0][:80]}; retrying in {wait}s ({attempt + 1}/{len(RETRY_WAIT)})",
+            file=sys.stderr,
+            flush=True,
+        )
         self._sleep(wait)
 
     _sleep = staticmethod(time.sleep)
@@ -101,7 +120,9 @@ class Http:
     def get(self, path, **kw) -> Response:
         return self.request("GET", path, **kw)
 
-    def download(self, path: str, dest: Path, headers: dict | None = None, sha256: str | None = None, quiet: bool = False) -> Path:
+    def download(
+        self, path: str, dest: Path, headers: dict | None = None, sha256: str | None = None, quiet: bool = False
+    ) -> Path:
         """Stream a URL to a file. Verifies sha256 when given. Writes to dest.part first.
         A connection that drops half way is retried from the start, a few times."""
         url = path if path.startswith("http") else self.base + path

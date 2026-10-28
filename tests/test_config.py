@@ -20,13 +20,16 @@ def test_servers_load(tmp_path):
         servers.infra("nope")
 
 
-@pytest.mark.parametrize("text,message", [
-    ("infrastructures: {}", "needs a `gitea:` section"),
-    ("gitea: {host: g1, name: g}\ninfrastructures:\n  x: {type: nomad, nodes: [a]}", "type must be one of"),
-    ("gitea: {host: g1, name: g}\ninfrastructures:\n  x: {type: k3s, nodes: []}", "at least one SSH alias"),
-    ("- not a mapping", "must be a mapping"),
-    ("gitea: [", "not valid YAML"),
-])
+@pytest.mark.parametrize(
+    "text,message",
+    [
+        ("infrastructures: {}", "needs a `gitea:` section"),
+        ("gitea: {host: g1, name: g}\ninfrastructures:\n  x: {type: nomad, nodes: [a]}", "type must be one of"),
+        ("gitea: {host: g1, name: g}\ninfrastructures:\n  x: {type: k3s, nodes: []}", "at least one SSH alias"),
+        ("- not a mapping", "must be a mapping"),
+        ("gitea: [", "not valid YAML"),
+    ],
+)
 def test_servers_errors(tmp_path, text, message):
     (tmp_path / "servers.yml").write_text(text)
     with pytest.raises(ConfigError, match=message):

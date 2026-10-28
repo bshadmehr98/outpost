@@ -33,10 +33,10 @@ from dataclasses import dataclass, field
 from urllib.parse import quote
 
 PATH_CA = "/etc/outpost/ca.crt"
-PATH_CA_DIR = "/etc/ssl/certs"           # OpenSSL's default CA directory, looked up by subject hash
+PATH_CA_DIR = "/etc/ssl/certs"  # OpenSSL's default CA directory, looked up by subject hash
 PATH_APT_KEY = "/etc/outpost/gitea-apt.asc"
 PATH_RPM_KEY = "/etc/outpost/gitea-rpm.asc"
-PATH_APK_KEYS = "/etc/apk/keys"            # apk only reads keys from here, under the name the signer used
+PATH_APK_KEYS = "/etc/apk/keys"  # apk only reads keys from here, under the name the signer used
 PATH_APK_REPOS = "/etc/apk/repositories"
 PATH_RPM_REPO = "/etc/yum.repos.d/outpost.repo"
 PATH_PROXY_ENV = "/etc/outpost/proxy.env"
@@ -49,20 +49,35 @@ NO_PROXY_ENV = "# No egress proxy is configured (servers.yml has no egress_proxy
 # aside, so each is overwritten with a comment-only file; a name not listed here is still harmless on
 # a sealed node (the seal rejects the mirror), it just fails later and louder.
 STOCK_RPM_REPOS = (
-    "rocky.repo", "rocky-extras.repo", "rocky-addons.repo", "rocky-devel.repo",
-    "almalinux-baseos.repo", "almalinux-appstream.repo", "almalinux-crb.repo", "almalinux-extras.repo",
-    "almalinux-highavailability.repo", "almalinux-nfv.repo", "almalinux-plus.repo", "almalinux-resilientstorage.repo",
-    "almalinux-rt.repo", "almalinux-sap.repo", "almalinux-saphana.repo",
-    "fedora.repo", "fedora-updates.repo", "fedora-updates-testing.repo", "fedora-cisco-openh264.repo",
-    "centos.repo", "centos-addons.repo",
+    "rocky.repo",
+    "rocky-extras.repo",
+    "rocky-addons.repo",
+    "rocky-devel.repo",
+    "almalinux-baseos.repo",
+    "almalinux-appstream.repo",
+    "almalinux-crb.repo",
+    "almalinux-extras.repo",
+    "almalinux-highavailability.repo",
+    "almalinux-nfv.repo",
+    "almalinux-plus.repo",
+    "almalinux-resilientstorage.repo",
+    "almalinux-rt.repo",
+    "almalinux-sap.repo",
+    "almalinux-saphana.repo",
+    "fedora.repo",
+    "fedora-updates.repo",
+    "fedora-updates-testing.repo",
+    "fedora-cisco-openh264.repo",
+    "centos.repo",
+    "centos-addons.repo",
 )
 
 
 @dataclass(frozen=True)
 class GiteaInfo:
-    name: str   # DNS name, e.g. gitea.internal
+    name: str  # DNS name, e.g. gitea.internal
     ip: str
-    org: str    # organisation holding pip, npm, apt, apk, rpm and files
+    org: str  # organisation holding pip, npm, apt, apk, rpm and files
 
     @property
     def url(self) -> str:
@@ -99,26 +114,35 @@ class GiteaInfo:
 @dataclass(frozen=True)
 class ProxyInfo:
     """Where the egress proxy is, as the nodes see it. Built by infra/proxy.py from servers.yml."""
-    url: str                 # http://<gitea address>:3128, or http://proxy.internal:3128 on another host
-    no_proxy: str            # what must never go through the proxy: Gitea, loopback, private networks
-    ip: str                  # the address the proxy listens on
-    name: str                # the name nodes use for it (the Gitea name when it runs on the Gitea host)
-    allowed: tuple[str, ...] = field(default_factory=tuple)   # servers.yml egress_proxy.allow
-    host: str = ""           # SSH alias of the proxy host
-    on_gitea: bool = True    # runs on the Gitea host, so nodes need no new address or name
+
+    url: str  # http://<gitea address>:3128, or http://proxy.internal:3128 on another host
+    no_proxy: str  # what must never go through the proxy: Gitea, loopback, private networks
+    ip: str  # the address the proxy listens on
+    name: str  # the name nodes use for it (the Gitea name when it runs on the Gitea host)
+    allowed: tuple[str, ...] = field(default_factory=tuple)  # servers.yml egress_proxy.allow
+    host: str = ""  # SSH alias of the proxy host
+    on_gitea: bool = True  # runs on the Gitea host, so nodes need no new address or name
 
     def env(self) -> dict[str, str]:
         """The variables, in the order they are written everywhere."""
-        return {"HTTPS_PROXY": self.url, "HTTP_PROXY": self.url, "NO_PROXY": self.no_proxy,
-                "https_proxy": self.url, "http_proxy": self.url, "no_proxy": self.no_proxy}
+        return {
+            "HTTPS_PROXY": self.url,
+            "HTTP_PROXY": self.url,
+            "NO_PROXY": self.no_proxy,
+            "https_proxy": self.url,
+            "http_proxy": self.url,
+            "no_proxy": self.no_proxy,
+        }
 
 
 def proxy_env(proxy: ProxyInfo) -> str:
     """/etc/outpost/proxy.env: KEY=value lines for env_file: and `set -a; . file`. OUTPOST_PROXY_ALLOWED is
     informational (the demo app probes those names); the proxy enforces the list, not the client."""
     lines = [f"{k}={v}" for k, v in proxy.env().items()] + [f"OUTPOST_PROXY_ALLOWED={','.join(proxy.allowed)}"]
-    return ("# Written by Outpost: the egress proxy. Programs that honour these variables reach the names in\n"
-            "# OUTPOST_PROXY_ALLOWED through it; everything else still has no internet.\n" + "\n".join(lines) + "\n")
+    return (
+        "# Written by Outpost: the egress proxy. Programs that honour these variables reach the names in\n"
+        "# OUTPOST_PROXY_ALLOWED through it; everything else still has no internet.\n" + "\n".join(lines) + "\n"
+    )
 
 
 def proxy_exports(proxy: ProxyInfo) -> str:
@@ -159,10 +183,14 @@ def environment_script(proxy: ProxyInfo | None) -> str:
     strip = f"grep -vE '^({marker}|HTTPS?_PROXY=|https?_proxy=|NO_PROXY=|no_proxy=)' {PATH_ENVIRONMENT} || true"
     if proxy:
         lines = "".join(f"echo {shlex.quote(f'{k}={v}')}; " for k, v in proxy.env().items())
-        return (f"touch {PATH_ENVIRONMENT}\n"
-                f"{{ {strip}; echo '{marker}'; {lines}}} > {PATH_ENVIRONMENT}.outpost && cat {PATH_ENVIRONMENT}.outpost > {PATH_ENVIRONMENT} && rm -f {PATH_ENVIRONMENT}.outpost\n")
-    return (f"if grep -qs '^{marker}' {PATH_ENVIRONMENT}; then {{ {strip}; }} > {PATH_ENVIRONMENT}.outpost && "
-            f"cat {PATH_ENVIRONMENT}.outpost > {PATH_ENVIRONMENT} && rm -f {PATH_ENVIRONMENT}.outpost; fi\n")
+        return (
+            f"touch {PATH_ENVIRONMENT}\n"
+            f"{{ {strip}; echo '{marker}'; {lines}}} > {PATH_ENVIRONMENT}.outpost && cat {PATH_ENVIRONMENT}.outpost > {PATH_ENVIRONMENT} && rm -f {PATH_ENVIRONMENT}.outpost\n"
+        )
+    return (
+        f"if grep -qs '^{marker}' {PATH_ENVIRONMENT}; then {{ {strip}; }} > {PATH_ENVIRONMENT}.outpost && "
+        f"cat {PATH_ENVIRONMENT}.outpost > {PATH_ENVIRONMENT} && rm -f {PATH_ENVIRONMENT}.outpost; fi\n"
+    )
 
 
 def apt_source_line(gitea: GiteaInfo, distro: str) -> str:
@@ -176,14 +204,23 @@ def apk_repository_line(gitea: GiteaInfo, branch: str, repository: str = "main")
 def rpm_repo_section(gitea: GiteaInfo, distro: str) -> str:
     """One [section] of outpost.repo: Gitea serves one RPM repository per group, and the group is the distro.
     gpgcheck stays on: Gitea signs the repository metadata and the packages it serves with the key at gpgkey."""
-    return (f"[outpost-{distro}]\nname=Outpost {distro} (Gitea)\nbaseurl={gitea.rpm_repo}/{distro}\nenabled=1\n"
-            f"gpgcheck=1\nrepo_gpgcheck=0\ngpgkey=file://{PATH_RPM_KEY}\nsslcacert={PATH_CA}\n")
+    return (
+        f"[outpost-{distro}]\nname=Outpost {distro} (Gitea)\nbaseurl={gitea.rpm_repo}/{distro}\nenabled=1\n"
+        f"gpgcheck=1\nrepo_gpgcheck=0\ngpgkey=file://{PATH_RPM_KEY}\nsslcacert={PATH_CA}\n"
+    )
 
 
-def client_files(gitea: GiteaInfo, ca_pem: str, apt_key: str | None, distros: list[str],
-                 apk_key=None, apk_branches: list[str] | None = None,
-                 rpm_key: str | None = None, rpm_distros: list[str] | None = None,
-                 proxy: ProxyInfo | None = None) -> dict[str, str]:
+def client_files(
+    gitea: GiteaInfo,
+    ca_pem: str,
+    apt_key: str | None,
+    distros: list[str],
+    apk_key=None,
+    apk_branches: list[str] | None = None,
+    rpm_key: str | None = None,
+    rpm_distros: list[str] | None = None,
+    proxy: ProxyInfo | None = None,
+) -> dict[str, str]:
     """path -> content. Shared by nodes and the config image. `apk_key` is an AlpineKey (name, content):
     the file under /etc/apk/keys must carry the name Gitea signed with, and it is only written when a
     branch exists, because apk rejects an index whose key it does not have but accepts a missing key dir.
@@ -251,9 +288,11 @@ def corefile(node_ip: str) -> str:
 
 
 def profile_script(gitea: GiteaInfo, proxy: ProxyInfo | None = None) -> str:
-    return (f"export PIP_INDEX_URL={gitea.pypi_index}\nexport PIP_CERT={PATH_CA}\n"
-            f"export NPM_CONFIG_REGISTRY={gitea.npm_registry}\nexport NPM_CONFIG_CAFILE={PATH_CA}\n"
-            + (proxy_exports(proxy) if proxy else ""))
+    return (
+        f"export PIP_INDEX_URL={gitea.pypi_index}\nexport PIP_CERT={PATH_CA}\n"
+        f"export NPM_CONFIG_REGISTRY={gitea.npm_registry}\nexport NPM_CONFIG_CAFILE={PATH_CA}\n"
+        + (proxy_exports(proxy) if proxy else "")
+    )
 
 
 def host_files(gitea: GiteaInfo, ca_pem: str, node_ip: str, proxy: ProxyInfo | None = None) -> dict[str, str]:
@@ -269,18 +308,29 @@ def host_files(gitea: GiteaInfo, ca_pem: str, node_ip: str, proxy: ProxyInfo | N
     }
 
 
-def config_image_files(gitea: GiteaInfo, ca_pem: str, apt_key: str | None, distros: list[str],
-                       apk_key=None, apk_branches: list[str] | None = None,
-                       rpm_key: str | None = None, rpm_distros: list[str] | None = None,
-                       proxy: ProxyInfo | None = None, ca_hash: str | None = None) -> dict[str, tuple[bytes, int]]:
+def config_image_files(
+    gitea: GiteaInfo,
+    ca_pem: str,
+    apt_key: str | None,
+    distros: list[str],
+    apk_key=None,
+    apk_branches: list[str] | None = None,
+    rpm_key: str | None = None,
+    rpm_distros: list[str] | None = None,
+    proxy: ProxyInfo | None = None,
+    ca_hash: str | None = None,
+) -> dict[str, tuple[bytes, int]]:
     """Text files only: the config image is copied onto any base, so it must not carry a distro's binaries.
     `ca_hash` is the CA's OpenSSL subject hash (pki.subject_hash): the CA is also written as
     /etc/ssl/certs/<hash>.0, where OpenSSL's default lookup finds it. apk has no CA option of its own and an
     Alpine base has no update-ca-certificates, so this is how `apk add` over https trusts Gitea in a build.
     With a proxy it carries /etc/outpost/proxy.env and the profile.d exports, for interactive shells and
     env_file; RUN steps get the variables from the Docker client config on the node, not from these files."""
-    merged = {**disabled_apt_sources(), **disabled_os_sources(apk_branches),
-              **client_files(gitea, ca_pem, apt_key, distros, apk_key, apk_branches, rpm_key, rpm_distros, proxy=proxy)}
+    merged = {
+        **disabled_apt_sources(),
+        **disabled_os_sources(apk_branches),
+        **client_files(gitea, ca_pem, apt_key, distros, apk_key, apk_branches, rpm_key, rpm_distros, proxy=proxy),
+    }
     if proxy:
         merged[PATH_PROFILE] = proxy_exports(proxy)
     if ca_hash:

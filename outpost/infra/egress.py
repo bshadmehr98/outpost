@@ -27,10 +27,12 @@ OUT_CHAIN = "OUTPOST-OUT"
 def _owner_parts(proxy_user: str) -> dict[str, str]:
     """The pieces of the script that differ on the proxy host."""
     return {
-        "comment": ("\n# On this host OUTPUT goes through OUTPOST-OUT first: the egress proxy's own user may open\n"
-                    "# TCP 443 and 80 (the named exceptions, enforced by the proxy's allow list); then OUTPOST."),
+        "comment": (
+            "\n# On this host OUTPUT goes through OUTPOST-OUT first: the egress proxy's own user may open\n"
+            "# TCP 443 and 80 (the named exceptions, enforced by the proxy's allow list); then OUTPOST."
+        ),
         "vars": f'PROXY_USER="{proxy_user}"\nOUT_CHAIN={OUT_CHAIN}\n',
-        "functions": '''
+        "functions": """
 build_out_chain() {  # <iptables|ip6tables> <table>: hooked into OUTPUT only
   local ipt=$1 t=$2
   $ipt -t $t -N $OUT_CHAIN 2>/dev/null || true
@@ -43,18 +45,18 @@ build_out_chain() {  # <iptables|ip6tables> <table>: hooked into OUTPUT only
   fi
   $ipt -t $t -A $OUT_CHAIN -j $CHAIN
 }
-''',
+""",
         "hook": 'hook() { local c=${4:-$CHAIN}; $1 -t $2 -C "$3" -j $c 2>/dev/null || $1 -t $2 -I "$3" 1 -j $c; }\n'
-                'unhook() { local c=${4:-$CHAIN}; while $1 -t $2 -C "$3" -j $c 2>/dev/null; do $1 -t $2 -D "$3" -j $c; done; }',
-        "seal": '''      build_out_chain $ipt filter
+        'unhook() { local c=${4:-$CHAIN}; while $1 -t $2 -C "$3" -j $c 2>/dev/null; do $1 -t $2 -D "$3" -j $c; done; }',
+        "seal": """      build_out_chain $ipt filter
       build_out_chain $ipt security
       $ipt -N DOCKER-USER 2>/dev/null || true
       hook $ipt filter OUTPUT $OUT_CHAIN; hook $ipt filter FORWARD; hook $ipt filter DOCKER-USER
       hook $ipt security OUTPUT $OUT_CHAIN; hook $ipt security FORWARD
       # a direct OUTPUT -> OUTPOST hook (the script without the exception) would make it ineffective
-      unhook $ipt filter OUTPUT; unhook $ipt security OUTPUT''',
+      unhook $ipt filter OUTPUT; unhook $ipt security OUTPUT""",
         "open": "      unhook $ipt filter OUTPUT $OUT_CHAIN; unhook $ipt security OUTPUT $OUT_CHAIN\n",
-        "status": 'if iptables -C OUTPUT -j $OUT_CHAIN 2>/dev/null || iptables -C OUTPUT -j $CHAIN 2>/dev/null',
+        "status": "if iptables -C OUTPUT -j $OUT_CHAIN 2>/dev/null || iptables -C OUTPUT -j $CHAIN 2>/dev/null",
     }
 
 
@@ -63,10 +65,10 @@ PLAIN = {
     "vars": "",
     "functions": "",
     "hook": 'hook() { $1 -t $2 -C "$3" -j $CHAIN 2>/dev/null || $1 -t $2 -I "$3" 1 -j $CHAIN; }\n'
-            'unhook() { while $1 -t $2 -C "$3" -j $CHAIN 2>/dev/null; do $1 -t $2 -D "$3" -j $CHAIN; done; }',
-    "seal": '''      $ipt -N DOCKER-USER 2>/dev/null || true
+    'unhook() { while $1 -t $2 -C "$3" -j $CHAIN 2>/dev/null; do $1 -t $2 -D "$3" -j $CHAIN; done; }',
+    "seal": """      $ipt -N DOCKER-USER 2>/dev/null || true
       hook $ipt filter OUTPUT; hook $ipt filter FORWARD; hook $ipt filter DOCKER-USER
-      hook $ipt security OUTPUT; hook $ipt security FORWARD''',
+      hook $ipt security OUTPUT; hook $ipt security FORWARD""",
     "open": "",
     "status": "if iptables -C OUTPUT -j $CHAIN 2>/dev/null",
 }
@@ -179,9 +181,15 @@ def install(host, gitea_ip: str, allow: list[str], proxy_user: str | None = None
     """`proxy_user` only on the host that runs the egress proxy: its user may then open 443 and 80."""
     host.write(SCRIPT_PATH, script(gitea_ip, allow, proxy_user), mode="0755")
     host.write(UNIT_PATH, UNIT)
-    host.run("systemctl daemon-reload && systemctl enable outpost-egress.service >/dev/null 2>&1 && touch /var/log/outpost-egress.log", raise_on_failure=True)
+    host.run(
+        "systemctl daemon-reload && systemctl enable outpost-egress.service >/dev/null 2>&1 && touch /var/log/outpost-egress.log",
+        raise_on_failure=True,
+    )
     if not proxy_user:
-        host.run(f"if iptables -S {OUT_CHAIN} >/dev/null 2>&1 || iptables -t security -S {OUT_CHAIN} >/dev/null 2>&1; then\n{DROP_OUT_CHAIN}fi", raise_on_failure=True)
+        host.run(
+            f"if iptables -S {OUT_CHAIN} >/dev/null 2>&1 || iptables -t security -S {OUT_CHAIN} >/dev/null 2>&1; then\n{DROP_OUT_CHAIN}fi",
+            raise_on_failure=True,
+        )
 
 
 def seal(host, reason: str = "") -> str:

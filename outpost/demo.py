@@ -20,7 +20,7 @@ from .ssh import Host
 
 NAME = "demo"
 TEMPLATE = Path(__file__).parent / "templates" / "platform" / NAME
-PORTS = {"compose": 8000, "swarm": 8080, "k3s": 30080}   # one port per type, so one node can host several
+PORTS = {"compose": 8000, "swarm": 8080, "k3s": 30080}  # one port per type, so one node can host several
 IGNORE = {".git", "__pycache__", ".gitea"}
 
 NEEDS_YML = """\
@@ -84,7 +84,7 @@ def workflow(gitea_name: str, org: str, infras: dict[str, str], user: str = "out
         FETCH_SOURCE.rstrip("\n"),
         "      - name: Build (apt and pip are answered by Gitea; the Dockerfile fails if the internet is reachable)",
         "        run: docker build --build-arg GITEA=$GITEA --build-arg ORG=$ORG --build-arg GIT_SHA=${{ gitea.sha }} -t $IMAGE:${{ gitea.sha }} .",
-        f"      - name: Push the image into Gitea's registry\n        run: |\n          echo \"${{{{ secrets.PACKAGE_TOKEN }}}}\" | docker login $GITEA -u {user} --password-stdin\n          docker push $IMAGE:${{{{ gitea.sha }}}}",
+        f'      - name: Push the image into Gitea\'s registry\n        run: |\n          echo "${{{{ secrets.PACKAGE_TOKEN }}}}" | docker login $GITEA -u {user} --password-stdin\n          docker push $IMAGE:${{{{ gitea.sha }}}}',
     ]
     for name, itype in infras.items():
         port = PORTS[itype]
@@ -106,6 +106,7 @@ def ensure_local(platform: Platform) -> Path:
     folder = platform.root / NAME
     if not folder.exists():
         import shutil
+
         shutil.copytree(TEMPLATE, folder)
     needs = platform.needs_dir / f"{NAME}.yml"
     if not needs.exists():
@@ -130,8 +131,14 @@ def urls(platform: Platform, servers: Servers) -> dict[str, dict]:
         state = platform.read_state(f"infra-{name}") or {}
         node = infra.nodes[0]
         ip = ((state.get("nodes") or {}).get(node) or {}).get("ip")
-        out[name] = {"type": infra.type, "node": node, "ip": ip, "port": PORTS[infra.type],
-                     "url": f"http://{ip}:{PORTS[infra.type]}" if ip else None, "set_up": bool(state)}
+        out[name] = {
+            "type": infra.type,
+            "node": node,
+            "ip": ip,
+            "port": PORTS[infra.type],
+            "url": f"http://{ip}:{PORTS[infra.type]}" if ip else None,
+            "set_up": bool(state),
+        }
     return out
 
 
@@ -140,7 +147,9 @@ def push(platform: Platform, servers: Servers, log=print) -> dict:
     info = gitea_info(platform, servers)
     ready = {n: i.type for n, i in servers.infrastructures.items() if platform.read_state(f"infra-{n}")}
     if not ready:
-        raise RuntimeError("No infrastructure has been set up yet. Run `outpost infra setup <name>` first; the workflow deploys to the ones that are.")
+        raise RuntimeError(
+            "No infrastructure has been set up yet. Run `outpost infra setup <name>` first; the workflow deploys to the ones that are."
+        )
     files = project_files(folder)
     files[".gitea/workflows/deploy.yml"] = workflow(info.name, info.org, ready, servers.gitea.user).encode()
     (folder / ".gitea" / "workflows").mkdir(parents=True, exist_ok=True)
@@ -156,20 +165,35 @@ def push(platform: Platform, servers: Servers, log=print) -> dict:
             log("nothing changed since the last push")
             commit = None
         else:
-            result = client.commit_files(info.org, NAME, changed, f"outpost demo push: {len(changed)} file{'s' if len(changed) > 1 else ''}", existing)
+            result = client.commit_files(
+                info.org,
+                NAME,
+                changed,
+                f"outpost demo push: {len(changed)} file{'s' if len(changed) > 1 else ''}",
+                existing,
+            )
             commit = (result.get("commit") or {}).get("sha")
-            log(f"committed {len(changed)} file{'s' if len(changed) > 1 else ''} to {info.org}/{NAME} ({(commit or '')[:10]})")
+            log(
+                f"committed {len(changed)} file{'s' if len(changed) > 1 else ''} to {info.org}/{NAME} ({(commit or '')[:10]})"
+            )
         runners = [r["name"] for r in client.runners()]
     missing = [n for n in ready if servers.infrastructures[n].nodes[0] not in runners]
     if missing:
-        log(f"warning: no runner registered for {', '.join(missing)}; run `outpost infra setup <name>` again to install it")
+        log(
+            f"warning: no runner registered for {', '.join(missing)}; run `outpost infra setup <name>` again to install it"
+        )
 
     where = urls(platform, servers)
     base = f"https://{info.ip}/{info.org}/{NAME}"
     log(f"\nWatch the workflow:  {base}/actions")
     for name in ready:
         log(f"  {name:10} {where[name]['url'] or '(node ip unknown)'}   after the '{name}' job is green")
-    result = {"commit": commit, "repo": f"{info.org}/{NAME}", "actions_url": f"{base}/actions", "infras": {n: where[n] for n in ready}}
+    result = {
+        "commit": commit,
+        "repo": f"{info.org}/{NAME}",
+        "actions_url": f"{base}/actions",
+        "infras": {n: where[n] for n in ready},
+    }
     platform.write_state("demo", result)
     return result
 
@@ -179,18 +203,24 @@ def _package_token(platform: Platform, servers: Servers, client) -> str:
     Gitea does not know it (the lab was recreated, Gitea was reinstalled)."""
     password = platform.read_secret("gitea-admin-password")
     if not password:
-        raise RuntimeError("secrets/gitea-admin-password is missing; it is needed to create and check the package token. Run `outpost gitea setup`.")
+        raise RuntimeError(
+            "secrets/gitea-admin-password is missing; it is needed to create and check the package token. Run `outpost gitea setup`."
+        )
     token = platform.read_secret("gitea-package-token")
     if token and token[-8:] in {t.get("token_last_eight") for t in client.tokens(servers.gitea.user, password)}:
         return token
     import time
-    token = client.create_token(servers.gitea.user, password, f"outpost-packages-{int(time.time())}", ["write:package", "read:repository"])
+
+    token = client.create_token(
+        servers.gitea.user, password, f"outpost-packages-{int(time.time())}", ["write:package", "read:repository"]
+    )
     platform.write_secret("gitea-package-token", token)
     return token
 
 
 def _blob_sha(content: bytes) -> str:
     import hashlib
+
     return hashlib.sha1(b"blob %d\0" % len(content) + content).hexdigest()
 
 
@@ -201,9 +231,19 @@ def status(platform: Platform, servers: Servers) -> dict:
         runs = []
         for run in client.workflow_runs(info.org, NAME, limit=3):
             jobs = client.workflow_jobs(info.org, NAME, run["id"])
-            runs.append({"id": run["id"], "sha": run.get("head_sha", "")[:10], "status": run.get("status"), "conclusion": run.get("conclusion"),
-                         "url": run.get("html_url", "").replace(f"https://{info.name}", f"https://{info.ip}"), "when": run.get("created_at"),
-                         "jobs": [{"name": j["name"], "status": j.get("status"), "conclusion": j.get("conclusion")} for j in jobs]})
+            runs.append(
+                {
+                    "id": run["id"],
+                    "sha": run.get("head_sha", "")[:10],
+                    "status": run.get("status"),
+                    "conclusion": run.get("conclusion"),
+                    "url": run.get("html_url", "").replace(f"https://{info.name}", f"https://{info.ip}"),
+                    "when": run.get("created_at"),
+                    "jobs": [
+                        {"name": j["name"], "status": j.get("status"), "conclusion": j.get("conclusion")} for j in jobs
+                    ],
+                }
+            )
     serving = {}
     for name, where in urls(platform, servers).items():
         if not where["set_up"]:
@@ -214,6 +254,11 @@ def status(platform: Platform, servers: Servers) -> dict:
         except ValueError:
             health = None
         serving[name] = {**where, "health": health}
-    result = {"repo": f"{info.org}/{NAME}", "actions_url": f"https://{info.ip}/{info.org}/{NAME}/actions", "runs": runs, "serving": serving}
-    platform.write_state("demo-status", result)   # the proof report reads it; no SSH needed there
+    result = {
+        "repo": f"{info.org}/{NAME}",
+        "actions_url": f"https://{info.ip}/{info.org}/{NAME}/actions",
+        "runs": runs,
+        "serving": serving,
+    }
+    platform.write_state("demo-status", result)  # the proof report reads it; no SSH needed there
     return result

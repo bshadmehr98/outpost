@@ -24,14 +24,27 @@ def test_workflow_is_valid_yaml_with_one_deploy_job_per_infrastructure():
     text = demo.workflow("gitea.internal", "pkgs", {"dev": "compose", "prod": "swarm", "k8s": "k3s"}, "outpost")
     wf = yaml.safe_load(text)
     assert list(wf["jobs"]) == ["build", "dev", "prod", "k8s"]
-    assert wf["jobs"]["build"]["runs-on"] == "docker" and wf["jobs"]["k8s"]["runs-on"] == "k8s" and wf["jobs"]["k8s"]["needs"] == "build"
+    assert (
+        wf["jobs"]["build"]["runs-on"] == "docker"
+        and wf["jobs"]["k8s"]["runs-on"] == "k8s"
+        and wf["jobs"]["k8s"]["needs"] == "build"
+    )
     assert wf["env"]["IMAGE"] == "gitea.internal/pkgs/demo"
     steps = [s["run"] for s in wf["jobs"]["dev"]["steps"]]
     assert "docker compose -p demo-dev" in steps[1] and "PORT=8000" in steps[1] and "${{ gitea.sha }}" in steps[1]
     assert "127.0.0.1:8000/healthz" in steps[2]
-    assert "docker stack deploy" in wf["jobs"]["prod"]["steps"][1]["run"] and "PORT=8080" in wf["jobs"]["prod"]["steps"][1]["run"]
-    assert "__PORT__|30080" in wf["jobs"]["k8s"]["steps"][1]["run"] and "k3s kubectl apply" in wf["jobs"]["k8s"]["steps"][1]["run"]
-    assert "secrets.PACKAGE_TOKEN" in wf["jobs"]["build"]["steps"][2]["run"] and "-u outpost" in wf["jobs"]["build"]["steps"][2]["run"]
+    assert (
+        "docker stack deploy" in wf["jobs"]["prod"]["steps"][1]["run"]
+        and "PORT=8080" in wf["jobs"]["prod"]["steps"][1]["run"]
+    )
+    assert (
+        "__PORT__|30080" in wf["jobs"]["k8s"]["steps"][1]["run"]
+        and "k3s kubectl apply" in wf["jobs"]["k8s"]["steps"][1]["run"]
+    )
+    assert (
+        "secrets.PACKAGE_TOKEN" in wf["jobs"]["build"]["steps"][2]["run"]
+        and "-u outpost" in wf["jobs"]["build"]["steps"][2]["run"]
+    )
     assert not any("uses" in s for job in wf["jobs"].values() for s in job["steps"])
 
 
@@ -39,16 +52,29 @@ def test_init_ships_the_demo_and_ensure_local_fills_an_old_platform(tmp_path):
     assert main(["init", str(tmp_path)]) == 0
     assert (tmp_path / "demo" / "Dockerfile").exists() and (tmp_path / "needs" / "demo.yml").exists()
     files = demo.project_files(tmp_path / "demo")
-    assert {"Dockerfile", "requirements.txt", "app/app.py", "app/probe.py", "app/templates/index.html", "compose.yml", "stack.yml", "k8s.yml"} <= set(files)
+    assert {
+        "Dockerfile",
+        "requirements.txt",
+        "app/app.py",
+        "app/probe.py",
+        "app/templates/index.html",
+        "compose.yml",
+        "stack.yml",
+        "k8s.yml",
+    } <= set(files)
     dockerfile = files["Dockerfile"].decode()
     assert "COPY --from=config / /" in dockerfile and "--fail-if-reachable" in dockerfile
-    assert "FROM ${GITEA}/${ORG}/library/python:3.12-slim" in dockerfile and "\nFROM python:" not in dockerfile  # named by its Gitea copy
+    assert (
+        "FROM ${GITEA}/${ORG}/library/python:3.12-slim" in dockerfile and "\nFROM python:" not in dockerfile
+    )  # named by its Gitea copy
     old = tmp_path / "old"
     old.mkdir()
     (old / "servers.yml").write_text(SERVERS)
     (old / "needs").mkdir()
     demo.ensure_local(Platform(old))
-    assert (old / "demo" / "app" / "app.py").exists() and "../demo/requirements.txt" in (old / "needs" / "demo.yml").read_text()
+    assert (old / "demo" / "app" / "app.py").exists() and "../demo/requirements.txt" in (
+        old / "needs" / "demo.yml"
+    ).read_text()
 
 
 def test_urls_come_from_setup_state(tmp_path):
@@ -56,7 +82,14 @@ def test_urls_come_from_setup_state(tmp_path):
     platform = Platform(tmp_path)
     platform.write_state("infra-dev", {"type": "compose", "nodes": {"n1": {"ip": "10.0.0.11"}}})
     u = demo.urls(platform, load_servers(platform.servers_file))
-    assert u["dev"] == {"type": "compose", "node": "n1", "ip": "10.0.0.11", "port": 8000, "url": "http://10.0.0.11:8000", "set_up": True}
+    assert u["dev"] == {
+        "type": "compose",
+        "node": "n1",
+        "ip": "10.0.0.11",
+        "port": 8000,
+        "url": "http://10.0.0.11:8000",
+        "set_up": True,
+    }
     assert u["k8s"]["set_up"] is False and u["k8s"]["url"] is None and u["k8s"]["port"] == 30080
 
 
@@ -91,7 +124,11 @@ class FakeClient:
 
     def tokens(self, user, password):
         assert password == "pw"
-        return [{"name": "outpost-packages", "token_last_eight": "pkgtoken"[-8:]}] if getattr(self, "tokens_made", 0) else []
+        return (
+            [{"name": "outpost-packages", "token_last_eight": "pkgtoken"[-8:]}]
+            if getattr(self, "tokens_made", 0)
+            else []
+        )
 
 
 def test_push_commits_only_changes_and_makes_one_package_token(tmp_path, monkeypatch, capsys):
@@ -109,6 +146,7 @@ def test_push_commits_only_changes_and_makes_one_package_token(tmp_path, monkeyp
 
         def __exit__(self, *a):
             return False
+
     monkeypatch.setattr(demo, "connect", lambda p, s: Conn())
     servers = load_servers(platform.servers_file)
 
@@ -117,7 +155,10 @@ def test_push_commits_only_changes_and_makes_one_package_token(tmp_path, monkeyp
     assert len(client.commits) == 1 and ".gitea/workflows/deploy.yml" in client.commits[0]
     wf = yaml.safe_load(client.commits[0][".gitea/workflows/deploy.yml"])
     assert list(wf["jobs"]) == ["build", "dev"]  # only set-up infrastructures get a job
-    assert result["infras"]["dev"]["url"] == "http://10.0.0.11:8000" and (tmp_path / "demo" / ".gitea" / "workflows" / "deploy.yml").exists()
+    assert (
+        result["infras"]["dev"]["url"] == "http://10.0.0.11:8000"
+        and (tmp_path / "demo" / ".gitea" / "workflows" / "deploy.yml").exists()
+    )
     assert json.loads((tmp_path / "state" / "demo.json").read_text())["commit"] == "abc123def456"
 
     demo.push(platform, servers)
@@ -133,6 +174,7 @@ def test_push_refuses_without_a_set_up_infrastructure(tmp_path, monkeypatch):
     (tmp_path / "servers.yml").write_text(SERVERS)
     Platform(tmp_path).write_state("gitea", {"ip": "10.0.0.5"})
     import pytest
+
     with pytest.raises(RuntimeError, match="infra setup"):
         demo.push(Platform(tmp_path), load_servers(tmp_path / "servers.yml"))
 
@@ -148,13 +190,20 @@ def test_runner_labels_and_install(tmp_path):
     host = FakeHost("n1", responses=[(r"gitea-runner --version", "")])
     out = runner.install(host, ctx, ["dev:host", "docker:host"], "REGTOKEN", registered=set())
     assert out == {"node": "n1", "labels": ["dev:host", "docker:host"]}
-    assert host.ran("generic/gitea-runner/5.2.2/gitea-runner") and host.ran("register --config /etc/outpost/runner.yaml --no-interactive --instance https://gitea.internal --token REGTOKEN --name n1 --labels dev:host,docker:host")
+    assert host.ran("generic/gitea-runner/5.2.2/gitea-runner") and host.ran(
+        "register --config /etc/outpost/runner.yaml --no-interactive --instance https://gitea.internal --token REGTOKEN --name n1 --labels dev:host,docker:host"
+    )
     unit = host.files["/etc/systemd/system/outpost-runner.service"]
-    assert "daemon --config /etc/outpost/runner.yaml --labels dev:host,docker:host" in unit and "WorkingDirectory=/var/lib/outpost-runner" in unit
+    assert (
+        "daemon --config /etc/outpost/runner.yaml --labels dev:host,docker:host" in unit
+        and "WorkingDirectory=/var/lib/outpost-runner" in unit
+    )
     assert "workdir_parent: /var/lib/outpost-runner/work" in host.files["/etc/outpost/runner.yaml"]
 
     # already registered and known to Gitea: no second registration, labels still refreshed
-    host2 = FakeHost("n1", responses=[(r"gitea-runner --version", "5.2.2"), (r"test -s /var/lib/outpost-runner/.runner", "")])
+    host2 = FakeHost(
+        "n1", responses=[(r"gitea-runner --version", "5.2.2"), (r"test -s /var/lib/outpost-runner/.runner", "")]
+    )
     runner.install(host2, ctx, ["dev:host"], "T", registered={"n1"})
     assert not host2.ran("register --config") and not host2.ran("curl --cacert")
     assert runner.extra_checks()[0][0] == "actions runner active"
@@ -176,6 +225,11 @@ def test_push_replaces_a_package_token_gitea_does_not_know(tmp_path, monkeypatch
 
         def __exit__(self, *a):
             return False
+
     monkeypatch.setattr(demo, "connect", lambda p, s: Conn())
     demo.push(platform, load_servers(platform.servers_file))
-    assert client.tokens_made == 1 and platform.read_secret("gitea-package-token") == "pkgtoken" and client.secrets["PACKAGE_TOKEN"] == "pkgtoken"
+    assert (
+        client.tokens_made == 1
+        and platform.read_secret("gitea-package-token") == "pkgtoken"
+        and client.secrets["PACKAGE_TOKEN"] == "pkgtoken"
+    )

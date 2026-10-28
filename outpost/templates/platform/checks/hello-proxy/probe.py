@@ -12,12 +12,12 @@ import urllib.request
 
 
 def fetch(name: str, direct: bool = False) -> str:
-    handlers = [urllib.request.ProxyHandler({})] if direct else []   # no handler: $HTTPS_PROXY from the environment
+    handlers = [urllib.request.ProxyHandler({})] if direct else []  # no handler: $HTTPS_PROXY from the environment
     try:
         urllib.request.build_opener(*handlers).open(f"https://{name}/", timeout=20)
         return "reached"
     except urllib.error.HTTPError:
-        return "reached"   # an HTTP status, even 404, came from the far end
+        return "reached"  # an HTTP status, even 404, came from the far end
     except Exception as e:
         reason = str(getattr(e, "reason", e))
         return "refused-403" if "403" in reason else f"failed ({reason})"

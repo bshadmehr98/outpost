@@ -132,7 +132,9 @@ def setup(platform: Platform, servers: Servers, log=print) -> dict:
         raise RuntimeError("Could not detect the Gitea host's IP. Set gitea.ip in servers.yml.")
     want = versions.names()["uname"]
     if facts.get("arch") and facts["arch"] != want:
-        raise RuntimeError(f"[{cfg.host}] is {facts['arch']} but this platform is built for {want} (arch: {versions.ARCH} in servers.yml).")
+        raise RuntimeError(
+            f"[{cfg.host}] is {facts['arch']} but this platform is built for {want} (arch: {versions.ARCH} in servers.yml)."
+        )
     log(f"[{cfg.host}] {facts.get('id', '?')} {facts.get('codename', '')}, Gitea will be https://{cfg.name} ({ip})")
 
     log("==> [2/7] certificates")
@@ -144,6 +146,7 @@ def setup(platform: Platform, servers: Servers, log=print) -> dict:
     if installed != versions.GITEA:
         if installed:
             from .backup import backup
+
             log(f"[{cfg.host}] gitea {installed} is installed; backing it up before upgrading to {versions.GITEA}")
             backup(platform, servers, platform.root / "backups", log=log, host=host)
         log(f"[{cfg.host}] uploading gitea {versions.GITEA} binary ({binary.stat().st_size // 1_000_000} MB)")
@@ -151,9 +154,15 @@ def setup(platform: Platform, servers: Servers, log=print) -> dict:
         host.put(binary, "/usr/local/bin/gitea", mode="0755")
     if not host.run("command -v git").ok:
         log(f"[{cfg.host}] git is not installed; trying the host's package manager")
-        if not host.run("DEBIAN_FRONTEND=noninteractive apt-get install -y -qq git 2>&1 | tail -2 || dnf install -y git").ok \
-                or not host.run("command -v git").ok:
-            raise RuntimeError(f"[{cfg.host}] Gitea needs git. Install it once (apt-get install git), then rerun `outpost gitea setup`.")
+        if (
+            not host.run(
+                "DEBIAN_FRONTEND=noninteractive apt-get install -y -qq git 2>&1 | tail -2 || dnf install -y git"
+            ).ok
+            or not host.run("command -v git").ok
+        ):
+            raise RuntimeError(
+                f"[{cfg.host}] Gitea needs git. Install it once (apt-get install git), then rerun `outpost gitea setup`."
+            )
     host.run(
         "id git >/dev/null 2>&1 || useradd --system --shell /bin/bash --home /var/lib/gitea --create-home git\n"
         "mkdir -p /var/lib/gitea/{custom,data,log} /etc/gitea\n"
@@ -162,23 +171,29 @@ def setup(platform: Platform, servers: Servers, log=print) -> dict:
     )
     host.write("/etc/gitea/gitea.crt", cert.read_text())
     host.write("/etc/gitea/gitea.key", key.read_text(), mode="0640")
-    hostsfile.install(host, ip, cfg.name)   # now, and again at every boot
+    hostsfile.install(host, ip, cfg.name)  # now, and again at every boot
 
     log("==> [4/7] configuration and service")
     if not host.run("test -s /etc/gitea/app.ini").ok:
         log(f"[{cfg.host}] writing /etc/gitea/app.ini")
         host.write("/etc/gitea/app.ini", APP_INI.format(name=cfg.name), mode="0640")
         host.run(
-            "sed -i \"s|__SECRET_KEY__|$(/usr/local/bin/gitea generate secret SECRET_KEY)|\" /etc/gitea/app.ini\n"
-            "sed -i \"s|__INTERNAL_TOKEN__|$(/usr/local/bin/gitea generate secret INTERNAL_TOKEN)|\" /etc/gitea/app.ini\n"
-            "sed -i \"s|__JWT_SECRET__|$(/usr/local/bin/gitea generate secret JWT_SECRET)|\" /etc/gitea/app.ini\n"
-            "sed -i \"s|__LFS_JWT_SECRET__|$(/usr/local/bin/gitea generate secret LFS_JWT_SECRET)|\" /etc/gitea/app.ini\n",
+            'sed -i "s|__SECRET_KEY__|$(/usr/local/bin/gitea generate secret SECRET_KEY)|" /etc/gitea/app.ini\n'
+            'sed -i "s|__INTERNAL_TOKEN__|$(/usr/local/bin/gitea generate secret INTERNAL_TOKEN)|" /etc/gitea/app.ini\n'
+            'sed -i "s|__JWT_SECRET__|$(/usr/local/bin/gitea generate secret JWT_SECRET)|" /etc/gitea/app.ini\n'
+            'sed -i "s|__LFS_JWT_SECRET__|$(/usr/local/bin/gitea generate secret LFS_JWT_SECRET)|" /etc/gitea/app.ini\n',
             raise_on_failure=True,
         )
     # Gitea occasionally saves generated settings back into app.ini, so the git user owns it
-    host.run("chown git:git /etc/gitea/app.ini && chmod 640 /etc/gitea/app.ini && chown root:git /etc/gitea/gitea.key /etc/gitea/gitea.crt", raise_on_failure=True)
+    host.run(
+        "chown git:git /etc/gitea/app.ini && chmod 640 /etc/gitea/app.ini && chown root:git /etc/gitea/gitea.key /etc/gitea/gitea.crt",
+        raise_on_failure=True,
+    )
     host.write("/etc/systemd/system/gitea.service", UNIT)
-    host.run("systemctl daemon-reload && systemctl enable gitea >/dev/null 2>&1; systemctl restart gitea", raise_on_failure=True)
+    host.run(
+        "systemctl daemon-reload && systemctl enable gitea >/dev/null 2>&1; systemctl restart gitea",
+        raise_on_failure=True,
+    )
     wait_for_gitea(host)
     log(f"[{cfg.host}] gitea is answering on https://{cfg.name}")
 
@@ -187,22 +202,41 @@ def setup(platform: Platform, servers: Servers, log=print) -> dict:
     users = host.run(f"{GITEA} admin user list --admin 2>/dev/null || true", raise_on_failure=True).stdout
     if cfg.user not in users.split():
         password = password or pysecrets.token_urlsafe(18)
-        host.run(f"{GITEA} admin user create --admin --username {shlex.quote(cfg.user)} --password {shlex.quote(password)} "
-                 f"--email {shlex.quote(cfg.user + '@' + cfg.name)} --must-change-password=false", raise_on_failure=True)
+        host.run(
+            f"{GITEA} admin user create --admin --username {shlex.quote(cfg.user)} --password {shlex.quote(password)} "
+            f"--email {shlex.quote(cfg.user + '@' + cfg.name)} --must-change-password=false",
+            raise_on_failure=True,
+        )
         platform.write_secret("gitea-admin-password", password)
         log(f"[{cfg.host}] created admin user {cfg.user} (password in secrets/gitea-admin-password)")
     token = platform.read_secret("gitea-token")
-    if token and host.run(f"curl -sk --max-time 5 -o /dev/null -w '%{{http_code}}' -H 'Authorization: token {token}' "
-                          "https://127.0.0.1/api/v1/user").stdout.strip() != "200":
+    if (
+        token
+        and host.run(
+            f"curl -sk --max-time 5 -o /dev/null -w '%{{http_code}}' -H 'Authorization: token {token}' "
+            "https://127.0.0.1/api/v1/user"
+        ).stdout.strip()
+        != "200"
+    ):
         log(f"[{cfg.host}] this Gitea does not accept secrets/gitea-token (reinstalled?); making a new one")
         token = None
     if not token:
-        token = host.run(f"{GITEA} admin user generate-access-token --username {shlex.quote(cfg.user)} "
-                         f"--token-name outpost-{int(time.time())} --scopes {TOKEN_SCOPES} --raw", raise_on_failure=True).stdout.strip().splitlines()[-1]
+        token = (
+            host.run(
+                f"{GITEA} admin user generate-access-token --username {shlex.quote(cfg.user)} "
+                f"--token-name outpost-{int(time.time())} --scopes {TOKEN_SCOPES} --raw",
+                raise_on_failure=True,
+            )
+            .stdout.strip()
+            .splitlines()[-1]
+        )
         platform.write_secret("gitea-token", token)
         log(f"[{cfg.host}] created API token (secrets/gitea-token; scopes {TOKEN_SCOPES})")
 
-    platform.write_state("gitea", {"name": cfg.name, "ip": ip, "org": cfg.org, "user": cfg.user, "version": versions.GITEA, "host": cfg.host})
+    platform.write_state(
+        "gitea",
+        {"name": cfg.name, "ip": ip, "org": cfg.org, "user": cfg.user, "version": versions.GITEA, "host": cfg.host},
+    )
 
     log(f"==> [6/7] organisation {cfg.org}")
     with connect(platform, servers) as client:
@@ -214,7 +248,9 @@ def setup(platform: Platform, servers: Servers, log=print) -> dict:
     log("==> [7/7] sealing the server")
     # when the egress proxy runs here (`outpost proxy setup`), its user keeps its one exception
     proxy_state = platform.read_state("proxy") or {}
-    proxy_here = bool(servers.egress_proxy and servers.egress_proxy.host == cfg.host and proxy_state.get("host") == cfg.host)
+    proxy_here = bool(
+        servers.egress_proxy and servers.egress_proxy.host == cfg.host and proxy_state.get("host") == cfg.host
+    )
     egress.install(host, ip, cfg.allow, proxy_user=PROXY_USER if proxy_here else None)
     if proxy_here:
         log(f"[{cfg.host}] the egress proxy runs here: its user {PROXY_USER} keeps its exception (TCP 443 and 80)")

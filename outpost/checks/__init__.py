@@ -38,7 +38,7 @@ class Check:
     infra: list[str] = field(default_factory=list)
     steps: list[dict] = field(default_factory=list)
     context: Path | None = None
-    requires: list[str] = field(default_factory=list)   # "proxy": only where the egress proxy is set up
+    requires: list[str] = field(default_factory=list)  # "proxy": only where the egress proxy is set up
 
     def applies_to(self, infra_type: str) -> bool:
         return not self.infra or infra_type in self.infra
@@ -57,15 +57,24 @@ def load_checks(checks_dir: Path) -> list[Check]:
         requires = [requires] if isinstance(requires, str) else requires
         unknown = [str(r) for r in requires if str(r) not in REQUIREMENTS]
         if not isinstance(requires, list) or unknown:
-            raise ConfigError(f"{path}: `requires:` may only list {', '.join(REQUIREMENTS)} (got {', '.join(unknown) or requires!r})")
-        checks.append(Check(
-            name=str(data.get("name") or path.stem),
-            description=str(data.get("description", "")),
-            infra=[str(i) for i in data.get("infra") or []],
-            steps=[{"run": str(s["run"]), "expect": s.get("expect")} if isinstance(s, dict) else {"run": str(s), "expect": None} for s in data["steps"]],
-            context=folder if folder.is_dir() else None,
-            requires=[str(r) for r in requires],
-        ))
+            raise ConfigError(
+                f"{path}: `requires:` may only list {', '.join(REQUIREMENTS)} (got {', '.join(unknown) or requires!r})"
+            )
+        checks.append(
+            Check(
+                name=str(data.get("name") or path.stem),
+                description=str(data.get("description", "")),
+                infra=[str(i) for i in data.get("infra") or []],
+                steps=[
+                    {"run": str(s["run"]), "expect": s.get("expect")}
+                    if isinstance(s, dict)
+                    else {"run": str(s), "expect": None}
+                    for s in data["steps"]
+                ],
+                context=folder if folder.is_dir() else None,
+                requires=[str(r) for r in requires],
+            )
+        )
     return checks
 
 
@@ -86,7 +95,9 @@ def run_check(check: Check, host, env: dict[str, str], log=print, timeout: int =
             host.put(archive, f"{remote_dir}/context.tgz")
         finally:
             archive.unlink(missing_ok=True)
-        host.run(f"tar -xzf {remote_dir}/context.tgz -C {remote_dir} && rm {remote_dir}/context.tgz", raise_on_failure=True)
+        host.run(
+            f"tar -xzf {remote_dir}/context.tgz -C {remote_dir} && rm {remote_dir}/context.tgz", raise_on_failure=True
+        )
 
     results = []
     ok = True

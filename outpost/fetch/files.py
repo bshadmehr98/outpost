@@ -8,7 +8,7 @@ from ..http import Http
 def rewrite(url: str, mirrors) -> str:
     """Use the GitHub mirror for github.com links when one is configured."""
     if url.startswith("https://github.com/") and mirrors.github != "https://github.com":
-        return mirrors.github + url[len("https://github.com"):]
+        return mirrors.github + url[len("https://github.com") :]
     return url
 
 

@@ -25,8 +25,8 @@ from ..fetch import rpm as rpmmod
 from . import clients, egress, hostsfile
 from .clients import GiteaInfo, ProxyInfo
 
-PROXY_USER = "outpost-proxy"   # the system user the egress proxy runs as; the only owner the seal ever exempts
-RUNNER_HOME = "/var/lib/outpost-runner"   # runner.HOME; Actions jobs read $HOME/.docker/config.json there
+PROXY_USER = "outpost-proxy"  # the system user the egress proxy runs as; the only owner the seal ever exempts
+RUNNER_HOME = "/var/lib/outpost-runner"  # runner.HOME; Actions jobs read $HOME/.docker/config.json there
 
 DNS_UNIT = """[Unit]
 Description=Outpost node DNS (CoreDNS: answers the Gitea name for containers)
@@ -70,13 +70,13 @@ WantedBy=multi-user.target
 class NodeContext:
     gitea: GiteaInfo
     ca_pem: str
-    distros: list[str] = field(default_factory=list)   # apt distros that exist in Gitea
-    apk_branches: list[str] = field(default_factory=list)   # Alpine branches that exist in Gitea
-    rpm_distros: list[str] = field(default_factory=list)    # rpm distros (Gitea groups) that exist in Gitea
-    allow: list[str] = field(default_factory=list)     # extra reachable addresses (other nodes, user list)
+    distros: list[str] = field(default_factory=list)  # apt distros that exist in Gitea
+    apk_branches: list[str] = field(default_factory=list)  # Alpine branches that exist in Gitea
+    rpm_distros: list[str] = field(default_factory=list)  # rpm distros (Gitea groups) that exist in Gitea
+    allow: list[str] = field(default_factory=list)  # extra reachable addresses (other nodes, user list)
     infra_name: str = ""
-    args: str = ""                                     # extra flags for the runtime (k3s server, swarm init)
-    proxy: ProxyInfo | None = None                     # the egress proxy, when servers.yml has one
+    args: str = ""  # extra flags for the runtime (k3s server, swarm init)
+    proxy: ProxyInfo | None = None  # the egress proxy, when servers.yml has one
 
     def proxy_user_for(self, alias: str) -> str | None:
         """The owner exception goes only into the seal of the host that runs the proxy."""
@@ -113,19 +113,25 @@ def registry_check(ctx: NodeContext) -> str:
     """Docker has the CA for Gitea's registry and the registry answers /v2/ (200, or 401 asking for a token).
     Pulls nothing, so it holds on a sealed node with an empty registry."""
     g = ctx.gitea
-    return (f"test -s /etc/docker/certs.d/{g.name}/ca.crt && "
-            f"code=$(curl --cacert {clients.PATH_CA} -sS --max-time 10 -o /dev/null -w '%{{http_code}}' {g.url}/v2/) && "
-            f"{{ [ \"$code\" = 200 ] || [ \"$code\" = 401 ]; }} && echo \"/v2/ -> $code\"")
+    return (
+        f"test -s /etc/docker/certs.d/{g.name}/ca.crt && "
+        f"code=$(curl --cacert {clients.PATH_CA} -sS --max-time 10 -o /dev/null -w '%{{http_code}}' {g.url}/v2/) && "
+        f'{{ [ "$code" = 200 ] || [ "$code" = 401 ]; }} && echo "/v2/ -> $code"'
+    )
 
 
 def prepare_node(host, ctx: NodeContext, log=print) -> dict:
     log(f"==> {host.alias}: connecting and configuring the clients")
     facts = host.facts()
     g = ctx.gitea
-    log(f"  [{host.alias}] {facts.get('id', '?')} {facts.get('codename', '')} {facts.get('arch', '')} ip={facts.get('ip', '?')}")
+    log(
+        f"  [{host.alias}] {facts.get('id', '?')} {facts.get('codename', '')} {facts.get('arch', '')} ip={facts.get('ip', '?')}"
+    )
     want = versions.names()["uname"]
     if facts.get("arch") and facts["arch"] != want:
-        raise RuntimeError(f"[{host.alias}] is {facts['arch']} but this platform is built for {want} (arch: {versions.ARCH} in servers.yml).")
+        raise RuntimeError(
+            f"[{host.alias}] is {facts['arch']} but this platform is built for {want} (arch: {versions.ARCH} in servers.yml)."
+        )
 
     # 1. name resolution without DNS (rewrite in place: /etc/hosts can be a bind mount), and a unit that
     #    puts the line back at boot, because cloud-init and Docker both rewrite /etc/hosts
@@ -133,8 +139,10 @@ def prepare_node(host, ctx: NodeContext, log=print) -> dict:
 
     # 2 + 3. trust and client configuration
     node_ip = facts.get("ip") or host.ip()
-    for path, content in {**clients.client_files(g, ctx.ca_pem, apt_key=None, distros=[], proxy=ctx.proxy),
-                          **clients.host_files(g, ctx.ca_pem, node_ip, proxy=ctx.proxy)}.items():
+    for path, content in {
+        **clients.client_files(g, ctx.ca_pem, apt_key=None, distros=[], proxy=ctx.proxy),
+        **clients.host_files(g, ctx.ca_pem, node_ip, proxy=ctx.proxy),
+    }.items():
         host.write(path, content)
     _proxy_settings(host, ctx, log)
     # Debian and Alpine both ship update-ca-certificates reading /usr/local/share/ca-certificates (Alpine's
@@ -148,7 +156,9 @@ def prepare_node(host, ctx: NodeContext, log=print) -> dict:
     )
     reach = host.run(f"curl --cacert {clients.PATH_CA} -fsS --max-time 10 {g.url}/api/v1/version")
     if not reach.ok:
-        raise RuntimeError(f"[{host.alias}] cannot reach {g.url}: {reach.stderr.strip()}. Check servers.yml gitea.ip and firewalls (port 443).")
+        raise RuntimeError(
+            f"[{host.alias}] cannot reach {g.url}: {reach.stderr.strip()}. Check servers.yml gitea.ip and firewalls (port 443)."
+        )
     log(f"  [{host.alias}] reaches Gitea {reach.stdout.strip()}")
 
     # 4. OS packages from Gitea: fetch the repo key, keep only what Gitea actually has, park the stock sources
@@ -188,7 +198,9 @@ def _proxy_settings(host, ctx: NodeContext, log=print) -> None:
             host.write(path, updated, mode="0600")
     host.run(clients.environment_script(ctx.proxy), raise_on_failure=True)
     if ctx.proxy:
-        log(f"  [{host.alias}] egress proxy {ctx.proxy.url} for programs that opt in (HTTPS_PROXY), containers through the Docker client config")
+        log(
+            f"  [{host.alias}] egress proxy {ctx.proxy.url} for programs that opt in (HTTPS_PROXY), containers through the Docker client config"
+        )
 
 
 def apply_proxy(host, ctx: NodeContext, log=print) -> None:
@@ -220,7 +232,7 @@ def _configure_apt(host, ctx: NodeContext, facts: dict) -> None:
     host.run(
         f"{curl(ctx, g.apt_repo + '/repository.key', clients.PATH_APT_KEY)} || true\n"
         f"mkdir -p /etc/apt/sources.disabled /etc/apt/sources.list.d\n"
-        f"for f in /etc/apt/sources.list.d/*; do [ -e \"$f\" ] && [ \"$(basename $f)\" != outpost.list ] && mv \"$f\" /etc/apt/sources.disabled/; done; true\n"
+        f'for f in /etc/apt/sources.list.d/*; do [ -e "$f" ] && [ "$(basename $f)" != outpost.list ] && mv "$f" /etc/apt/sources.disabled/; done; true\n'
         f"if [ -s /etc/apt/sources.list ]; then mv /etc/apt/sources.list /etc/apt/sources.disabled/sources.list; fi\n"
         f"{{ {lines}\n}} > /etc/apt/sources.list.d/outpost.list\n",
         raise_on_failure=True,
@@ -263,7 +275,7 @@ def _configure_rpm(host, ctx: NodeContext, facts: dict) -> None:
     host.run(
         f"{curl(ctx, g.rpm_repo + '/repository.key', clients.PATH_RPM_KEY)} || true\n"
         f"mkdir -p /etc/yum.repos.d.disabled /etc/yum.repos.d\n"
-        f"for f in /etc/yum.repos.d/*.repo; do [ -e \"$f\" ] && [ \"$(basename $f)\" != outpost.repo ] && mv \"$f\" /etc/yum.repos.d.disabled/; done; true\n"
+        f'for f in /etc/yum.repos.d/*.repo; do [ -e "$f" ] && [ "$(basename $f)" != outpost.repo ] && mv "$f" /etc/yum.repos.d.disabled/; done; true\n'
         f"{{ {lines}\n}} > {clients.PATH_RPM_REPO}\n",
         raise_on_failure=True,
     )
@@ -272,14 +284,20 @@ def _configure_rpm(host, ctx: NodeContext, facts: dict) -> None:
 def install_dns(host, ctx: NodeContext, log=print) -> None:
     g = ctx.gitea
     url = g.generic("coredns", versions.COREDNS, f"coredns_{versions.COREDNS}_linux_{versions.ARCH}.tgz")
-    if versions.COREDNS not in host.run("/usr/local/bin/coredns -version 2>/dev/null || true", raise_on_failure=True).stdout:
+    if (
+        versions.COREDNS
+        not in host.run("/usr/local/bin/coredns -version 2>/dev/null || true", raise_on_failure=True).stdout
+    ):
         host.run(
             f"{curl(ctx, url, '/tmp/coredns.tgz')}\n"
             "tar -xzf /tmp/coredns.tgz -C /usr/local/bin coredns && chmod 755 /usr/local/bin/coredns && rm -f /tmp/coredns.tgz\n",
             raise_on_failure=True,
         )
     host.write("/etc/systemd/system/outpost-dns.service", DNS_UNIT)
-    host.run("systemctl daemon-reload && systemctl enable outpost-dns >/dev/null 2>&1; systemctl restart outpost-dns && sleep 1 && systemctl is-active outpost-dns", raise_on_failure=True)
+    host.run(
+        "systemctl daemon-reload && systemctl enable outpost-dns >/dev/null 2>&1; systemctl restart outpost-dns && sleep 1 && systemctl is-active outpost-dns",
+        raise_on_failure=True,
+    )
     log(f"  [{host.alias}] node dns (coredns {versions.COREDNS}) answers {g.name} for containers")
 
 
@@ -299,12 +317,15 @@ def install_docker(host, ctx: NodeContext, log=print) -> None:
             f"{curl(ctx, docker_url, '/tmp/docker.tgz')}\n"
             "tar -xzf /tmp/docker.tgz -C /usr/local/bin --strip-components=1 && rm -f /tmp/docker.tgz\n"
             "groupadd -f docker\n"
-            "if [ -n \"${SUDO_USER:-}\" ]; then usermod -aG docker \"$SUDO_USER\"; fi\n",
+            'if [ -n "${SUDO_USER:-}" ]; then usermod -aG docker "$SUDO_USER"; fi\n',
             raise_on_failure=True,
         )
         host.write("/etc/systemd/system/docker.service", DOCKER_UNIT)
         # restart, not `enable --now`: an already running daemon would keep the old binary
-        host.run("systemctl daemon-reload && systemctl enable docker >/dev/null 2>&1; systemctl restart docker", raise_on_failure=True)
+        host.run(
+            "systemctl daemon-reload && systemctl enable docker >/dev/null 2>&1; systemctl restart docker",
+            raise_on_failure=True,
+        )
     host.run(
         "mkdir -p /usr/local/lib/docker/cli-plugins\n"
         f"if ! docker compose version 2>/dev/null | grep -q {versions.COMPOSE}; then "

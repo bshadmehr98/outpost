@@ -49,15 +49,18 @@ def test_empty_and_missing(tmp_path):
     assert load_needs(tmp_path / "nope").is_empty()
 
 
-@pytest.mark.parametrize("text,message", [
-    ("pypi: [{foo: bar}]", "pip specs"),
-    ("npm: [chalk]", "name@version"),
-    ("apt: {packages: [curl]}", "distro"),
-    ("apk: {packages: [curl]}", "apk needs `branch:`"),
-    ("rpm: [{packages: [curl]}]", "rpm needs `distro:`"),
-    ("files: [{url: https://x/y}]", "`name:`"),
-    ("pypi: [{file: missing.txt}]", "does not exist"),
-])
+@pytest.mark.parametrize(
+    "text,message",
+    [
+        ("pypi: [{foo: bar}]", "pip specs"),
+        ("npm: [chalk]", "name@version"),
+        ("apt: {packages: [curl]}", "distro"),
+        ("apk: {packages: [curl]}", "apk needs `branch:`"),
+        ("rpm: [{packages: [curl]}]", "rpm needs `distro:`"),
+        ("files: [{url: https://x/y}]", "`name:`"),
+        ("pypi: [{file: missing.txt}]", "does not exist"),
+    ],
+)
 def test_errors(tmp_path, text, message):
     (tmp_path / "needs").mkdir()
     (tmp_path / "needs" / "x.yml").write_text(text)
@@ -68,9 +71,21 @@ def test_errors(tmp_path, text, message):
 def test_platform_files():
     files = versions.platform_files(Mirrors(), {"compose", "k3s"})
     names = [f["name"] for f in files]
-    assert names == ["gitea", "coredns", "gitea-runner", "docker", "docker-compose", "docker-buildx", "k3s", "k3s-airgap-images", "k3s-install"]
+    assert names == [
+        "gitea",
+        "coredns",
+        "gitea-runner",
+        "docker",
+        "docker-compose",
+        "docker-buildx",
+        "k3s",
+        "k3s-airgap-images",
+        "k3s-install",
+    ]
     assert "%2B" in next(f["url"] for f in files if f["name"] == "k3s")
-    assert versions.platform_files(Mirrors(github="https://gh.mirror.ir"), {"swarm"})[4]["url"].startswith("https://gh.mirror.ir/docker/compose")
+    assert versions.platform_files(Mirrors(github="https://gh.mirror.ir"), {"swarm"})[4]["url"].startswith(
+        "https://gh.mirror.ir/docker/compose"
+    )
     assert [f["name"] for f in versions.platform_files(Mirrors(), set())] == ["gitea"]
     needs = add_platform_files(load_needs(__import__("pathlib").Path("/nonexistent")), files)
     assert [f.name for f in needs.files] == names

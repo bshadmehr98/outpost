@@ -25,9 +25,16 @@ def prepared(platform_dir, monkeypatch):
     binary = platform_dir / "box" / "files" / "gitea" / versions.GITEA / "gitea"
     binary.parent.mkdir(parents=True)
     binary.write_bytes(b"ELF")
-    host = FakeHost("gitea-1", facts={"id": "ubuntu", "codename": "noble", "arch": "x86_64", "ip": "10.0.0.5"},
-                    responses=[(r"generate-access-token", "abc123token\n"), (r"admin user list", ""), (r"api/v1/user", "200"),
-                               (r"test -s /etc/gitea/app.ini", Result(1, "", ""))])
+    host = FakeHost(
+        "gitea-1",
+        facts={"id": "ubuntu", "codename": "noble", "arch": "x86_64", "ip": "10.0.0.5"},
+        responses=[
+            (r"generate-access-token", "abc123token\n"),
+            (r"admin user list", ""),
+            (r"api/v1/user", "200"),
+            (r"test -s /etc/gitea/app.ini", Result(1, "", "")),
+        ],
+    )
     monkeypatch.setattr(setupmod, "Host", lambda alias: host)
 
     @contextmanager
@@ -62,21 +69,28 @@ def test_setup_installs_everything_in_order(prepared):
     restart = next(i for i, s in enumerate(host.scripts) if "systemctl restart gitea" in s)
     create_user = next(i for i, s in enumerate(host.scripts) if "admin user create" in s)
     assert restart < create_user < seal
-    assert "--scopes write:organization,write:repository,write:package,read:user,read:misc" in joined and "--scopes all" not in joined
-    assert "echo \"egress=" in host.scripts[-1]   # the host facts are cached last, for the dashboard and the report
+    assert (
+        "--scopes write:organization,write:repository,write:package,read:user,read:misc" in joined
+        and "--scopes all" not in joined
+    )
+    assert 'echo "egress=' in host.scripts[-1]  # the host facts are cached last, for the dashboard and the report
     assert (platform.state_dir / "hosts" / "gitea-1.json").exists()
 
 
 def test_setup_is_idempotent(prepared):
     platform, servers, host = prepared
     setupmod.setup(platform, servers, log=lambda *_: None)
-    host.responses = [(r"gitea --version", f"Gitea version {versions.GITEA} built with go"), (r"admin user list", "outpost\n"),
-                      (r"test -s /etc/gitea/app.ini", ""), (r"api/v1/user", "200")]
+    host.responses = [
+        (r"gitea --version", f"Gitea version {versions.GITEA} built with go"),
+        (r"admin user list", "outpost\n"),
+        (r"test -s /etc/gitea/app.ini", ""),
+        (r"api/v1/user", "200"),
+    ]
     host.puts.clear()
     host.scripts.clear()
     token_before = platform.read_secret("gitea-token")
     setupmod.setup(platform, servers, log=lambda *_: None)
-    assert host.puts == []                                      # binary not re-uploaded
+    assert host.puts == []  # binary not re-uploaded
     assert not any("admin user create" in s for s in host.scripts)
     assert not any("generate-access-token" in s for s in host.scripts)
     assert platform.read_secret("gitea-token") == token_before
@@ -99,7 +113,7 @@ def test_setup_replaces_a_token_this_gitea_does_not_accept(prepared):
 def test_setup_again_keeps_the_proxy_exception_on_the_gitea_host(prepared):
     platform, servers, host = prepared
     setupmod.setup(platform, servers, log=lambda *_: None)
-    assert "--uid-owner" not in host.files["/usr/local/sbin/outpost-egress"]   # no proxy: the plain seal
+    assert "--uid-owner" not in host.files["/usr/local/sbin/outpost-egress"]  # no proxy: the plain seal
     path = platform.servers_file
     path.write_text(path.read_text() + "\negress_proxy: {allow: [api.twilio.com]}\n")
     platform.write_state("proxy", {"host": "gitea-1", "url": "http://10.0.0.5:3128", "allow": ["api.twilio.com"]})

@@ -15,7 +15,10 @@ def setup(ctx: common.NodeContext, hosts: list, log=print) -> dict:
 def extra_checks(ctx: common.NodeContext) -> list[tuple[str, str]]:
     return [
         ("docker running", "docker info --format '{{.ServerVersion}}'"),
-        (f"docker at pinned version {versions.DOCKER}", f"docker info --format '{{{{.ServerVersion}}}}' | grep -q {versions.DOCKER}"),
+        (
+            f"docker at pinned version {versions.DOCKER}",
+            f"docker info --format '{{{{.ServerVersion}}}}' | grep -q {versions.DOCKER}",
+        ),
         (f"compose at pinned version {versions.COMPOSE}", f"docker compose version | grep -q {versions.COMPOSE}"),
         ("compose plugin", "docker compose version"),
         ("buildx plugin", "docker buildx version"),

@@ -21,7 +21,10 @@ def setup(ctx: common.NodeContext, hosts: list, log=print) -> dict:
     token = manager.run("docker swarm join-token -q worker", raise_on_failure=True).stdout.strip()
 
     for host in hosts[1:]:
-        if host.run("docker info --format '{{.Swarm.LocalNodeState}}'", raise_on_failure=True).stdout.strip() == "active":
+        if (
+            host.run("docker info --format '{{.Swarm.LocalNodeState}}'", raise_on_failure=True).stdout.strip()
+            == "active"
+        ):
             log(f"  [{host.alias}] already joined")
             continue
         host.run(f"docker swarm join --token {token} {manager_ip}:2377", raise_on_failure=True)
@@ -32,7 +35,10 @@ def setup(ctx: common.NodeContext, hosts: list, log=print) -> dict:
 def extra_checks(ctx: common.NodeContext) -> list[tuple[str, str]]:
     return [
         ("docker running", "docker info --format '{{.ServerVersion}}'"),
-        (f"docker at pinned version {versions.DOCKER}", f"docker info --format '{{{{.ServerVersion}}}}' | grep -q {versions.DOCKER}"),
+        (
+            f"docker at pinned version {versions.DOCKER}",
+            f"docker info --format '{{{{.ServerVersion}}}}' | grep -q {versions.DOCKER}",
+        ),
         (f"compose at pinned version {versions.COMPOSE}", f"docker compose version | grep -q {versions.COMPOSE}"),
         ("swarm active", "test \"$(docker info --format '{{.Swarm.LocalNodeState}}')\" = active"),
         ("docker trusts and reaches gitea registry", common.registry_check(ctx)),

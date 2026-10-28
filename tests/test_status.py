@@ -2,14 +2,19 @@ import json
 import os
 import time
 
-from outpost.needs import Needs, NpmNeed, FileNeed
+from outpost.needs import FileNeed, Needs, NpmNeed
 from outpost.paths import Platform
 from outpost.ui import status
 
 
 def needs():
-    n = Needs(images=["python:3.12-slim", "alpine:3.20"], pypi={"3.12": ["Flask==3.1.3", "requests"]}, npm=[NpmNeed("chalk", "5.3.0")],
-              apt={"bookworm": ["curl", "libpq-dev"]}, files=[FileNeed("gitea", "28.2.0", "https://x/gitea", "gitea")])
+    n = Needs(
+        images=["python:3.12-slim", "alpine:3.20"],
+        pypi={"3.12": ["Flask==3.1.3", "requests"]},
+        npm=[NpmNeed("chalk", "5.3.0")],
+        apt={"bookworm": ["curl", "libpq-dev"]},
+        files=[FileNeed("gitea", "28.2.0", "https://x/gitea", "gitea")],
+    )
     return n
 
 
@@ -26,7 +31,15 @@ def test_box_status_finds_what_is_there(tmp_path):
     (box / "apt" / "bookworm").mkdir(parents=True)
     (box / "apt" / "bookworm" / "curl_7.88_amd64.deb").write_bytes(b"x")
     s = status.box_status(p, needs())
-    assert s["missing"] == {"images": ["python:3.12-slim"], "pypi": [], "npm": [], "apt": ["libpq-dev (bookworm)"], "apk": [], "rpm": [], "files": ["gitea 28.2.0"]}
+    assert s["missing"] == {
+        "images": ["python:3.12-slim"],
+        "pypi": [],
+        "npm": [],
+        "apt": ["libpq-dev (bookworm)"],
+        "apk": [],
+        "rpm": [],
+        "files": ["gitea 28.2.0"],
+    }
     assert s["missing_total"] == 3 and s["kinds"]["pypi"]["files"] == 2 and s["bytes"] == 15
 
 
@@ -40,7 +53,10 @@ def test_box_status_apk_and_rpm_files_are_matched_by_name(tmp_path):
     s = status.box_status(p, n)
     assert s["missing"]["apk"] == ["jq (v3.20)"] and s["missing"]["rpm"] == ["git (fedora40)"]
     assert s["kinds"]["apk"]["files"] == 1 and s["kinds"]["rpm"]["files"] == 1
-    assert status.search(p, n, "curl")["needs"] == [{"kind": "apk (v3.20)", "text": "curl"}, {"kind": "rpm (rocky9)", "text": "curl"}]
+    assert status.search(p, n, "curl")["needs"] == [
+        {"kind": "apk (v3.20)", "text": "curl"},
+        {"kind": "rpm (rocky9)", "text": "curl"},
+    ]
 
 
 def test_sync_arrows_follow_file_times(tmp_path):
@@ -49,7 +65,11 @@ def test_sync_arrows_follow_file_times(tmp_path):
     (p.needs_dir / "a.yml").write_text("images: [x]\n")
     empty = {"missing_total": 0}
     s = status.sync(p, empty, ["dev"])
-    assert s["arrows"]["fetch"]["state"] == "none" and s["arrows"]["upload"]["state"] == "none" and "dev" in s["arrows"]["setup"]["why"]
+    assert (
+        s["arrows"]["fetch"]["state"] == "none"
+        and s["arrows"]["upload"]["state"] == "none"
+        and "dev" in s["arrows"]["setup"]["why"]
+    )
     p.box_dir.mkdir()
     (p.box_dir / "manifest.json").write_text("{}")
     p.write_state("upload", {})
@@ -76,10 +96,25 @@ def test_runs_and_search(tmp_path):
     assert r[1]["exit"] == 1 and r[0]["exit"] is None and r[0]["running"] and r[1]["when"] == "2026-01-01T12:00:00"
     assert status.runs(p)[0]["running"] is False  # not live any more: the dashboard was closed mid-run
     p.box_dir.mkdir()
-    (p.box_dir / "manifest.json").write_text(json.dumps({"items": [{"path": "pypi/flask-3.1.3.whl", "size": 5}, {"path": "images/alpine_3.20/blobs/sha256/abc", "size": 1}, {"path": "images/alpine_3.20/index.json", "size": 1}]}))
+    (p.box_dir / "manifest.json").write_text(
+        json.dumps(
+            {
+                "items": [
+                    {"path": "pypi/flask-3.1.3.whl", "size": 5},
+                    {"path": "images/alpine_3.20/blobs/sha256/abc", "size": 1},
+                    {"path": "images/alpine_3.20/index.json", "size": 1},
+                ]
+            }
+        )
+    )
     s = status.search(p, needs(), "FLASK")
-    assert s["needs"] == [{"kind": "pypi (py3.12)", "text": "Flask==3.1.3"}] and s["box"][0]["path"] == "pypi/flask-3.1.3.whl"
-    assert status.search(p, needs(), "alpine")["box"] == [{"path": "images/alpine_3.20/index.json", "size": 1}]  # blobs are noise
+    assert (
+        s["needs"] == [{"kind": "pypi (py3.12)", "text": "Flask==3.1.3"}]
+        and s["box"][0]["path"] == "pypi/flask-3.1.3.whl"
+    )
+    assert status.search(p, needs(), "alpine")["box"] == [
+        {"path": "images/alpine_3.20/index.json", "size": 1}
+    ]  # blobs are noise
 
 
 def test_preflight_lists_tools(tmp_path):

@@ -8,7 +8,8 @@ CONF_DIR = "/etc/gitea"
 def wait_for_gitea(host, timeout: int = 90) -> None:
     result = host.run(
         f"for i in $(seq 1 {timeout // 2}); do curl -sk --max-time 3 https://127.0.0.1/api/v1/version >/dev/null 2>&1 && exit 0; sleep 2; done; "
-        "journalctl -u gitea --no-pager -n 20; exit 1")
+        "journalctl -u gitea --no-pager -n 20; exit 1"
+    )
     if not result.ok:
         raise RuntimeError(f"Gitea did not start within {timeout}s:\n{result.stdout[-1500:]}")
 

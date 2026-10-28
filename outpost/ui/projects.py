@@ -22,7 +22,18 @@ from ..paths import Platform
 
 PYTHON_LOCKFILES = ("requirements.txt", "requirements.in", "poetry.lock", "uv.lock", "Pipfile.lock")
 JS_LOCKFILES = ("package-lock.json", "npm-shrinkwrap.json", "pnpm-lock.yaml", "yarn.lock")
-SKIP_DIRS = {"node_modules", ".venv", "venv", ".git", "__pycache__", "dist", "build", ".tox", ".mypy_cache", "site-packages"}
+SKIP_DIRS = {
+    "node_modules",
+    ".venv",
+    "venv",
+    ".git",
+    "__pycache__",
+    "dist",
+    "build",
+    ".tox",
+    ".mypy_cache",
+    "site-packages",
+}
 MAX_DEPTH = 3
 
 # base image -> apt distro, for the usual suspects
@@ -99,7 +110,7 @@ def needed_image(image: str, gitea: str | None = None) -> str | None:
     if name == "config" and "/" in image:  # Outpost's own config image, not something to fetch
         return None
     if gitea and image.startswith(gitea.rstrip("/") + "/"):
-        return oci.original_ref(image[len(gitea.rstrip("/")) + 1:])
+        return oci.original_ref(image[len(gitea.rstrip("/")) + 1 :])
     if "$" in image:  # ${GITEA}/${ORG}/library/python:3.12-slim -> python:3.12-slim, if the rest stands on its own
         parts = image.split("/")
         while parts and "$" in parts[0]:
@@ -191,10 +202,12 @@ def scan(folder: str | Path, gitea: str | None = None) -> dict:
     images = [i for d in dockerfiles for i in d["images"]]
     images = list(dict.fromkeys(images))
     distros = {}
-    for image in images:   # the first image of each family names the distro for that family's packages
+    for image in images:  # the first image of each family names the distro for that family's packages
         d = distro_for_image(image)
         distros.setdefault(kind_for_distro(d), d)
-    packages = {kind: list(dict.fromkeys(p for d in dockerfiles for p in d.get(kind, []))) for kind in ("apt", "apk", "rpm")}
+    packages = {
+        kind: list(dict.fromkeys(p for d in dockerfiles for p in d.get(kind, []))) for kind in ("apt", "apk", "rpm")
+    }
     out = {
         "folder": str(root),
         "name": re.sub(r"[^a-z0-9]+", "-", root.name.lower()).strip("-") or "project",
@@ -222,8 +235,12 @@ def write_needs(platform: Platform, project: dict) -> Path:
     def rel(p: str) -> str:
         return os.path.relpath(Path(os.path.expanduser(p)).resolve(), needs_dir)
 
-    pypi = [{"file": rel(p)} for p in project.get("pypi_files") or []] + [s.strip() for s in project.get("pypi") or [] if s.strip()]
-    npm = [{"file": rel(p)} for p in project.get("npm_files") or []] + [s.strip() for s in project.get("npm") or [] if s.strip()]
+    pypi = [{"file": rel(p)} for p in project.get("pypi_files") or []] + [
+        s.strip() for s in project.get("pypi") or [] if s.strip()
+    ]
+    npm = [{"file": rel(p)} for p in project.get("npm_files") or []] + [
+        s.strip() for s in project.get("npm") or [] if s.strip()
+    ]
     data: dict = {"name": name, "python": str(project.get("python") or "3.12")}
     if project.get("folder"):
         data["folder"] = str(project["folder"])  # where it was scanned from, so the dashboard can scan again
@@ -235,16 +252,27 @@ def write_needs(platform: Platform, project: dict) -> Path:
         data["npm"] = npm
     apt = project.get("apt") or {}
     if apt.get("packages"):
-        data["apt"] = {"distro": str(apt.get("distro") or "bookworm"), "packages": [p.strip() for p in apt["packages"] if p.strip()]}
+        data["apt"] = {
+            "distro": str(apt.get("distro") or "bookworm"),
+            "packages": [p.strip() for p in apt["packages"] if p.strip()],
+        }
     apk = project.get("apk") or {}
     if apk.get("packages"):
-        data["apk"] = {"branch": str(apk.get("branch") or ALPINE_CURRENT), "packages": [p.strip() for p in apk["packages"] if p.strip()]}
+        data["apk"] = {
+            "branch": str(apk.get("branch") or ALPINE_CURRENT),
+            "packages": [p.strip() for p in apk["packages"] if p.strip()],
+        }
     rpm = project.get("rpm") or {}
     if rpm.get("packages"):
-        data["rpm"] = {"distro": str(rpm.get("distro") or "rocky9"), "packages": [p.strip() for p in rpm["packages"] if p.strip()]}
+        data["rpm"] = {
+            "distro": str(rpm.get("distro") or "rocky9"),
+            "packages": [p.strip() for p in rpm["packages"] if p.strip()],
+        }
     if project.get("files"):
         data["files"] = project["files"]
     path = needs_dir / f"{name}.yml"
-    path.write_text("# Written by the Outpost dashboard. Edit freely; see docs/reference/needs.md.\n"
-                    + yaml.safe_dump(data, sort_keys=False, default_flow_style=None, width=100))
+    path.write_text(
+        "# Written by the Outpost dashboard. Edit freely; see docs/reference/needs.md.\n"
+        + yaml.safe_dump(data, sort_keys=False, default_flow_style=None, width=100)
+    )
     return path

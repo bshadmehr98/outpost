@@ -26,7 +26,13 @@ class Recorder:
 
 def test_pypi_command_flags(tmp_path):
     run = Recorder()
-    result = pypi.fetch({"3.12": ["flask==3.0.0", "httpx"]}, tmp_path, Mirrors(pypi="https://pypi.mirror.ir/simple"), log=lambda *_: None, run=run)
+    result = pypi.fetch(
+        {"3.12": ["flask==3.0.0", "httpx"]},
+        tmp_path,
+        Mirrors(pypi="https://pypi.mirror.ir/simple"),
+        log=lambda *_: None,
+        run=run,
+    )
     cmd = run.calls[0]
     assert cmd[:3] == ["pip", "download", "-q"]
     assert "--index-url" in cmd and "https://pypi.mirror.ir/simple" in cmd
@@ -44,7 +50,10 @@ def test_pypi_falls_back_per_package(tmp_path):
 
 
 def test_files_rewrite_github_mirror():
-    assert files.rewrite("https://github.com/a/b/releases/x", Mirrors(github="https://gh.ir")) == "https://gh.ir/a/b/releases/x"
+    assert (
+        files.rewrite("https://github.com/a/b/releases/x", Mirrors(github="https://gh.ir"))
+        == "https://gh.ir/a/b/releases/x"
+    )
     assert files.rewrite("https://dl.gitea.com/x", Mirrors(github="https://gh.ir")) == "https://dl.gitea.com/x"
 
 
@@ -54,7 +63,11 @@ def test_apt_script_and_image():
         apt.image_for("windows")
     script = apt.script_for("bookworm", ["curl", "libpq-dev"], Mirrors(debian="http://deb.mirror.ir/debian"))
     assert "deb http://deb.mirror.ir/debian bookworm main" in script
-    assert "apt-cache depends --recurse --no-recommends" in script and "curl libpq-dev" in script and "apt-get download" in script
+    assert (
+        "apt-cache depends --recurse --no-recommends" in script
+        and "curl libpq-dev" in script
+        and "apt-get download" in script
+    )
     run = Recorder()
     apt.fetch({"noble": ["htop"]}, Path("/tmp/box-test"), Mirrors(), log=lambda *_: None, run=run)
     cmd = run.calls[0]
@@ -78,7 +91,9 @@ def test_apk_script_and_image():
     assert cmd[-2] == "-c" and cmd[cmd.index("alpine:3.20") + 1] == "sh" and "/tmp/box-test/apk/v3.20:/out" in cmd
     assert result == {"v3.20": 0}
     with pytest.raises(RuntimeError, match="apk download for v3.20 failed"):
-        apk.fetch({"v3.20": ["curl"]}, Path("/tmp/box-test"), Mirrors(), log=lambda *_: None, run=Recorder(fail_first=True))
+        apk.fetch(
+            {"v3.20": ["curl"]}, Path("/tmp/box-test"), Mirrors(), log=lambda *_: None, run=Recorder(fail_first=True)
+        )
 
 
 def test_rpm_script_and_image():
@@ -90,12 +105,20 @@ def test_rpm_script_and_image():
     assert rpm.distro_for_host("fedora", "40") == "fedora40" and rpm.distro_for_host("centos", "9") == "stream9"
     assert rpm.distro_for_host("ubuntu", "24.04") is None
     script = rpm.script_for("rocky9", ["curl", "git"], Mirrors(rocky="https://rocky.mirror.ir/rocky"))
-    assert "rm -f /etc/yum.repos.d/*.repo" in script and "baseurl=https://rocky.mirror.ir/rocky/9/BaseOS/x86_64/os" in script
+    assert (
+        "rm -f /etc/yum.repos.d/*.repo" in script
+        and "baseurl=https://rocky.mirror.ir/rocky/9/BaseOS/x86_64/os" in script
+    )
     assert "baseurl=https://rocky.mirror.ir/rocky/9/AppStream/x86_64/os" in script and "gpgcheck=0" in script
     assert "dnf-plugins-core" in script and "dnf -q -y download --resolve --alldeps --destdir /out curl git" in script
     fedora = rpm.script_for("fedora40", ["curl"], Mirrors())
-    assert "https://dl.fedoraproject.org/pub/fedora/linux/releases/40/Everything/x86_64/os" in fedora and "updates/40/Everything/x86_64" in fedora
-    assert "https://mirror.stream.centos.org/9-stream/BaseOS/x86_64/os" in rpm.script_for("stream9", ["curl"], Mirrors())
+    assert (
+        "https://dl.fedoraproject.org/pub/fedora/linux/releases/40/Everything/x86_64/os" in fedora
+        and "updates/40/Everything/x86_64" in fedora
+    )
+    assert "https://mirror.stream.centos.org/9-stream/BaseOS/x86_64/os" in rpm.script_for(
+        "stream9", ["curl"], Mirrors()
+    )
     versions.use_arch("arm64")
     try:
         assert "/9/BaseOS/aarch64/os" in rpm.script_for("alma9", ["curl"], Mirrors())
@@ -104,19 +127,37 @@ def test_rpm_script_and_image():
     run = Recorder()
     rpm.fetch({"rocky9": ["curl"]}, Path("/tmp/box-test"), Mirrors(), log=lambda *_: None, run=run)
     cmd = run.calls[0]
-    assert cmd[:4] == ["docker", "run", "--rm", "--platform"] and "rockylinux:9" in cmd and "bash" in cmd and "/tmp/box-test/rpm/rocky9:/out" in cmd
+    assert (
+        cmd[:4] == ["docker", "run", "--rm", "--platform"]
+        and "rockylinux:9" in cmd
+        and "bash" in cmd
+        and "/tmp/box-test/rpm/rocky9:/out" in cmd
+    )
     with pytest.raises(RuntimeError, match="rpm download for rocky9 failed"):
-        rpm.fetch({"rocky9": ["curl"]}, Path("/tmp/box-test"), Mirrors(), log=lambda *_: None, run=Recorder(fail_first=True))
+        rpm.fetch(
+            {"rocky9": ["curl"]}, Path("/tmp/box-test"), Mirrors(), log=lambda *_: None, run=Recorder(fail_first=True)
+        )
 
 
 def test_fetch_all_runs_every_kind(tmp_path, monkeypatch):
     from outpost.fetch import fetch_all
     from outpost.needs import Needs
+
     calls = []
     for mod, name in ((apk, "apk"), (rpm, "rpm"), (apt, "apt")):
         monkeypatch.setattr(mod, "fetch", lambda needs, box, mirrors, log, _n=name: calls.append((_n, needs)) or {})
-    results = fetch_all(Needs(apk={"v3.20": ["curl"]}, rpm={"rocky9": ["git"]}), tmp_path, Mirrors(), only={"apk", "rpm"}, log=lambda *_: None)
-    assert calls == [("apk", {"v3.20": ["curl"]}), ("rpm", {"rocky9": ["git"]})] and set(results) == {"apk", "rpm", "manifest"}
+    results = fetch_all(
+        Needs(apk={"v3.20": ["curl"]}, rpm={"rocky9": ["git"]}),
+        tmp_path,
+        Mirrors(),
+        only={"apk", "rpm"},
+        log=lambda *_: None,
+    )
+    assert calls == [("apk", {"v3.20": ["curl"]}), ("rpm", {"rocky9": ["git"]})] and set(results) == {
+        "apk",
+        "rpm",
+        "manifest",
+    }
 
 
 class _NpmHandler(BaseHTTPRequestHandler):
@@ -127,7 +168,9 @@ class _NpmHandler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         if self.path == "/chalk/5.3.0":
-            body = json.dumps({"dist": {"tarball": f"http://{self.headers['Host']}/chalk/-/chalk-5.3.0.tgz", "integrity": None}}).encode()
+            body = json.dumps(
+                {"dist": {"tarball": f"http://{self.headers['Host']}/chalk/-/chalk-5.3.0.tgz", "integrity": None}}
+            ).encode()
         elif self.path.endswith(".tgz"):
             body = self.tgz
         else:
@@ -159,6 +202,7 @@ def test_npm_fetch_from_metadata_and_lockfile_url(tmp_path, npm_server):
     url, tgz = npm_server
     import base64
     import hashlib
+
     good = "sha512-" + base64.b64encode(hashlib.sha512(tgz).digest()).decode()
     needs = [
         NpmNeed("chalk", "5.3.0"),
@@ -177,7 +221,10 @@ def test_images_fetch_uses_docker_mirror(tmp_path, fake_gitea):
     result = images.fetch(["alpine:3.20"], tmp_path / "box", Mirrors(docker=fake_gitea.url), log=lambda *_: None)
     assert result["pulled"] == 1
     assert oci.layout_ref(tmp_path / "box" / "images" / "alpine_3.20") == "alpine:3.20"
-    assert images.fetch(["alpine:3.20"], tmp_path / "box", Mirrors(docker=fake_gitea.url), log=lambda *_: None)["skipped"] == 1
+    assert (
+        images.fetch(["alpine:3.20"], tmp_path / "box", Mirrors(docker=fake_gitea.url), log=lambda *_: None)["skipped"]
+        == 1
+    )
 
 
 def test_files_fetch_skips_existing(tmp_path):

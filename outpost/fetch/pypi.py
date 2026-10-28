@@ -20,7 +20,19 @@ def pip_command() -> list[str]:
 
 def wheel_flags(python: str) -> list[str]:
     abi = "cp" + python.replace(".", "")
-    flags = ["--python-version", python, "--implementation", "cp", "--abi", abi, "--abi", "abi3", "--abi", "none", "--only-binary=:all:"]
+    flags = [
+        "--python-version",
+        python,
+        "--implementation",
+        "cp",
+        "--abi",
+        abi,
+        "--abi",
+        "abi3",
+        "--abi",
+        "none",
+        "--only-binary=:all:",
+    ]
     for p in versions.names()["pip"]:
         flags += ["--platform", p]
     return flags
@@ -45,7 +57,9 @@ def fetch(pypi: dict[str, list[str]], box: Path, mirrors, log=print, run=subproc
                 continue
             sdist = run(base + [spec, "--no-deps", "--no-binary=:all:"], capture_output=True, text=True)
             if sdist.returncode != 0:
-                failed.append(f"{spec} (py{python}): {sdist.stderr.strip().splitlines()[-1] if sdist.stderr.strip() else 'pip failed'}")
+                failed.append(
+                    f"{spec} (py{python}): {sdist.stderr.strip().splitlines()[-1] if sdist.stderr.strip() else 'pip failed'}"
+                )
                 log(f"    FAILED {spec}")
     count = len([p for p in out.iterdir() if p.suffix in (".whl", ".gz", ".zip")])
     log(f"    {count} file(s) in box/pypi, {len(failed)} failed")

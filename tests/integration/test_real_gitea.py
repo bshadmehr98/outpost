@@ -49,10 +49,26 @@ def gitea():
     sh("docker", "network", "create", "--subnet", SUBNET, NET)
     URL = f"http://{GITEA_IP}:{PORT}"
     # ROOT_URL must be reachable by every client, including the token realm Docker follows
-    sh("docker", "run", "-d", "--name", NAME, "--network", NET, "--ip", GITEA_IP,
-       "-e", "GITEA__security__INSTALL_LOCK=true", "-e", "GITEA__packages__ENABLED=true",
-       "-e", "GITEA__service__DISABLE_REGISTRATION=true", "-e", f"GITEA__server__ROOT_URL={URL}/",
-       f"gitea/gitea:{versions.GITEA}")
+    sh(
+        "docker",
+        "run",
+        "-d",
+        "--name",
+        NAME,
+        "--network",
+        NET,
+        "--ip",
+        GITEA_IP,
+        "-e",
+        "GITEA__security__INSTALL_LOCK=true",
+        "-e",
+        "GITEA__packages__ENABLED=true",
+        "-e",
+        "GITEA__service__DISABLE_REGISTRATION=true",
+        "-e",
+        f"GITEA__server__ROOT_URL={URL}/",
+        f"gitea/gitea:{versions.GITEA}",
+    )
     for _ in range(60):
         try:
             urllib.request.urlopen(f"{URL}/api/v1/version", timeout=2)
@@ -61,10 +77,47 @@ def gitea():
             time.sleep(2)
     else:
         raise RuntimeError(sh("docker", "logs", NAME, check=False).stdout[-2000:])
-    sh("docker", "exec", "-u", "git", NAME, "gitea", "admin", "user", "create", "--admin", "--username", "outpost",
-       "--password", "Outpost123!", "--email", "outpost@example.com", "--must-change-password=false")
-    token = sh("docker", "exec", "-u", "git", NAME, "gitea", "admin", "user", "generate-access-token",
-               "--username", "outpost", "--token-name", "it", "--scopes", "all", "--raw").stdout.strip().splitlines()[-1]
+    sh(
+        "docker",
+        "exec",
+        "-u",
+        "git",
+        NAME,
+        "gitea",
+        "admin",
+        "user",
+        "create",
+        "--admin",
+        "--username",
+        "outpost",
+        "--password",
+        "Outpost123!",
+        "--email",
+        "outpost@example.com",
+        "--must-change-password=false",
+    )
+    token = (
+        sh(
+            "docker",
+            "exec",
+            "-u",
+            "git",
+            NAME,
+            "gitea",
+            "admin",
+            "user",
+            "generate-access-token",
+            "--username",
+            "outpost",
+            "--token-name",
+            "it",
+            "--scopes",
+            "all",
+            "--raw",
+        )
+        .stdout.strip()
+        .splitlines()[-1]
+    )
     client = GiteaClient(Http(URL, basic=("outpost", token)), "pkgs", public_url=URL)
     client.ensure_org("pkgs")
     yield client
@@ -110,7 +163,9 @@ def test_npm(gitea, tmp_path):
 
 
 def test_debian(gitea, tmp_path):
-    deb = fetch("http://deb.debian.org/debian/pool/main/h/hello/hello_2.10-3_amd64.deb", tmp_path / "hello_2.10-3_amd64.deb")
+    deb = fetch(
+        "http://deb.debian.org/debian/pool/main/h/hello/hello_2.10-3_amd64.deb", tmp_path / "hello_2.10-3_amd64.deb"
+    )
     assert gitea.upload_debian(deb, "bookworm") == "uploaded"
     assert gitea.upload_debian(deb, "bookworm") == "exists"
     assert gitea.debian_has_distro("bookworm") and not gitea.debian_has_distro("noble")
@@ -142,8 +197,9 @@ def test_alpine(gitea, apk_files):
     assert index[:2] == b"\x1f\x8b"
 
 
-@pytest.mark.parametrize("ref", ["python:3.12-slim", "bitnami/redis:7", "ghcr.io/my-org/team/app:1.4",
-                                 "quay.io/my_org/my.app:1"])
+@pytest.mark.parametrize(
+    "ref", ["python:3.12-slim", "bitnami/redis:7", "ghcr.io/my-org/team/app:1.4", "quay.io/my_org/my.app:1"]
+)
 def test_generated_image_names_are_accepted_by_gitea(gitea, tmp_path, ref):
     """Every name Outpost generates must be one real Gitea accepts. The OCI spec is not enough: `library--python`
     is valid OCI and Gitea answers NAME_INVALID. Push a tiny image under the generated name, pull it back, and
@@ -151,7 +207,9 @@ def test_generated_image_names_are_accepted_by_gitea(gitea, tmp_path, ref):
     r = oci.parse_ref(ref)
     layout = oci.build_layout({"/hello": (ref.encode(), 0o644)}, tmp_path / "img", r.short)
     gitea.push_image(layout, "pkgs", r.mirror_name, r.tag)
-    pulled = gitea.registry().pull(oci.Ref(registry="gitea", repo=f"pkgs/{r.mirror_name}", tag=r.tag), tmp_path / "back")
+    pulled = gitea.registry().pull(
+        oci.Ref(registry="gitea", repo=f"pkgs/{r.mirror_name}", tag=r.tag), tmp_path / "back"
+    )
     assert json.loads((pulled / "index.json").read_text())["manifests"]
     packages = gitea.http.get("/api/v1/packages/pkgs?type=container&limit=50").json()
     assert r.mirror_name in {p["name"] for p in packages}
@@ -182,8 +240,20 @@ def test_docker_daemon_pulls_by_gitea_name(gitea):
     name, a tag that only exists in Gitea. A bare `alpine:outpost-only` is not rewritten and must fail."""
     host = URL.split("//")[1]
     sh("docker", "rm", "-f", DIND, check=False)
-    sh("docker", "run", "-d", "--privileged", "--name", DIND, "--network", NET, "-e", "DOCKER_TLS_CERTDIR=", "docker:dind",
-       f"--insecure-registry={host}")
+    sh(
+        "docker",
+        "run",
+        "-d",
+        "--privileged",
+        "--name",
+        DIND,
+        "--network",
+        NET,
+        "-e",
+        "DOCKER_TLS_CERTDIR=",
+        "docker:dind",
+        f"--insecure-registry={host}",
+    )
     for _ in range(60):
         if sh("docker", "exec", DIND, "docker", "info", check=False).returncode == 0:
             break
@@ -191,7 +261,17 @@ def test_docker_daemon_pulls_by_gitea_name(gitea):
     assert "Registry Mirrors" not in sh("docker", "exec", DIND, "docker", "info").stdout
     pulled = sh("docker", "exec", DIND, "docker", "pull", f"{host}/pkgs/library/alpine:outpost-only", check=False)
     assert pulled.returncode == 0, pulled.stderr
-    out = sh("docker", "exec", DIND, "docker", "run", "--rm", f"{host}/pkgs/library/alpine:outpost-only", "cat", "/etc/alpine-release").stdout
+    out = sh(
+        "docker",
+        "exec",
+        DIND,
+        "docker",
+        "run",
+        "--rm",
+        f"{host}/pkgs/library/alpine:outpost-only",
+        "cat",
+        "/etc/alpine-release",
+    ).stdout
     assert out.startswith("3.20")
     assert sh("docker", "exec", DIND, "docker", "pull", "alpine:outpost-only", check=False).returncode != 0
 
@@ -205,7 +285,8 @@ def test_config_image_is_usable_in_a_build(gitea, tmp_path):
     (tmp_path / "ctx").mkdir()
     (tmp_path / "ctx" / "Dockerfile").write_text(
         f"FROM {host}/pkgs/config:latest AS config\nFROM {host}/pkgs/library/alpine:3.20\nCOPY --from=config / /\n"
-        "CMD cat /etc/pip.conf /etc/apt/sources.list.d/outpost.list\n")
+        "CMD cat /etc/pip.conf /etc/apt/sources.list.d/outpost.list\n"
+    )
     # build inside dind, whose daemon trusts the plain-http Gitea; both images are named by their Gitea copy
     sh("docker", "cp", str(tmp_path / "ctx"), f"{DIND}:/ctx")
     sh("docker", "exec", DIND, "docker", "build", "-q", "-t", "outpost-it-config", "/ctx")
@@ -222,15 +303,21 @@ def test_apk_add_from_gitea_with_the_config_image_key(gitea, apk_files):
     info = GiteaInfo(name="gitea.internal", ip="10.0.0.5", org="pkgs")
     files = clients.config_image_files(info, "CA PEM", None, [], apk_key=gitea.alpine_key(), apk_branches=["v3.20"])
     key_paths = [p for p in files if p.startswith("/etc/apk/keys/")]
-    assert len(key_paths) == 1 and files["/etc/apk/repositories"][0] == b"https://gitea.internal/api/packages/pkgs/alpine/v3.20/main\n"
-    layout = oci.build_layout(files, Path(tempfile_dir := tempfile.mkdtemp(prefix="outpost-it-apk-")) / "config", info.config_image)
+    assert (
+        len(key_paths) == 1
+        and files["/etc/apk/repositories"][0] == b"https://gitea.internal/api/packages/pkgs/alpine/v3.20/main\n"
+    )
+    layout = oci.build_layout(
+        files, Path(tempfile_dir := tempfile.mkdtemp(prefix="outpost-it-apk-")) / "config", info.config_image
+    )
     gitea.push_image(layout, "pkgs", "config", "apk-test")
     ctx = Path(tempfile_dir) / "ctx"
     ctx.mkdir()
     (ctx / "Dockerfile").write_text(
         f"FROM {host}/pkgs/config:apk-test AS config\nFROM {host}/pkgs/library/alpine:3.20\nCOPY --from=config / /\n"
         f"RUN echo http://{host}/api/packages/pkgs/alpine/v3.20/main > /etc/apk/repositories && apk update && apk add zlib\n"
-        "CMD apk info zlib && ls /etc/apk/keys\n")
+        "CMD apk info zlib && ls /etc/apk/keys\n"
+    )
     sh("docker", "cp", str(ctx), f"{DIND}:/ctx-apk")
     built = sh("docker", "exec", DIND, "docker", "build", "-q", "-t", "outpost-it-apk", "/ctx-apk", check=False)
     assert built.returncode == 0, built.stderr[-2000:]

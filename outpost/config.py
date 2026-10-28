@@ -17,11 +17,11 @@ class ConfigError(Exception):
 
 @dataclass
 class GiteaConfig:
-    host: str                      # SSH alias from ~/.ssh/config
-    name: str                      # DNS name every node will use, e.g. gitea.internal
-    ip: str | None = None          # detected over SSH when missing
-    org: str = "pkgs"              # Gitea organisation that holds pip, npm, apt, apk, rpm and files
-    user: str = "outpost"          # Gitea admin user Outpost creates
+    host: str  # SSH alias from ~/.ssh/config
+    name: str  # DNS name every node will use, e.g. gitea.internal
+    ip: str | None = None  # detected over SSH when missing
+    org: str = "pkgs"  # Gitea organisation that holds pip, npm, apt, apk, rpm and files
+    user: str = "outpost"  # Gitea admin user Outpost creates
     allow: list[str] = field(default_factory=list)  # extra CIDRs the Gitea host may reach
 
     @property
@@ -32,21 +32,22 @@ class GiteaConfig:
 @dataclass
 class InfraConfig:
     name: str
-    type: str                      # compose | swarm | k3s
-    nodes: list[str]               # SSH aliases
+    type: str  # compose | swarm | k3s
+    nodes: list[str]  # SSH aliases
     allow: list[str] = field(default_factory=list)  # extra CIDRs the nodes may reach
-    args: str = ""                 # extra flags for `k3s server` or `docker swarm init`
+    args: str = ""  # extra flags for `k3s server` or `docker swarm init`
 
 
 @dataclass
 class ProxyConfig:
     """The optional egress proxy: one tinyproxy, sealed like everything else, that may reach only the
     names in `allow` (see docs/architecture/proxy.md)."""
-    host: str                      # SSH alias of the proxy host; servers.yml default: the Gitea host
+
+    host: str  # SSH alias of the proxy host; servers.yml default: the Gitea host
     port: int = 3128
-    allow: list[str] = field(default_factory=list)   # host names, or "*.domain" for a domain and its subdomains
-    distro: str | None = None      # apt codename or rpm distro of the proxy host, for `outpost needs` / `fetch`
-    name: str = "proxy.internal"   # the name nodes use when the proxy is not on the Gitea host
+    allow: list[str] = field(default_factory=list)  # host names, or "*.domain" for a domain and its subdomains
+    distro: str | None = None  # apt codename or rpm distro of the proxy host, for `outpost needs` / `fetch`
+    name: str = "proxy.internal"  # the name nodes use when the proxy is not on the Gitea host
 
 
 @dataclass
@@ -54,8 +55,8 @@ class Servers:
     gitea: GiteaConfig
     infrastructures: dict[str, InfraConfig]
     ssh_config: Path | None = None  # alternative ssh config file, relative to the platform folder
-    arch: str = "amd64"             # CPU architecture of every server: amd64 or arm64
-    egress_proxy: ProxyConfig | None = None   # the named exceptions, when servers.yml has an egress_proxy section
+    arch: str = "amd64"  # CPU architecture of every server: amd64 or arm64
+    egress_proxy: ProxyConfig | None = None  # the named exceptions, when servers.yml has an egress_proxy section
 
     def infra(self, name: str) -> InfraConfig:
         if name not in self.infrastructures:
@@ -109,15 +110,23 @@ def proxy_allow_entry(value) -> str:
     firewall handles addresses), no schemes, ports or paths (the proxy matches the host name only)."""
     text = str(value).strip().lower()
     if "://" in text or "/" in text or ":" in text:
-        raise ConfigError(f"egress_proxy.allow: {value!r} must be a host name such as api.twilio.com, without scheme, port or path")
+        raise ConfigError(
+            f"egress_proxy.allow: {value!r} must be a host name such as api.twilio.com, without scheme, port or path"
+        )
     bare = text[2:] if text.startswith("*.") else text
     if text.startswith("*.") and "." not in bare and re.fullmatch(r"[a-z0-9-]+", bare):
-        raise ConfigError(f"egress_proxy.allow: {value!r} would allow a whole top-level domain; name the domain (*.sendgrid.net)")
+        raise ConfigError(
+            f"egress_proxy.allow: {value!r} would allow a whole top-level domain; name the domain (*.sendgrid.net)"
+        )
     if not _HOSTNAME.fullmatch(bare):
         if re.fullmatch(r"[0-9.]+", bare):
-            raise ConfigError(f"egress_proxy.allow: {value!r} is an address; the proxy allows names. "
-                              "Put addresses in an infrastructure's `allow:` list instead")
-        raise ConfigError(f"egress_proxy.allow: {value!r} is not a host name (api.twilio.com) or a wildcard (*.sendgrid.net)")
+            raise ConfigError(
+                f"egress_proxy.allow: {value!r} is an address; the proxy allows names. "
+                "Put addresses in an infrastructure's `allow:` list instead"
+            )
+        raise ConfigError(
+            f"egress_proxy.allow: {value!r} is not a host name (api.twilio.com) or a wildcard (*.sendgrid.net)"
+        )
     return text
 
 
@@ -133,7 +142,9 @@ def _load_proxy(data, gitea: GiteaConfig) -> ProxyConfig | None:
     if isinstance(allow, str):
         allow = [allow]
     if not isinstance(allow, list) or not allow:
-        raise ConfigError("egress_proxy.allow must list at least one host name, e.g. [api.twilio.com, \"*.sendgrid.net\"]")
+        raise ConfigError(
+            'egress_proxy.allow must list at least one host name, e.g. [api.twilio.com, "*.sendgrid.net"]'
+        )
     port = data.get("port", 3128)
     if isinstance(port, bool) or not isinstance(port, int) or not 1 <= port <= 65535:
         raise ConfigError(f"egress_proxy.port must be a number from 1 to 65535 (got {port!r})")
@@ -178,7 +189,9 @@ def load_servers(path: Path) -> Servers:
         if not isinstance(nodes, list) or not nodes:
             raise ConfigError(f"infrastructure '{name}': `nodes:` must list at least one SSH alias")
         infras[str(name)] = InfraConfig(
-            name=str(name), type=itype, nodes=[str(n) for n in nodes],
+            name=str(name),
+            type=itype,
+            nodes=[str(n) for n in nodes],
             allow=[str(x) for x in spec.get("allow", [])],
             args=str(spec.get("args", "") or ""),
         )
@@ -201,4 +214,14 @@ def load_mirrors(path: Path) -> Mirrors:
     return Mirrors(**{k: str(v).rstrip("/") for k, v in data.items()})
 
 
-__all__ = ["ConfigError", "GiteaConfig", "InfraConfig", "ProxyConfig", "Servers", "Mirrors", "load_servers", "load_mirrors", "versions"]
+__all__ = [
+    "ConfigError",
+    "GiteaConfig",
+    "InfraConfig",
+    "ProxyConfig",
+    "Servers",
+    "Mirrors",
+    "load_servers",
+    "load_mirrors",
+    "versions",
+]

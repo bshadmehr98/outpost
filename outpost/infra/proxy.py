@@ -57,26 +57,33 @@ import shlex
 
 from .. import versions
 from ..config import ConfigError, ProxyConfig
-from ..fetch import apt as aptmod, rpm as rpmmod
+from ..fetch import apt as aptmod
+from ..fetch import rpm as rpmmod
 from . import clients, common, egress
 from .clients import GiteaInfo, ProxyInfo
 
 USER = common.PROXY_USER
-CONF_PATH = "/etc/tinyproxy/tinyproxy.conf"          # the only configuration the AppArmor profile lets it read
-ALLOW_PATH = "/usr/share/tinyproxy/outpost.allow"   # /usr/share/tinyproxy/* is readable; /etc/tinyproxy/* is not
+CONF_PATH = "/etc/tinyproxy/tinyproxy.conf"  # the only configuration the AppArmor profile lets it read
+ALLOW_PATH = "/usr/share/tinyproxy/outpost.allow"  # /usr/share/tinyproxy/* is readable; /etc/tinyproxy/* is not
 LOG_DIR = "/var/log/tinyproxy"
-LOG_PATH = f"{LOG_DIR}/tinyproxy.log"                # the only log file the profile lets it write
+LOG_PATH = f"{LOG_DIR}/tinyproxy.log"  # the only log file the profile lets it write
 UNIT_PATH = "/etc/systemd/system/outpost-proxy.service"
-LOGROTATE_PATH = "/etc/logrotate.d/tinyproxy"       # replaces the package's, which reloads the masked stock unit
-OLD_PATHS = ("/etc/outpost/proxy.conf", "/etc/outpost/proxy.allow", "/etc/logrotate.d/outpost-proxy")   # written by earlier versions
+LOGROTATE_PATH = "/etc/logrotate.d/tinyproxy"  # replaces the package's, which reloads the masked stock unit
+OLD_PATHS = (
+    "/etc/outpost/proxy.conf",
+    "/etc/outpost/proxy.allow",
+    "/etc/logrotate.d/outpost-proxy",
+)  # written by earlier versions
 STOCK_UNIT = "tinyproxy.service"
 PACKAGE = "tinyproxy"
-REFUSAL_PROBES = ("example.com", "example.net", "example.org")   # documentation domains, IANA reserved
+REFUSAL_PROBES = ("example.com", "example.net", "example.org")  # documentation domains, IANA reserved
 
 # tinyproxy opens its log after dropping to USER, and the package's postinst gives the directory to its own
 # user (tinyproxy:adm, 0750) on every upgrade; this runs as root before each start and hands it back
-LOG_PREP = (f"mkdir -p {LOG_DIR} && chown {USER}:{USER} {LOG_DIR} && chmod 0750 {LOG_DIR} && "
-            f"touch {LOG_PATH} && chown {USER}:{USER} {LOG_PATH} && chmod 0640 {LOG_PATH}")
+LOG_PREP = (
+    f"mkdir -p {LOG_DIR} && chown {USER}:{USER} {LOG_DIR} && chmod 0750 {LOG_DIR} && "
+    f"touch {LOG_PATH} && chown {USER}:{USER} {LOG_PATH} && chmod 0640 {LOG_PATH}"
+)
 
 LOGROTATE = f"""{LOG_PATH} {{
     weekly
@@ -90,6 +97,7 @@ LOGROTATE = f"""{LOG_PATH} {{
 
 
 # -- the allow list -----------------------------------------------------------------
+
 
 def allow_regex(entry: str) -> str:
     """`api.twilio.com` -> `^api\\.twilio\\.com$`; `*.sendgrid.net` -> `(^|\\.)sendgrid\\.net$` (the domain
@@ -209,12 +217,22 @@ def info(cfg: ProxyConfig, gitea: GiteaInfo, gitea_host: str, ip: str | None = N
     address = gitea.ip if on_gitea else ip
     if not address:
         raise RuntimeError(f"the egress proxy host {cfg.host} has no known address; run `outpost proxy setup`")
-    no_proxy = [gitea.name, gitea.ip, "localhost", "127.0.0.1", *clients.PRIVATE_NETS] + ([] if on_gitea else [name, address])
-    return ProxyInfo(url=f"http://{address if on_gitea else name}:{cfg.port}", no_proxy=",".join(dict.fromkeys(no_proxy)), ip=address, name=name,
-                     allowed=tuple(cfg.allow), host=cfg.host, on_gitea=on_gitea)
+    no_proxy = [gitea.name, gitea.ip, "localhost", "127.0.0.1", *clients.PRIVATE_NETS] + (
+        [] if on_gitea else [name, address]
+    )
+    return ProxyInfo(
+        url=f"http://{address if on_gitea else name}:{cfg.port}",
+        no_proxy=",".join(dict.fromkeys(no_proxy)),
+        ip=address,
+        name=name,
+        allowed=tuple(cfg.allow),
+        host=cfg.host,
+        on_gitea=on_gitea,
+    )
 
 
 # -- getting tinyproxy into the box ---------------------------------------------------
+
 
 def package_need(cfg: ProxyConfig, facts: dict | None) -> tuple[str, str]:
     """(kind, distro) of the proxy host: `egress_proxy.distro`, else what `outpost hosts` cached about it."""
@@ -224,23 +242,29 @@ def package_need(cfg: ProxyConfig, facts: dict | None) -> tuple[str, str]:
         try:
             rpmmod.split(cfg.distro)
         except ValueError:
-            raise ConfigError(f"egress_proxy.distro {cfg.distro!r} is neither a Debian or Ubuntu codename (bookworm, noble) "
-                              "nor an rpm distro (rocky9, alma9, fedora40, stream9)") from None
+            raise ConfigError(
+                f"egress_proxy.distro {cfg.distro!r} is neither a Debian or Ubuntu codename (bookworm, noble) "
+                "nor an rpm distro (rocky9, alma9, fedora40, stream9)"
+            ) from None
         return "rpm", cfg.distro
     if facts and facts.get("id"):
         family = common.os_family(facts)
         if family == "apk":
-            raise ConfigError(f"the egress proxy host {cfg.host} runs Alpine, which Outpost does not support as a proxy host; "
-                              "put the proxy on a Debian, Ubuntu or RHEL-family host (egress_proxy.host)")
+            raise ConfigError(
+                f"the egress proxy host {cfg.host} runs Alpine, which Outpost does not support as a proxy host; "
+                "put the proxy on a Debian, Ubuntu or RHEL-family host (egress_proxy.host)"
+            )
         if family == "apt" and facts.get("codename"):
             return "apt", facts["codename"]
         if family == "rpm":
             distro = rpmmod.distro_for_host(facts.get("id", ""), facts.get("version_id", ""))
             if distro:
                 return "rpm", distro
-    raise ConfigError(f"Outpost does not know which system the egress proxy host {cfg.host} runs, so it cannot fetch tinyproxy "
-                      "for it. Set `distro:` under egress_proxy in servers.yml (noble, bookworm, rocky9...) or run "
-                      "`outpost hosts --refresh` once so Outpost can ask the host.")
+    raise ConfigError(
+        f"Outpost does not know which system the egress proxy host {cfg.host} runs, so it cannot fetch tinyproxy "
+        "for it. Set `distro:` under egress_proxy in servers.yml (noble, bookworm, rocky9...) or run "
+        "`outpost hosts --refresh` once so Outpost can ask the host."
+    )
 
 
 def add_package(needs, cfg: ProxyConfig | None, facts: dict | None):
@@ -255,6 +279,7 @@ def add_package(needs, cfg: ProxyConfig | None, facts: dict | None):
 
 # -- setup --------------------------------------------------------------------------
 
+
 def _distro_of(family: str, facts: dict) -> str:
     if family == "rpm":
         return rpmmod.distro_for_host(facts.get("id", ""), facts.get("version_id", "")) or facts.get("id", "?")
@@ -262,12 +287,16 @@ def _distro_of(family: str, facts: dict) -> str:
 
 
 INSTALL = {
-    "apt": ("apt-get update -qq 2>&1 | tail -3\n"
-            f"if ! apt-cache show {PACKAGE} >/dev/null 2>&1; then echo OUTPOST-NO-TINYPROXY; exit 0; fi\n"
-            f"DEBIAN_FRONTEND=noninteractive apt-get install -y -q -o Dpkg::Options::=--force-confold {PACKAGE} 2>&1 | tail -3\n"),
-    "rpm": ("dnf -q makecache 2>&1 | tail -3\n"
-            f"if ! dnf -q info {PACKAGE} >/dev/null 2>&1; then echo OUTPOST-NO-TINYPROXY; exit 0; fi\n"
-            f"dnf install -y -q {PACKAGE} 2>&1 | tail -3\n"),
+    "apt": (
+        "apt-get update -qq 2>&1 | tail -3\n"
+        f"if ! apt-cache show {PACKAGE} >/dev/null 2>&1; then echo OUTPOST-NO-TINYPROXY; exit 0; fi\n"
+        f"DEBIAN_FRONTEND=noninteractive apt-get install -y -q -o Dpkg::Options::=--force-confold {PACKAGE} 2>&1 | tail -3\n"
+    ),
+    "rpm": (
+        "dnf -q makecache 2>&1 | tail -3\n"
+        f"if ! dnf -q info {PACKAGE} >/dev/null 2>&1; then echo OUTPOST-NO-TINYPROXY; exit 0; fi\n"
+        f"dnf install -y -q {PACKAGE} 2>&1 | tail -3\n"
+    ),
 }
 REGISTRY = {"apt": ("Debian", "apt"), "rpm": ("RPM", "rpm")}
 
@@ -275,26 +304,32 @@ REGISTRY = {"apt": ("Debian", "apt"), "rpm": ("RPM", "rpm")}
 def diagnose_script(family: str, gitea: GiteaInfo, distro: str) -> str:
     """What the package manager saw when it found no tinyproxy: the refresh in full, the package source
     Outpost wrote, what the index says about tinyproxy, and whether Gitea answers for the distro at all."""
-    keep_going = "set +e +o pipefail\n"   # Host.run starts with set -euo pipefail; one failing probe must not end the report
+    keep_going = (
+        "set +e +o pipefail\n"  # Host.run starts with set -euo pipefail; one failing probe must not end the report
+    )
     if family == "rpm":
         url = f"{gitea.rpm_repo}/{distro}/repodata/repomd.xml"
-        return (keep_going +
-                f"echo '--- dnf makecache'; dnf makecache 2>&1 | tail -20\n"
-                f"echo '--- {clients.PATH_RPM_REPO}'; cat {clients.PATH_RPM_REPO} 2>&1\n"
-                f"echo '--- dnf repolist'; dnf repolist -v 2>&1 | tail -20\n"
-                f"echo '--- dnf info {PACKAGE}'; dnf info {PACKAGE} 2>&1 | tail -10\n"
-                f"echo '--- {url}'; curl --cacert {clients.PATH_CA} -sS -o /dev/null -w '%{{http_code}}\\n' --max-time 10 {shlex.quote(url)} 2>&1\n")
-    url = f"{gitea.apt_repo}/dists/{distro}/Release"
-    return (keep_going +
-            f"echo '--- apt-get update'; apt-get update 2>&1 | tail -20\n"
-            f"echo '--- /etc/apt/sources.list.d/outpost.list'; cat /etc/apt/sources.list.d/outpost.list 2>&1\n"
-            f"echo '--- other sources'; ls /etc/apt/sources.list /etc/apt/sources.list.d/ 2>&1\n"
-            f"echo '--- apt-cache policy {PACKAGE}'; apt-cache policy {PACKAGE} 2>&1\n"
+        return (
+            keep_going + f"echo '--- dnf makecache'; dnf makecache 2>&1 | tail -20\n"
+            f"echo '--- {clients.PATH_RPM_REPO}'; cat {clients.PATH_RPM_REPO} 2>&1\n"
+            f"echo '--- dnf repolist'; dnf repolist -v 2>&1 | tail -20\n"
+            f"echo '--- dnf info {PACKAGE}'; dnf info {PACKAGE} 2>&1 | tail -10\n"
             f"echo '--- {url}'; curl --cacert {clients.PATH_CA} -sS -o /dev/null -w '%{{http_code}}\\n' --max-time 10 {shlex.quote(url)} 2>&1\n"
-            f"echo '--- getent hosts {gitea.name}'; getent hosts {shlex.quote(gitea.name)} 2>&1\n")
+        )
+    url = f"{gitea.apt_repo}/dists/{distro}/Release"
+    return (
+        keep_going + f"echo '--- apt-get update'; apt-get update 2>&1 | tail -20\n"
+        f"echo '--- /etc/apt/sources.list.d/outpost.list'; cat /etc/apt/sources.list.d/outpost.list 2>&1\n"
+        f"echo '--- other sources'; ls /etc/apt/sources.list /etc/apt/sources.list.d/ 2>&1\n"
+        f"echo '--- apt-cache policy {PACKAGE}'; apt-cache policy {PACKAGE} 2>&1\n"
+        f"echo '--- {url}'; curl --cacert {clients.PATH_CA} -sS -o /dev/null -w '%{{http_code}}\\n' --max-time 10 {shlex.quote(url)} 2>&1\n"
+        f"echo '--- getent hosts {gitea.name}'; getent hosts {shlex.quote(gitea.name)} 2>&1\n"
+    )
 
 
-def setup(host, ctx: common.NodeContext, cfg: ProxyConfig, *, egress_allow: list[str], client_allow: list[str], log=print) -> dict:
+def setup(
+    host, ctx: common.NodeContext, cfg: ProxyConfig, *, egress_allow: list[str], client_allow: list[str], log=print
+) -> dict:
     """Install and seal the proxy on `host`. ctx.proxy says where it is; on the Gitea host nothing of a
     node is prepared (it already resolves its own name, and reaches Gitea on itself), elsewhere the host
     is prepared like a node first, so it trusts the CA, resolves Gitea and gets packages from it."""
@@ -306,13 +341,19 @@ def setup(host, ctx: common.NodeContext, cfg: ProxyConfig, *, egress_allow: list
     facts = host.facts()
     family = common.os_family(facts)
     if family == "apk":
-        raise RuntimeError(f"[{host.alias}] runs Alpine, which Outpost does not support as an egress proxy host. "
-                           "Put the proxy on a Debian, Ubuntu or RHEL-family host (egress_proxy.host in servers.yml).")
+        raise RuntimeError(
+            f"[{host.alias}] runs Alpine, which Outpost does not support as an egress proxy host. "
+            "Put the proxy on a Debian, Ubuntu or RHEL-family host (egress_proxy.host in servers.yml)."
+        )
     want = versions.names()["uname"]
     if facts.get("arch") and facts["arch"] != want:
-        raise RuntimeError(f"[{host.alias}] is {facts['arch']} but this platform is built for {want} (arch: {versions.ARCH} in servers.yml).")
+        raise RuntimeError(
+            f"[{host.alias}] is {facts['arch']} but this platform is built for {want} (arch: {versions.ARCH} in servers.yml)."
+        )
     distro = _distro_of(family, facts)
-    log(f"  [{host.alias}] {facts.get('id', '?')} {distro}, proxy {p.url} ({'on the Gitea host' if p.on_gitea else 'its own host'})")
+    log(
+        f"  [{host.alias}] {facts.get('id', '?')} {distro}, proxy {p.url} ({'on the Gitea host' if p.on_gitea else 'its own host'})"
+    )
 
     log(f"==> [2/6] package sources: Gitea's {REGISTRY[family][0]} registry")
     if p.on_gitea:
@@ -330,14 +371,21 @@ def setup(host, ctx: common.NodeContext, cfg: ProxyConfig, *, egress_allow: list
         name, kind = REGISTRY[family]
         seen = host.run(diagnose_script(family, g, distro), timeout=300)
         detail = (seen.stdout + seen.stderr).strip()[-3000:]
-        raise RuntimeError(f"Gitea's {name} registry has no {PACKAGE} for {distro}. Run `outpost fetch --only {kind}` and "
-                           f"`outpost upload` (with egress_proxy in servers.yml, fetch adds {PACKAGE} for {distro} by itself), "
-                           f"then `outpost proxy setup` again.\nWhat [{host.alias}] sees:\n{detail}")
+        raise RuntimeError(
+            f"Gitea's {name} registry has no {PACKAGE} for {distro}. Run `outpost fetch --only {kind}` and "
+            f"`outpost upload` (with egress_proxy in servers.yml, fetch adds {PACKAGE} for {distro} by itself), "
+            f"then `outpost proxy setup` again.\nWhat [{host.alias}] sees:\n{detail}"
+        )
     if not out.ok:
-        raise RuntimeError(f"[{host.alias}] installing {PACKAGE} from Gitea failed: {(out.stderr or out.stdout).strip()[-400:]}")
-    found = host.run(f"systemctl disable --now {STOCK_UNIT} >/dev/null 2>&1 || true\n"
-                     f"command -v {PACKAGE} || ls /usr/sbin/{PACKAGE} /usr/bin/{PACKAGE} 2>/dev/null | head -1 || true\n"
-                     f"{PACKAGE} -v 2>&1 | head -1 || true", raise_on_failure=True).stdout.split()
+        raise RuntimeError(
+            f"[{host.alias}] installing {PACKAGE} from Gitea failed: {(out.stderr or out.stdout).strip()[-400:]}"
+        )
+    found = host.run(
+        f"systemctl disable --now {STOCK_UNIT} >/dev/null 2>&1 || true\n"
+        f"command -v {PACKAGE} || ls /usr/sbin/{PACKAGE} /usr/bin/{PACKAGE} 2>/dev/null | head -1 || true\n"
+        f"{PACKAGE} -v 2>&1 | head -1 || true",
+        raise_on_failure=True,
+    ).stdout.split()
     binary = next((w for w in found if w.startswith("/")), f"/usr/bin/{PACKAGE}")
     version = next((w for w in reversed(found) if re.fullmatch(r"\d+\.\d+(\.\d+)?\S*", w)), "")
     log(f"  [{host.alias}] {PACKAGE} {version or '(version unknown)'} at {binary}, stock {STOCK_UNIT} masked")
@@ -353,37 +401,61 @@ def setup(host, ctx: common.NodeContext, cfg: ProxyConfig, *, egress_allow: list
     host.write(CONF_PATH, conf(p.ip, cfg.port, client_allow, version or "1.11.1"))
     host.write(ALLOW_PATH, allow_file(list(cfg.allow), g.name))
     host.write(LOGROTATE_PATH, LOGROTATE)
-    readable = host.run(f"runuser -u {USER} -- test -r {CONF_PATH} && runuser -u {USER} -- test -r {ALLOW_PATH} && "
-                        f"runuser -u {USER} -- test -w {LOG_PATH}")
+    readable = host.run(
+        f"runuser -u {USER} -- test -r {CONF_PATH} && runuser -u {USER} -- test -r {ALLOW_PATH} && "
+        f"runuser -u {USER} -- test -w {LOG_PATH}"
+    )
     if not readable.ok:
-        raise RuntimeError(f"[{host.alias}] {USER} cannot read its configuration or write its log:\n{_access_report(host)}")
+        raise RuntimeError(
+            f"[{host.alias}] {USER} cannot read its configuration or write its log:\n{_access_report(host)}"
+        )
     log(f"  [{host.alias}] allows {', '.join(cfg.allow)} (and {g.name}); everything else gets 403")
 
     log("==> [5/6] service outpost-proxy")
     host.write(UNIT_PATH, unit(binary))
-    started = host.run("systemctl daemon-reload && systemctl enable outpost-proxy >/dev/null 2>&1; "
-                       "systemctl restart outpost-proxy && sleep 1 && systemctl is-active outpost-proxy")
+    started = host.run(
+        "systemctl daemon-reload && systemctl enable outpost-proxy >/dev/null 2>&1; "
+        "systemctl restart outpost-proxy && sleep 1 && systemctl is-active outpost-proxy"
+    )
     if not started.ok:
         journal = host.run("journalctl -u outpost-proxy -n 15 --no-pager 2>&1 || true").stdout.strip()
-        raise RuntimeError(f"[{host.alias}] outpost-proxy did not start:\n{journal[-800:]}\n{_access_report(host, binary)}")
+        raise RuntimeError(
+            f"[{host.alias}] outpost-proxy did not start:\n{journal[-800:]}\n{_access_report(host, binary)}"
+        )
 
     log("==> [6/6] sealing, with the one exception for the proxy's own user")
     egress.install(host, g.ip, egress_allow, proxy_user=USER)
-    log(f"  [{host.alias}] egress: {egress.seal(host, 'proxy setup')}; {USER} may open TCP 443 and 80, nothing else changed")
-    return {"host": host.alias, "ip": p.ip, "port": cfg.port, "name": p.name, "url": p.url, "on_gitea": p.on_gitea,
-            "allow": list(cfg.allow), "tinyproxy": version, "family": family, "distro": distro}
+    log(
+        f"  [{host.alias}] egress: {egress.seal(host, 'proxy setup')}; {USER} may open TCP 443 and 80, nothing else changed"
+    )
+    return {
+        "host": host.alias,
+        "ip": p.ip,
+        "port": cfg.port,
+        "name": p.name,
+        "url": p.url,
+        "on_gitea": p.on_gitea,
+        "allow": list(cfg.allow),
+        "tinyproxy": version,
+        "family": family,
+        "distro": distro,
+    }
 
 
 def access_script(binary: str | None = None) -> str:
     """Why tinyproxy may not get at its files: every directory on the way with its mode, what the proxy user
     can read, and, with `binary`, tinyproxy run by hand as that user outside systemd's sandbox for two seconds."""
-    lines = ["set +e +o pipefail",
-             *[f"echo '--- namei -l {p}'; namei -l {p} 2>&1" for p in (CONF_PATH, ALLOW_PATH, LOG_PATH)],
-             f"echo '--- id {USER}'; id {USER} 2>&1",
-             f"echo '--- as {USER}'; runuser -u {USER} -- head -c 80 {CONF_PATH} >/dev/null 2>/tmp/outpost-proxy-read.err && echo readable || cat /tmp/outpost-proxy-read.err"]
+    lines = [
+        "set +e +o pipefail",
+        *[f"echo '--- namei -l {p}'; namei -l {p} 2>&1" for p in (CONF_PATH, ALLOW_PATH, LOG_PATH)],
+        f"echo '--- id {USER}'; id {USER} 2>&1",
+        f"echo '--- as {USER}'; runuser -u {USER} -- head -c 80 {CONF_PATH} >/dev/null 2>/tmp/outpost-proxy-read.err && echo readable || cat /tmp/outpost-proxy-read.err",
+    ]
     if binary:
-        lines.append(f"echo '--- {binary} -d -c {CONF_PATH} as {USER}, outside systemd'; "
-                     f"timeout 2 runuser -u {USER} -- {binary} -d -c {CONF_PATH} 2>&1 | tail -5; echo \"exit ${{PIPESTATUS[0]}}\"")
+        lines.append(
+            f"echo '--- {binary} -d -c {CONF_PATH} as {USER}, outside systemd'; "
+            f'timeout 2 runuser -u {USER} -- {binary} -d -c {CONF_PATH} 2>&1 | tail -5; echo "exit ${{PIPESTATUS[0]}}"'
+        )
         # the file is readable by the user but tinyproxy cannot open it: tell a path-based MAC (AppArmor on the
         # kernel, which a privileged container shares) from anything else
         lines += [
@@ -395,7 +467,9 @@ def access_script(binary: str | None = None) -> str:
             "grep -i tinyproxy /sys/kernel/security/apparmor/profiles 2>&1 | head -5; cat /proc/self/attr/current 2>&1",
             "echo '--- kernel denials'; dmesg 2>&1 | grep -iE 'denied|apparmor' | tail -8",
         ]
-        lines.append("echo '--- systemctl show outpost-proxy'; systemctl show outpost-proxy -p User -p ProtectSystem -p ProtectHome -p PrivateTmp 2>&1")
+        lines.append(
+            "echo '--- systemctl show outpost-proxy'; systemctl show outpost-proxy -p User -p ProtectSystem -p ProtectHome -p PrivateTmp 2>&1"
+        )
     return "\n".join(lines) + "\n"
 
 
@@ -406,34 +480,53 @@ def _access_report(host, binary: str | None = None) -> str:
 
 # -- verify -------------------------------------------------------------------------
 
+
 def host_checks(ctx: common.NodeContext, cfg: ProxyConfig) -> list[tuple[str, str]]:
     """Checks on the proxy host itself; each is one shell command that must succeed (verify.script)."""
     from .verify import by_family
+
     g = ctx.gitea
     target = probe_name(list(cfg.allow))
     owner = f"-p tcp -m owner --uid-owner {USER} -m tcp --dport 443 -j RETURN"
     return [
         ("proxy service active", "systemctl is-active outpost-proxy"),
-        ("tinyproxy installed from gitea", by_family(
-            apt=f"dpkg -s {PACKAGE} >/dev/null 2>&1 && apt-cache policy {PACKAGE} | grep -q {shlex.quote(g.apt_repo)} && {PACKAGE} -v",
-            apk="echo 'Alpine is not supported as a proxy host'; false",
-            rpm=f"rpm -q {PACKAGE} && dnf -q list --installed {PACKAGE} 2>/dev/null | grep -q '@outpost-'")),
-        ("proxy allow list is the current one", f"printf %s {shlex.quote(allow_file(list(cfg.allow), g.name))} | cmp -s - {ALLOW_PATH} && echo {len(cfg.allow)} names"),
-        ("egress sealed", f"test \"$({egress.SCRIPT_PATH} status)\" = sealed"),
-        ("proxy exception only for its own user",
-         f"iptables -C {egress.OUT_CHAIN} {owner} && iptables -t security -C {egress.OUT_CHAIN} {owner} && "
-         f"test \"$(iptables -S {egress.OUT_CHAIN} | grep -c -- '-j RETURN')\" = 2"),
-        ("public internet rejected for other users", "! curl --noproxy '*' -sS --max-time 5 https://pypi.org/simple/ >/dev/null 2>&1"),
-        ("proxy user can reach allowed names",
-         f"code=$(runuser -u {USER} -- curl --noproxy '*' -sS --max-time 10 -o /dev/null -w '%{{http_code}}' https://{target}/ 2>/dev/null); "
-         f"case \"$code\" in [234]??) echo \"{target} -> $code\" ;; *) echo \"{target} -> ${{code:-no answer}}\"; false ;; esac"),
-        ("proxy log exists", f"test -f {LOG_PATH} && echo \"$(wc -l < {LOG_PATH}) lines in {LOG_PATH}\""),
+        (
+            "tinyproxy installed from gitea",
+            by_family(
+                apt=f"dpkg -s {PACKAGE} >/dev/null 2>&1 && apt-cache policy {PACKAGE} | grep -q {shlex.quote(g.apt_repo)} && {PACKAGE} -v",
+                apk="echo 'Alpine is not supported as a proxy host'; false",
+                rpm=f"rpm -q {PACKAGE} && dnf -q list --installed {PACKAGE} 2>/dev/null | grep -q '@outpost-'",
+            ),
+        ),
+        (
+            "proxy allow list is the current one",
+            f"printf %s {shlex.quote(allow_file(list(cfg.allow), g.name))} | cmp -s - {ALLOW_PATH} && echo {len(cfg.allow)} names",
+        ),
+        ("egress sealed", f'test "$({egress.SCRIPT_PATH} status)" = sealed'),
+        (
+            "proxy exception only for its own user",
+            f"iptables -C {egress.OUT_CHAIN} {owner} && iptables -t security -C {egress.OUT_CHAIN} {owner} && "
+            f"test \"$(iptables -S {egress.OUT_CHAIN} | grep -c -- '-j RETURN')\" = 2",
+        ),
+        (
+            "public internet rejected for other users",
+            "! curl --noproxy '*' -sS --max-time 5 https://pypi.org/simple/ >/dev/null 2>&1",
+        ),
+        (
+            "proxy user can reach allowed names",
+            f"code=$(runuser -u {USER} -- curl --noproxy '*' -sS --max-time 10 -o /dev/null -w '%{{http_code}}' https://{target}/ 2>/dev/null); "
+            f'case "$code" in [234]??) echo "{target} -> $code" ;; *) echo "{target} -> ${{code:-no answer}}"; false ;; esac',
+        ),
+        ("proxy log exists", f'test -f {LOG_PATH} && echo "$(wc -l < {LOG_PATH}) lines in {LOG_PATH}"'),
     ]
 
 
 def verify(host, ctx: common.NodeContext, cfg: ProxyConfig) -> list[dict]:
     from . import verify as verifymod
-    checks = host_checks(ctx, cfg) + verifymod.proxy_checks(ctx, node=not ctx.proxy.on_gitea)   # the Gitea host is no node
+
+    checks = host_checks(ctx, cfg) + verifymod.proxy_checks(
+        ctx, node=not ctx.proxy.on_gitea
+    )  # the Gitea host is no node
     result = host.run(verifymod.script(checks), timeout=300)
     parsed = verifymod.parse(result.stdout)
     return parsed or [{"name": "connect", "ok": False, "detail": result.stderr.strip()[-300:] or "no output"}]

@@ -1,9 +1,9 @@
 import json
-from pathlib import Path
 import threading
 import time
 import urllib.request
 from http.server import ThreadingHTTPServer
+from pathlib import Path
 
 import pytest
 
@@ -36,7 +36,13 @@ def test_page_and_overview(ui):
     data = json.loads(body)
     assert data["servers"]["gitea"]["name"] == "gitea.internal"
     assert data["needs"]["images"] == 2 and data["box"] is None
-    assert "needs/demo.yml" in data["files"] and [c["name"] for c in data["checks"]] == ["hello-alpine", "hello-k3s", "hello-proxy-k3s", "hello-proxy", "hello-python"]
+    assert "needs/demo.yml" in data["files"] and [c["name"] for c in data["checks"]] == [
+        "hello-alpine",
+        "hello-k3s",
+        "hello-proxy-k3s",
+        "hello-proxy",
+        "hello-python",
+    ]
 
 
 def test_file_edit_is_restricted_and_validated(ui):
@@ -64,14 +70,21 @@ def test_run_command_and_poll(ui):
 def test_overview_has_step_data(ui):
     data = json.loads(call(ui + "/api/overview")[1])
     assert data["needs_files"][0]["name"] == "demo" and data["needs_files"][0]["summary"]["images"] == 2
-    assert "gitea" in data["needs_detail"]["files"][0]["name"] or any(f["name"] == "gitea" for f in data["needs_detail"]["files"])
+    assert "gitea" in data["needs_detail"]["files"][0]["name"] or any(
+        f["name"] == "gitea" for f in data["needs_detail"]["files"]
+    )
     assert data["versions"]["gitea"] and isinstance(data["ssh_aliases"], list) and "running" in data["lab"]
     assert data["servers"]["is_lab"] is False and data["running"] == []
 
 
 def test_servers_form_writes_valid_yaml(ui, platform_dir):
-    form = {"gitea": {"host": "g1", "name": "Gitea.Local"},
-            "infrastructures": {"dev": {"type": "compose", "nodes": "d1, d2"}, "k": {"type": "k3s", "nodes": ["k1"], "args": "--disable traefik"}}}
+    form = {
+        "gitea": {"host": "g1", "name": "Gitea.Local"},
+        "infrastructures": {
+            "dev": {"type": "compose", "nodes": "d1, d2"},
+            "k": {"type": "k3s", "nodes": ["k1"], "args": "--disable traefik"},
+        },
+    }
     assert call(ui + "/api/servers", "POST", form)[0] == 200
     data = json.loads(call(ui + "/api/overview")[1])["servers"]
     assert data["gitea"]["name"] == "gitea.local" and data["infrastructures"]["dev"]["nodes"] == ["d1", "d2"]
@@ -86,9 +99,25 @@ def test_project_scan_and_save(ui, platform_dir, tmp_path):
     project = tmp_path / "my-api"
     project.mkdir()
     (project / "requirements.txt").write_text("flask==3.0.0\nhttpx==0.27.0\n")
-    (project / "Dockerfile").write_text("FROM python:3.11-slim AS base\nRUN apt-get update && apt-get install -y --no-install-recommends curl libpq-dev \\\n && rm -rf /var/lib/apt/lists/*\nFROM base\nCOPY . .\n")
+    (project / "Dockerfile").write_text(
+        "FROM python:3.11-slim AS base\nRUN apt-get update && apt-get install -y --no-install-recommends curl libpq-dev \\\n && rm -rf /var/lib/apt/lists/*\nFROM base\nCOPY . .\n"
+    )
     (project / "web").mkdir()
-    (project / "web" / "package-lock.json").write_text(json.dumps({"lockfileVersion": 3, "packages": {"": {}, "node_modules/chalk": {"version": "5.3.0", "resolved": "https://registry.npmjs.org/chalk/-/chalk-5.3.0.tgz", "integrity": "sha512-x"}}}))
+    (project / "web" / "package-lock.json").write_text(
+        json.dumps(
+            {
+                "lockfileVersion": 3,
+                "packages": {
+                    "": {},
+                    "node_modules/chalk": {
+                        "version": "5.3.0",
+                        "resolved": "https://registry.npmjs.org/chalk/-/chalk-5.3.0.tgz",
+                        "integrity": "sha512-x",
+                    },
+                },
+            }
+        )
+    )
     status, body = call(ui + "/api/project/scan", "POST", {"folder": str(project)})
     p = json.loads(body)
     assert status == 200 and p["name"] == "my-api" and p["python"] == "3.11"
@@ -97,15 +126,31 @@ def test_project_scan_and_save(ui, platform_dir, tmp_path):
     assert kinds == {"requirements.txt": ("python", 2), "package-lock.json": ("js", 1)}
     assert call(ui + "/api/project/scan", "POST", {"folder": str(tmp_path / "nope")})[0] == 400
 
-    body = {"name": "My API", "python": p["python"], "images": p["images"], "pypi_files": [str(project / "requirements.txt")],
-            "npm_files": [str(project / "web" / "package-lock.json")], "pypi": ["rich==13.0.0"], "npm": [], "apt": p["apt"]}
+    body = {
+        "name": "My API",
+        "python": p["python"],
+        "images": p["images"],
+        "pypi_files": [str(project / "requirements.txt")],
+        "npm_files": [str(project / "web" / "package-lock.json")],
+        "pypi": ["rich==13.0.0"],
+        "npm": [],
+        "apt": p["apt"],
+    }
     status, resp = call(ui + "/api/project/save", "POST", body)
     assert status == 200 and json.loads(resp)["saved"] == "needs/my-api.yml"
     text = (platform_dir / "needs" / "my-api.yml").read_text()
     assert "file: ../../" in text or "file: ../" in text  # relative to needs/
     data = json.loads(call(ui + "/api/overview")[1])
     mine = next(f for f in data["needs_files"] if f["name"] == "my-api")
-    assert mine["error"] is None and mine["summary"] == {"images": 1, "pypi": 3, "npm": 1, "apt": 2, "apk": 0, "rpm": 0, "files": 0}
+    assert mine["error"] is None and mine["summary"] == {
+        "images": 1,
+        "pypi": 3,
+        "npm": 1,
+        "apt": 2,
+        "apk": 0,
+        "rpm": 0,
+        "files": 0,
+    }
     assert "python:3.11-slim" in data["needs_detail"]["images"] and "3.11" in data["needs_detail"]["pypi"]
     assert call(ui + "/api/file?name=needs/my-api.yml", "DELETE")[0] == 200
     assert call(ui + "/api/file?name=servers.yml", "DELETE")[0] == 400
@@ -113,12 +158,16 @@ def test_project_scan_and_save(ui, platform_dir, tmp_path):
 
 
 def test_lockfile_upload(ui, platform_dir):
-    req = urllib.request.Request(ui + "/api/lockfile?project=Shop&filename=requirements.txt", method="PUT", data=b"django==5.0\n")
+    req = urllib.request.Request(
+        ui + "/api/lockfile?project=Shop&filename=requirements.txt", method="PUT", data=b"django==5.0\n"
+    )
     with urllib.request.urlopen(req) as resp:
         info = json.loads(resp.read())
     assert info["kind"] == "python" and info["count"] == 1
     assert (platform_dir / "needs" / "shop" / "requirements.txt").read_text() == "django==5.0\n"
-    status, body = call(ui + "/api/project/save", "POST", {"name": "shop", "python": "3.12", "pypi_files": [info["path"]]})
+    status, body = call(
+        ui + "/api/project/save", "POST", {"name": "shop", "python": "3.12", "pypi_files": [info["path"]]}
+    )
     assert status == 200 and "file: shop/requirements.txt" in (platform_dir / "needs" / "shop.yml").read_text()
     req = urllib.request.Request(ui + "/api/lockfile?project=x&filename=../evil", method="PUT", data=b"")
     with urllib.request.urlopen(req) as resp:
@@ -167,6 +216,7 @@ def test_server_status_rejects_odd_aliases(ui):
 def test_ssh_config_problems_are_messages_and_the_environment_still_counts(platform_dir, monkeypatch, tmp_path):
     from outpost import ssh
     from outpost.ui.server import server_status, ssh_check
+
     platform = Platform(platform_dir)
     monkeypatch.setenv("OUTPOST_SSH_CONFIG", str(tmp_path / "missing"))
     try:
@@ -179,6 +229,7 @@ def test_ssh_config_problems_are_messages_and_the_environment_still_counts(platf
         monkeypatch.setenv("OUTPOST_SSH_CONFIG", str(config))
         platform.servers_file.write_text("gitea: [not, a, mapping]\n")
         from outpost.ui.server import _choose_ssh_config
+
         assert _choose_ssh_config(platform) is None
         assert ["-F", str(config)] == ssh.options.ssh_options(5)[-2:]
     finally:
@@ -188,18 +239,34 @@ def test_ssh_config_problems_are_messages_and_the_environment_still_counts(platf
 
 def test_servers_form_round_trips_the_egress_proxy(ui, platform_dir):
     from outpost.config import load_servers
-    form = {"gitea": {"host": "g1", "name": "gitea.internal"}, "infrastructures": {"dev": {"type": "compose", "nodes": "d1"}},
-            "egress_proxy": {"allow": "api.twilio.com\n*.sendgrid.net, api.twilio.com", "host": "", "port": "3128", "distro": "noble"}}
+
+    form = {
+        "gitea": {"host": "g1", "name": "gitea.internal"},
+        "infrastructures": {"dev": {"type": "compose", "nodes": "d1"}},
+        "egress_proxy": {
+            "allow": "api.twilio.com\n*.sendgrid.net, api.twilio.com",
+            "host": "",
+            "port": "3128",
+            "distro": "noble",
+        },
+    }
     assert call(ui + "/api/servers", "POST", form)[0] == 200
     proxy = load_servers(platform_dir / "servers.yml").egress_proxy
-    assert proxy.host == "g1" and proxy.port == 3128 and proxy.allow == ["api.twilio.com", "*.sendgrid.net"] and proxy.distro == "noble"
-    assert "port" not in (platform_dir / "servers.yml").read_text()   # defaults stay out of the file
+    assert (
+        proxy.host == "g1"
+        and proxy.port == 3128
+        and proxy.allow == ["api.twilio.com", "*.sendgrid.net"]
+        and proxy.distro == "noble"
+    )
+    assert "port" not in (platform_dir / "servers.yml").read_text()  # defaults stay out of the file
     data = json.loads(call(ui + "/api/overview")[1])["servers"]["egress_proxy"]
     assert data["allow"] == ["api.twilio.com", "*.sendgrid.net"] and data["host"] == "g1"
     # a form without the card keeps the section; an empty allow list removes it; a bad entry is refused
     assert call(ui + "/api/servers", "POST", {k: v for k, v in form.items() if k != "egress_proxy"})[0] == 200
     assert load_servers(platform_dir / "servers.yml").egress_proxy.allow == ["api.twilio.com", "*.sendgrid.net"]
-    status, body = call(ui + "/api/servers", "POST", {**form, "egress_proxy": {"allow": "https://api.twilio.com", "port": "3128"}})
+    status, body = call(
+        ui + "/api/servers", "POST", {**form, "egress_proxy": {"allow": "https://api.twilio.com", "port": "3128"}}
+    )
     assert status == 400 and "egress_proxy.allow" in json.loads(body)["error"]
     other = {**form, "egress_proxy": {"allow": "api.twilio.com", "host": "p1", "port": "8888"}}
     assert call(ui + "/api/servers", "POST", other)[0] == 200
@@ -211,4 +278,5 @@ def test_servers_form_round_trips_the_egress_proxy(ui, platform_dir):
 
 def test_proxy_commands_are_allowed_from_the_page():
     from outpost.ui.server import ALLOWED_COMMANDS
+
     assert "proxy" in ALLOWED_COMMANDS

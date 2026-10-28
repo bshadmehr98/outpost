@@ -34,7 +34,7 @@ def fetch(needs, box: Path, mirrors, log=print) -> dict:
         try:
             url = need.resolved
             if url and url.startswith(NPMJS) and mirrors.npm != NPMJS:
-                url = mirrors.npm + url[len(NPMJS):]
+                url = mirrors.npm + url[len(NPMJS) :]
             if not url:
                 meta = http.get(f"{mirrors.npm}/{quote(need.name, safe='@')}/{need.version}", ok=(200,)).json()
                 url = meta["dist"]["tarball"]

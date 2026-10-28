@@ -29,8 +29,14 @@ import urllib.error
 import urllib.request
 from concurrent.futures import ThreadPoolExecutor
 
-REFUSED_PROBE = "example.com"   # never on an allow list, unless you put it there
-PUBLIC = [("pypi.org", 443), ("registry.npmjs.org", 443), ("deb.debian.org", 80), ("registry-1.docker.io", 443), ("1.1.1.1", 443)]
+REFUSED_PROBE = "example.com"  # never on an allow list, unless you put it there
+PUBLIC = [
+    ("pypi.org", 443),
+    ("registry.npmjs.org", 443),
+    ("deb.debian.org", 80),
+    ("registry-1.docker.io", 443),
+    ("1.1.1.1", 443),
+]
 
 
 def probe(host: str, port: int, timeout: float = 2.0) -> dict:
@@ -39,19 +45,32 @@ def probe(host: str, port: int, timeout: float = 2.0) -> dict:
     try:
         addr = socket.getaddrinfo(host, port, socket.AF_INET, socket.SOCK_STREAM)[0][4]
     except socket.gaierror as e:
-        return {"target": f"{host}:{port}", "result": "unresolvable", "detail": str(e), "ms": int((time.monotonic() - started) * 1000)}
+        return {
+            "target": f"{host}:{port}",
+            "result": "unresolvable",
+            "detail": str(e),
+            "ms": int((time.monotonic() - started) * 1000),
+        }
     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     sock.settimeout(timeout)
     try:
         sock.connect(addr)
         result, detail = "REACHED", f"{addr[0]} accepted the connection"
     except socket.timeout:
-        result, detail = "timeout", f"{addr[0]} did not answer within {timeout}s (packets dropped by the firewall, or no route)"
+        result, detail = (
+            "timeout",
+            f"{addr[0]} did not answer within {timeout}s (packets dropped by the firewall, or no route)",
+        )
     except OSError as e:
         result, detail = "rejected", f"{addr[0]}: {getattr(e, 'strerror', None) or e}"
     finally:
         sock.close()
-    return {"target": f"{host}:{port}", "result": result, "detail": detail, "ms": int((time.monotonic() - started) * 1000)}
+    return {
+        "target": f"{host}:{port}",
+        "result": result,
+        "detail": detail,
+        "ms": int((time.monotonic() - started) * 1000),
+    }
 
 
 def probe_all(gitea: str | None = None) -> dict:
@@ -116,4 +135,8 @@ if __name__ == "__main__":
         via = probe_proxy()
         for r in (via or {}).get("results", []):
             print(f"  via proxy {r['target']:22} {r['result']:9} (expected {r['expected']}) {r['detail']}")
-        print("no egress proxy variables in this container" if via is None else f"proxy {'as expected' if via['ok'] else 'NOT as expected'}")
+        print(
+            "no egress proxy variables in this container"
+            if via is None
+            else f"proxy {'as expected' if via['ok'] else 'NOT as expected'}"
+        )

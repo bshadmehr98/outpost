@@ -53,7 +53,7 @@ def test_ssh_config_from_the_environment_or_servers_yml_but_not_two_different(tm
     try:
         ssh.use_config(None)
         assert ["-F", str(one)] == ssh_options(5)[-2:]
-        ssh.use_config(one)                      # the same file twice is fine
+        ssh.use_config(one)  # the same file twice is fine
         with pytest.raises(ssh.SshError, match="two ssh config files"):
             ssh.use_config(two)
     finally:
