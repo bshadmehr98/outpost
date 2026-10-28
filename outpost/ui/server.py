@@ -280,17 +280,29 @@ def _proxy_form(p) -> dict | None:
     return out
 
 
+def _choose_ssh_config(platform: Platform) -> str | None:
+    """Pick the ssh config file the way the CLI does, and say what is wrong instead of raising.
+    A servers.yml that does not load yet still lets OUTPOST_SSH_CONFIG count."""
+    try:
+        path = load_servers(platform.servers_file).ssh_config
+    except ConfigError:
+        path = None
+    try:
+        ssh.use_config(path)
+    except SshError as e:
+        return str(e)
+    return None
+
+
 def ssh_check(platform: Platform, alias: str) -> dict:
     """Reach a host the way Outpost will: ssh, then become root. Says what is missing in plain words."""
-    from .. import ssh
     from ..ssh import Host, SshError
     from ..ssh.options import ssh_options
     if not re.fullmatch(r"[A-Za-z0-9._-]+", alias or ""):
         return {"ok": False, "message": "that is not an SSH alias"}
-    try:
-        ssh.use_config(load_servers(platform.servers_file).ssh_config)
-    except ConfigError:
-        pass
+    problem = _choose_ssh_config(platform)
+    if problem:
+        return {"ok": False, "message": problem}
     plain = subprocess.run(["ssh", *ssh_options(8), alias, "id -un"], capture_output=True, text=True)
     if plain.returncode != 0:
         return {"ok": False, "message": f"ssh {alias} failed: {plain.stderr.strip() or 'no answer'}"}
@@ -305,15 +317,13 @@ def ssh_check(platform: Platform, alias: str) -> dict:
 
 def server_status(platform: Platform, alias: str) -> dict:
     """Egress state and the egress log of one server, read over SSH."""
-    from .. import ssh
     from ..infra import egress
     from ..ssh import Host, SshError
     if not re.fullmatch(r"[A-Za-z0-9._-]+", alias or ""):
         return {"ok": False, "message": "that is not an SSH alias"}
-    try:
-        ssh.use_config(load_servers(platform.servers_file).ssh_config)
-    except ConfigError:
-        pass
+    problem = _choose_ssh_config(platform)
+    if problem:
+        return {"ok": False, "message": problem}
     host = Host(alias, connect_timeout=8)
     try:
         state = egress.status(host)
