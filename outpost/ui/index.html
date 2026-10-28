@@ -326,6 +326,7 @@ const ago = iso => { if (!iso) return 'never'; const s = (Date.now() - new Date(
 const when = iso => iso ? new Date(iso).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' }) : '—';
 async function api(path, method = 'GET', body = null, raw = false) {
   const opts = { method }; if (body !== null) opts.body = raw ? body : JSON.stringify(body);
+  if (body !== null && !raw) opts.headers = { 'Content-Type': 'application/json' }; // the server refuses other bodies (no cross-site requests)
   try { const r = await fetch(path, opts); return await r.json(); } catch (e) { return { error: 'The dashboard server is not answering. Is `outpost ui` still running?' }; }
 }
 function toast(msg, ms = 2800) { const t = $('toast'); t.textContent = msg; t.classList.add('show'); clearTimeout(t._h); t._h = setTimeout(() => t.classList.remove('show'), ms); }

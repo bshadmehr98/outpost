@@ -287,6 +287,45 @@ def test_proxy_commands_are_allowed_from_the_page():
     assert "proxy" in ALLOWED_COMMANDS
 
 
+# -- only the dashboard's own page may change anything --------------------------------------
+
+
+def test_a_foreign_web_page_cannot_run_commands(ui):
+    """Bug: POST /api/run took any Origin and a text/plain body, so any web page open in the browser
+    could start outpost commands on this laptop (a "simple" cross-site request needs no preflight)."""
+    run = {"args": ["needs"]}
+    status, body = call(ui + "/api/run", "POST", run, headers={"Content-Type": "text/plain"})
+    assert status == 403 and "application/json" in json.loads(body)["error"]
+    evil = {"Content-Type": "application/json", "Origin": "https://evil.example"}
+    status, body = call(ui + "/api/run", "POST", run, headers=evil)
+    assert status == 403 and "evil.example" in json.loads(body)["error"]
+    for method, path in (("PUT", "/api/file?name=needs/x.yml"), ("DELETE", "/api/file?name=needs/demo.yml")):
+        assert call(ui + path, method, {"content": "a: 1\n"}, headers={"Origin": "null"})[0] == 403
+    assert (
+        call(ui + "/api/servers", "POST", {"gitea": {}}, headers={"Content-Type": "application/x-www-form-urlencoded"})[
+            0
+        ]
+        == 403
+    )
+    port = ui.rsplit(":", 1)[1]
+    status, body = call(ui + "/api/overview", headers={"Host": f"evil.example:{port}"})  # DNS rebinding
+    assert status == 403
+    # the page itself: same origin, JSON
+    status, body = call(
+        ui + "/api/file?name=needs/x.yml",
+        "PUT",
+        {"content": "a: 1\n"},
+        headers={"Origin": ui, "Content-Type": "application/json"},
+    )
+    assert status == 200
+    assert call(ui + "/api/overview", headers={"Host": f"localhost:{port}"})[0] == 200
+
+
+def test_the_page_sends_json_bodies_as_json():
+    page = (Path(__file__).parents[1] / "outpost" / "ui" / "index.html").read_text()
+    assert "opts.headers = { 'Content-Type': 'application/json' }" in page
+
+
 def test_every_get_route_answers(ui, workspace_dir):
     """The routes index.html reads, against a fresh workspace: none of them errors."""
     from outpost.ui.server import DELETE_ROUTES, GET_PREFIX_ROUTES, GET_ROUTES, POST_ROUTES, PUT_ROUTES

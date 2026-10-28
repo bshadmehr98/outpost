@@ -93,3 +93,11 @@ The server binds to 127.0.0.1 only. It edits only `servers.yml`, `mirrors.yml` a
 list, one at a time, and reads servers over SSH only when you click (connection test, seal status,
 *Look again*) or when you turned the five-minute heartbeat on. Anything that changes a machine
 goes through the CLI and lands in `state/runs/` like everything else.
+
+Only the page itself may change anything. A request that is not a GET must come from the dashboard's
+own origin (another site's `Origin` header is refused), and a POST must send
+`Content-Type: application/json`, which a plain form or another site's "simple" request cannot. So a
+web page open in the same browser cannot start commands on this laptop. Every request must name
+`127.0.0.1` or `localhost` in its `Host` header, so a DNS-rebinding page cannot read the API either.
+A tunnel to another port works (`ssh -L 9000:127.0.0.1:8484`), as long as the browser opens it as
+`localhost` or `127.0.0.1`.

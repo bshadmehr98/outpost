@@ -1,25 +1,29 @@
 """The dashboard's HTTP server: one HTML page and a few JSON endpoints, on 127.0.0.1 only.
 
-GET  /                        the page
-GET  /api/overview            servers, needs, box, state, checks, lab and step status, as JSON
-GET  /api/file?name=...       read servers.yml, mirrors.yml, needs/*.yml or checks/*.yml
-PUT  /api/file?name=...       write one of those files (must stay valid YAML)
-DELETE /api/file?name=...     remove a needs file
-POST /api/servers             write servers.yml from a form {gitea: {...}, infrastructures: {...}, egress_proxy: {...}}
-POST /api/ssh-check           {"alias": "dev-1"} -> can we reach it, are we root
-POST /api/project/scan        {"folder": "~/code/my-api"} -> lockfiles, images, apt/apk/rpm packages found
-POST /api/project/save        a proposal -> needs/<name>.yml
-PUT  /api/lockfile?project=&filename=   upload one lockfile into needs/<project>/
-GET  /api/search?q=flask      find a package or image in the needs and in the box
-GET  /api/runs                past runs; GET /api/runs/<id> one log
-POST /api/server-status       {"alias": "dev-1"} -> egress state and the egress log of that server
-POST /api/run                 start an outpost command; body {"args": ["fetch"]}
-GET  /api/run/<id>            its log so far, its "==> " steps, whether it is still running, and a translation of the failure
-GET  /api/hosts               the cached facts of every server (state/hosts/); POST refreshes them over SSH
-POST /api/demo                ask Gitea and the nodes how the demo is doing
-GET  /api/backups             the archives in backups/, for the restore picker
-GET  /report.html             the proof report, built from state/ only
+  GET  /                        the page
+  GET  /api/overview            servers, needs, box, state, checks, lab and step status, as JSON
+  GET  /api/file?name=...       read servers.yml, mirrors.yml, needs/*.yml or checks/*.yml
+  PUT  /api/file?name=...       write one of those files (must stay valid YAML)
+  DELETE /api/file?name=...     remove a needs file
+  POST /api/servers             write servers.yml from a form {gitea: {...}, infrastructures: {...}, egress_proxy: {...}}
+  POST /api/ssh-check           {"alias": "dev-1"} -> can we reach it, are we root
+  POST /api/project/scan        {"folder": "~/code/my-api"} -> lockfiles, images, apt/apk/rpm packages found
+  POST /api/project/save        a proposal -> needs/<name>.yml
+  PUT  /api/lockfile?project=&filename=   upload one lockfile into needs/<project>/
+  GET  /api/search?q=flask      find a package or image in the needs and in the box
+  GET  /api/runs                past runs; GET /api/runs/<id> one log
+  POST /api/server-status       {"alias": "dev-1"} -> egress state and the egress log of that server
+  POST /api/run                 start an outpost command; body {"args": ["fetch"]}
+  GET  /api/run/<id>            its log so far, its "==> " steps, whether it is still running, and a translation of the failure
+  GET  /api/hosts               the cached facts of every server (state/hosts/); POST refreshes them over SSH
+  POST /api/demo                ask Gitea and the nodes how the demo is doing
+  GET  /api/backups             the archives in backups/, for the restore picker
+  GET  /report.html             the proof report, built from state/ only
 
+Only this laptop's own pages may change anything: a request other than GET must come from the
+dashboard's own origin (no foreign Origin header), and a POST or a JSON PUT must say
+`Content-Type: application/json`, which a plain HTML form or a "simple" cross-site request cannot.
+Every request must name this laptop in its Host header, so a DNS-rebinding page cannot read the API.
 """
 
 import json
@@ -50,6 +54,7 @@ from outpost.ui.status import runs, search
 from outpost.workspace import Workspace
 
 PAGE = Path(__file__).parent / "index.html"
+LOCAL_NAMES = {"127.0.0.1", "localhost", "[::1]"}  # what the Host header may name
 JSON_TYPE = "application/json"
 REQUEST_ERRORS = (PermissionError, KeyError, ValueError, RuntimeError, ConfigError, HttpError, SshError, yaml.YAMLError)
 
@@ -96,6 +101,10 @@ class Handler(BaseHTTPRequestHandler):
 
     def _answer(self, routes: dict, prefix_routes: dict | None = None) -> None:
         path = urlparse(self.path).path
+        refused = self._refused(path)
+        if refused:
+            self.send_json({"error": refused}, 403)
+            return
         route = routes.get(path) or _by_prefix(prefix_routes or {}, path)
         if not route:
             self.send_json({"error": "not found"}, 404)
@@ -104,6 +113,22 @@ class Handler(BaseHTTPRequestHandler):
             route(self, path)
         except REQUEST_ERRORS as e:
             self.send_json({"error": str(e)}, 400)
+
+    def _refused(self, path: str) -> str | None:
+        """Why this request may not run, or None. See the module docstring."""
+        host = self.headers.get("Host", "")
+        if _host_name(host) not in LOCAL_NAMES:
+            return f"the dashboard answers only to 127.0.0.1 or localhost, not {host or 'no Host header'}"
+        if self.command == "GET":
+            return None
+        origin = self.headers.get("Origin")
+        if origin is not None and origin != f"http://{host}":
+            return f"requests from {origin} may not change anything here"
+        takes_json = self.command == "POST" or (self.command == "PUT" and path in JSON_PUT_PATHS)
+        sends_json = (self.headers.get("Content-Type") or "").split(";")[0].strip().lower() == JSON_TYPE
+        if takes_json and not sends_json:
+            return f"send the body as {JSON_TYPE}"
+        return None
 
     def _send(self, status: int, body: bytes, content_type: str) -> None:
         self.send_response(status)
@@ -188,6 +213,7 @@ PUT_ROUTES: dict[str, Callable[[Handler, str], None]] = {
         lambda h: save_lockfile(h.workspace, h.query("project"), h.query("filename"), h.body_bytes())
     ),
 }
+JSON_PUT_PATHS = {"/api/file"}  # /api/lockfile takes the file's own bytes
 DELETE_ROUTES: dict[str, Callable[[Handler, str], None]] = {
     "/api/file": _json_route(lambda h: delete_needs_file(h.workspace, h.query("name"))),
 }
@@ -209,3 +235,10 @@ def _by_prefix(prefix_routes: dict, path: str):
         if path.startswith(prefix):
             return prefix_routes[prefix]
     return None
+
+
+def _host_name(host: str) -> str:
+    """The name in a Host header, without the port: "127.0.0.1:8484" -> "127.0.0.1", "[::1]:8484" -> "[::1]"."""
+    if host.startswith("["):
+        return host.split("]", 1)[0] + "]"
+    return host.rsplit(":", 1)[0] if ":" in host else host
