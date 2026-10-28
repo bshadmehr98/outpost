@@ -10,6 +10,9 @@ OUTPOST_INTEGRATION=1 pytest tests/integration   # real Gitea in Docker, real Do
 Unit tests take about ten seconds and need no network. The integration suite takes a few minutes
 and needs Docker and the internet; [testing](testing.md) describes both.
 
+Before a commit, run `scripts/format.sh`, `ruff check outpost tests` and `pyright`; CI runs them
+too. How the code is written: [style](style.md). The words it uses: [glossary](../glossary.md).
+
 ## Layout
 
 ```
