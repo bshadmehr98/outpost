@@ -73,8 +73,8 @@ class Tunnel:
         deadline = time.time() + self.connect_timeout + 5
         while time.time() < deadline:
             if self._ssh_exited():
-                raise Unreachable(f"tunnel to {self.alias} failed: {decode(self._ssh.stderr.read()).strip()}")
-            if _port_accepts_connections(self.port):
+                raise Unreachable(f"tunnel to {self.alias} failed: {decode(self._ssh.stderr.read()).strip()}")  # pyright: ignore[reportOptionalMemberAccess]  set in __enter__
+            if _port_accepts_connections(self.port):  # pyright: ignore[reportArgumentType]  set in __enter__
                 return
             time.sleep(0.2)
         self._close()
@@ -82,7 +82,7 @@ class Tunnel:
 
     def _ssh_exited(self) -> bool:
         """True if the ssh program has stopped. (poll() gives its exit code, or None while it runs.)"""
-        return self._ssh.poll() is not None
+        return self._ssh.poll() is not None  # pyright: ignore[reportOptionalMemberAccess]  set in __enter__
 
     def _close(self) -> None:
         """Stop ssh: ask it to stop, and force it if it hasn't after 5 seconds."""

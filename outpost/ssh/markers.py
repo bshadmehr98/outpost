@@ -82,7 +82,7 @@ def command_finished(stderr: str) -> bool:
 
 def exit_code(stderr: str) -> int:
     """The command's real exit code, read from the last marker. Call only if command_finished()."""
-    return int(_MARKER_EXIT_AS_LAST_LINE.search(stderr).group(1))
+    return int(_MARKER_EXIT_AS_LAST_LINE.search(stderr).group(1))  # pyright: ignore[reportOptionalMemberAccess]  call only if command_finished()
 
 
 def without_markers(stderr: str) -> str:

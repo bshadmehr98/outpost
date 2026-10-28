@@ -162,15 +162,15 @@ def docker_client_config(existing: str, proxy: ProxyInfo | None, gitea_name: str
     proxies = data.get("proxies") if isinstance(data.get("proxies"), dict) else {}
     if proxy:
         want = {"httpProxy": proxy.url, "httpsProxy": proxy.url, "noProxy": proxy.no_proxy}
-        if proxies.get("default") == want:
+        if proxies.get("default") == want:  # pyright: ignore[reportOptionalMemberAccess]  None ruled out by the isinstance above
             return None
-        proxies["default"] = want
+        proxies["default"] = want  # pyright: ignore[reportOptionalSubscript]  None ruled out by the isinstance above
         data["proxies"] = proxies
     else:
-        mine = proxies.get("default") or {}
+        mine = proxies.get("default") or {}  # pyright: ignore[reportOptionalMemberAccess]  None ruled out by the isinstance above
         if not str(mine.get("noProxy", "")).startswith(gitea_name + ","):
             return None
-        del proxies["default"]
+        del proxies["default"]  # pyright: ignore[reportOptionalSubscript]  None ruled out by the isinstance above
         if not proxies:
             data.pop("proxies", None)
     return json.dumps(data, indent=2) + "\n"

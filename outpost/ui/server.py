@@ -205,7 +205,7 @@ def overview(platform: Platform) -> dict:
     data["running"] = [{"id": rid, "args": r["args"]} for rid, r in RUNS.items() if r["proc"].poll() is None]
     data["demo"] = {
         "local": (platform.root / "demo").exists(),
-        "urls": demo.urls(platform, servers) if data["servers"] else {},
+        "urls": demo.urls(platform, servers) if data["servers"] else {},  # pyright: ignore[reportArgumentType]  servers is set when data["servers"] is
         "files": sorted(demo.project_files(platform.root / "demo")) if (platform.root / "demo").exists() else [],
         "status": platform.read_state("demo-status"),
     }
@@ -471,7 +471,7 @@ def run_status(run_id: str) -> dict:
 
 
 class Handler(BaseHTTPRequestHandler):
-    platform: Platform = None  # set by serve()
+    platform: Platform = None  # pyright: ignore[reportAssignmentType]  set by serve()
 
     def log_message(self, *_):  # keep the terminal quiet
         pass

@@ -13,6 +13,7 @@ current without asking. `outpost hosts` prints the same table; `--refresh` asks 
 import base64
 import json
 import time
+from collections.abc import Callable
 from pathlib import Path
 
 from . import versions
@@ -79,7 +80,7 @@ def inspect(host) -> dict:
         return {"reachable": False, "error": str(e).strip().splitlines()[-1][:300]}
     if not out.stdout.strip():
         return {"reachable": False, "error": (out.stderr.strip().splitlines() or ["no answer"])[-1][:300]}
-    data = {"reachable": True}
+    data: dict = {"reachable": True}
     for line in out.stdout.splitlines():
         if "=" in line:
             key, value = line.split("=", 1)
@@ -131,7 +132,11 @@ def record(platform: Platform, alias: str, data: dict) -> dict:
 
 
 def refresh(
-    platform: Platform, servers: Servers, aliases: list[str] | None = None, log=print, make_host=Host
+    platform: Platform,
+    servers: Servers,
+    aliases: list[str] | None = None,
+    log=print,
+    make_host: Callable[[str], Host] = Host,
 ) -> dict[str, dict]:
     wanted = aliases or list(roles(servers))
     out = {}

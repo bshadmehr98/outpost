@@ -31,7 +31,7 @@ Documentation = "https://github.com/bshadmehr98/outpost/tree/main/docs"
 Changelog = "https://github.com/bshadmehr98/outpost/blob/main/CHANGELOG.md"
 
 [project.optional-dependencies]
-dev = ["pytest>=8", "ruff>=0.6"]
+dev = ["pytest>=8", "ruff>=0.6", "pyright>=1.1.380", "types-PyYAML"]
 
 [tool.setuptools.packages.find]
 include = ["outpost*"]
@@ -53,6 +53,12 @@ max-complexity = 12
 
 [tool.ruff.lint.isort]
 known-first-party = ["outpost", "tests"]
+
+[tool.pyright]
+pythonVersion = "3.11"
+typeCheckingMode = "basic"
+include = ["outpost"]  # tests are not type-checked yet: about 50 Optional findings there
+exclude = ["**/__pycache__", "outpost/templates"]  # templates are copied into the workspace, not imported
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

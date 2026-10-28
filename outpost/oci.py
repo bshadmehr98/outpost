@@ -241,7 +241,7 @@ class Registry:
         if start.status != 202:
             raise HttpError(start.status, start.text, f"start upload {repo}")
         location = start.headers.get("Location")
-        sep = "&" if "?" in location else "?"
+        sep = "&" if "?" in location else "?"  # pyright: ignore[reportOperatorIssue]  registry always sends Location on 202
         resp = self.call(
             "PUT",
             f"{location}{sep}digest={quote(digest, safe=':')}",

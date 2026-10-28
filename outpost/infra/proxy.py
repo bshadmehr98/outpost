@@ -144,7 +144,7 @@ def filter_type_line(version: str) -> str:
     """`FilterType ere` from tinyproxy 1.11.1 on; before that only `FilterExtended On` exists, and an
     unknown directive stops tinyproxy from starting."""
     nums = tuple(int(x) for x in re.findall(r"\d+", version)[:3]) or (0,)
-    return "FilterType ere" if nums >= (1, 11, 1) else "FilterExtended On"
+    return "FilterType ere" if nums >= (1, 11, 1) else "FilterExtended On"  # pyright: ignore[reportOperatorIssue]  tuple comparison is fine at runtime
 
 
 def conf(listen_ip: str, port: int, client_allow: list[str], tinyproxy_version: str = "1.11.1") -> str:
@@ -525,7 +525,8 @@ def verify(host, ctx: common.NodeContext, cfg: ProxyConfig) -> list[dict]:
     from . import verify as verifymod
 
     checks = host_checks(ctx, cfg) + verifymod.proxy_checks(
-        ctx, node=not ctx.proxy.on_gitea
+        ctx,
+        node=not ctx.proxy.on_gitea,  # pyright: ignore[reportOptionalMemberAccess]  verify runs only with an egress proxy
     )  # the Gitea host is no node
     result = host.run(verifymod.script(checks), timeout=300)
     parsed = verifymod.parse(result.stdout)

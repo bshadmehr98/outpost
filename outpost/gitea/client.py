@@ -142,7 +142,7 @@ class GiteaClient:
         resp = self._json(
             "POST", f"/api/v1/orgs/{quote(org or self.org)}/actions/runners/registration-token", ok=(200, 201)
         )
-        return (resp.json() or {}).get("token") or resp.headers.get("token") or resp.headers.get("Token")
+        return (resp.json() or {}).get("token") or resp.headers.get("token") or resp.headers.get("Token")  # pyright: ignore[reportReturnType]  Gitea may send no token; caller assumes one
 
     def runners(self, org: str | None = None) -> list[dict]:
         resp = self.http.get(f"/api/v1/orgs/{quote(org or self.org)}/actions/runners")
@@ -311,5 +311,5 @@ def npm_package_json(path: Path) -> dict:
     with tarfile.open(path, "r:gz") as tar:
         for member in tar.getmembers():
             if member.name.endswith("/package.json") and member.name.count("/") == 1:
-                return json.loads(tar.extractfile(member).read())
+                return json.loads(tar.extractfile(member).read())  # pyright: ignore[reportOptionalMemberAccess]  package.json is a file, never None
     raise ValueError(f"{path.name}: no package/package.json inside")

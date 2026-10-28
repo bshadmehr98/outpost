@@ -209,7 +209,7 @@ def runs(platform: Platform, limit: int = 50, live: set[str] | None = None) -> l
                 "running": running,
                 "bytes": log.stat().st_size,
                 "summary": "running" if running else explain.summarize(args, text, exit_code),
-                "seconds": int(re.search(r"after (\d+)s", tail).group(1))
+                "seconds": int(re.search(r"after (\d+)s", tail).group(1))  # pyright: ignore[reportOptionalMemberAccess]  match checked in the condition
                 if m and re.search(r"after (\d+)s", tail)
                 else None,
             }
