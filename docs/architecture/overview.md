@@ -42,7 +42,7 @@ flowchart TB
 | ssh (`outpost/ssh/`) | laptop | `Host.run / write / put / get` and `Tunnel`; the only way servers are touched |
 | Gitea client + setup + upload (`outpost/gitea`) | laptop | install over SSH, speak the registry APIs through the tunnel |
 | infra (`outpost/infra`) | laptop, writes to nodes | common steps, egress, compose, swarm, k3s, runner, verify |
-| checks, demo (`outpost/checks`, `outpost/demo.py`) | laptop | smoke tests and the demo pipeline |
+| checks, demo (`outpost/checks`, `outpost/demo`) | laptop | smoke tests and the demo pipeline |
 | dashboard (`outpost/ui`) | laptop, localhost only | reads the platform folder, runs the CLI |
 | lab (`outpost/lab.py`) | laptop | throwaway servers in Docker |
 

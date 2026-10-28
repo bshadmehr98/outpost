@@ -32,11 +32,12 @@ outpost/
   oci/            pull and push container images over HTTP: refs, registry, layout
   http.py         urllib wrapper: private CA, Host header, auth, downloads, retries for reads
   ssh/            Host.run / write / put / get and the Tunnel (one module per job; see its __init__.py)
-  gitea/          client (API + registries), setup (install over SSH), upload, connect
+  gitea/          setup/ (install over ssh, in seven named steps), upload (one uploader per kind), backup,
+                  connect (the tunnel), client (API), packages (the registries), service
   infra/          clients (config files), egress, context, common steps, compose, swarm, k3s, verify,
                   runner, setup, upgrade, proxy
-  demo.py         the demo project: workflow generation, push through Gitea's API, status
-  checks/         smoke check loader and runner
+  demo/           the demo project: workflow generation, push through Gitea's API, status
+  checks/         smoke checks: check, load, run
   ui/             the dashboard: server.py (JSON endpoints), projects.py (folder scan), index.html
   lab.py          throwaway servers in Docker (`outpost lab`)
   templates/      what `outpost init` copies (incl. demo/), and the lab server's Dockerfile

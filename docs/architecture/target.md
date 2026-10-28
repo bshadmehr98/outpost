@@ -64,7 +64,7 @@ outpost/
   oci/                   container images over plain HTTP                  <- oci.py
     __init__.py            overview, file map, re-exports
     refs.py                Ref, parse_ref, gitea_ref, original_ref, GITEA_IMAGE_NAME
-    registry.py            Registry: pull (_get_manifest, _pick_arch, _fetch_blobs), push (blobs from disk), tokens
+    registry.py            Registry: pull (_get_manifest, _pick_arch, _fetch_blobs), push (blobs from disk) -> Pushed(digest, uploaded), tokens
     layout.py              build_layout, layout_ref, digest_of, write_index(), blob_path
     media_types.py         MANIFEST_TYPES, INDEX_TYPES, ACCEPT, REF_ANNOTATION
   fetch/                 download the needs into the box                  <- same package
@@ -90,20 +90,21 @@ outpost/
     config_image.py        config_image_files
   gitea/                 install Gitea, talk to it, fill its registries
     __init__.py            overview, re-exports (setup, upload, backup, restore, connect, ...)
-    service.py             paths on the server, GITEA_CLI, wait_for_gitea, installed_version, token_works()
-    connect.py             connect(system), api_token(system)
-    client.py              GiteaClient: version, orgs, repos, tokens, secrets, runners, workflow runs
-    packages.py      (new) GiteaPackages: upload_* per registry, keys, has_*, push_image   <- client.py
-    upload_formats.py (new) multipart, pypi_name_version, npm_package_json, upload_outcome  <- client.py
+    service.py             paths on the server, GITEA_CLI, wait_for_gitea, installed_version, token_works() (token on stdin)
+    connect.py             connect(system), api_token(system); callers use `gitea.connect` through the package
+    client.py              GiteaClient: version, orgs, repos, tokens, secrets, runners, workflow runs; .packages
+    packages.py      (new) GiteaPackages, AlpineKey: upload_* per registry (files streamed), keys, has_*, push_image   <- client.py
+    upload_formats.py (new) multipart, pypi_name_version, npm_package_json, upload_outcome, UPLOADED, EXISTS  <- client.py
     setup/                 `outpost gitea setup`                          <- gitea/setup.py
-      __init__.py            setup(system, log): seven named steps
+      __init__.py            setup(system, log): the seven `==> [n/7]` steps, _record_gitea
       files.py               APP_INI, UNIT, TOKEN_SCOPES
+      server.py              connect_and_check_arch, ensure_certificates
       binary.py              check_box_has_gitea, install_binary (backup before upgrade), ensure_git
-      service_config.py      write_app_ini, start_gitea
-      admin.py               ensure_admin_user, ensure_api_token
+      service_config.py      make_git_user_and_folders, write_certificate, write_app_ini, start_gitea
+      admin.py               ensure_admin_user, ensure_api_token, ensure_org
       seal.py                seal_gitea_server
-    upload.py              upload(system, sources, log), upload_box, push_config_image, KIND_UPLOADERS
-    backup.py              backup(system, ...), restore(system, ...)
+    upload.py              upload(system, sources, log), upload_box, push_config_image, KIND_UPLOADERS, Tally
+    backup.py              backup(system, out_dir=None, ...), restore(system, archive, log)
   infra/                 set up, verify, upgrade the nodes of an infrastructure
     __init__.py            overview, TYPES, re-exports
     context.py       (new) NodeContext, node_context(system, infra), proxy_host_context(system)
@@ -136,12 +137,12 @@ outpost/
     __init__.py            overview, re-exports
     check.py               Check, REQUIREMENTS
     load.py                load_checks
-    run.py                 run_check, run_checks(system, infra, only, log), proxy_env(system)
+    run.py                 checks_for(system, infra, only), run_checks(system, infra, checks, log), run_check, proxy_check_env(system)
                            <- cli.cmd_check, cli._proxy_check_env
   demo/                  the example project                              <- demo.py
     __init__.py            overview, re-exports
     workflow.py            FETCH_SOURCE, DEPLOY_STEPS, WAIT, PORTS, workflow()
-    project.py             ensure_local, project_files, git_blob_sha, NEEDS_YML
+    project.py             NAME, ensure_local(workspace), project_files, git_blob_sha, NEEDS_YML
     push.py                push(system, log), package_token(system, client)
     status.py              status(system), demo_urls(system)
   rotate_ca.py     (new) `pki rotate`: new CA, then Gitea, the config image and the nodes   <- cli.cmd_pki
@@ -417,6 +418,7 @@ imports sit inside functions). Fix every old name you find.
 | **Bug fixes here** | the backup folder (bug 1), the images tally (bug 7), the backup sha256 (bug 8) |
 | **Risks** | `test_gitea_setup` and `test_day_two` patch `setupmod.Host` and `setupmod.connect`: change them to `outpost.system.Host` and to patching `outpost.gitea.setup.<step module>.connect`, or pass a client. `test_demo` patches `demo.connect` with `lambda p, s: Conn()`: it now takes `system`. `test_proxy` patches `outpost.checks.run_check`, but `run_checks` calls it from inside `checks/run.py`, so tests must patch `outpost.checks.run.run_check`. `test_gitea_client` and `test_real_gitea` call `client.upload_*`: change them to `client.packages.upload_*`. The integration flow reads `rig/backups/` (test_full_flow: 120, 162): after the fix, the archive lands there. Keep the `==> [n/7]` step lines: the dashboard's progress panel and `explain.summarize` parse them ("Gitea X is up at", "backup done: ... (N MB)", "N uploaded, M already there", "committed N file"). |
 | **Verify** | CLAUDE.md checks; help diff; `grep -rn "noqa: C901" outpost/gitea` is empty |
+| **Done (as built)** | All of the above. `gitea/__init__.py` re-exports `setup`, `upload`, `upload_box`, `push_config_image`, `backup`, `restore`, `connect`, `api_token`, `GiteaClient`, `GiteaPackages`, `AlpineKey`. Every caller (cli, `rotate_ca`, `infra/runner`, `demo`, the setup's `ensure_org`) calls `gitea.connect(system)` through the package, so tests fake the API by replacing one name, `outpost.gitea.connect`, as they replace `outpost.system.Host` for ssh. The setup's steps live in `setup/server.py` (new: `connect_and_check_arch`, `ensure_certificates`), `binary.py`, `service_config.py` (also `make_git_user_and_folders`, `write_certificate`), `admin.py` (also `ensure_org`) and `seal.py`; the `==> [n/7]` lines are unchanged. `oci.Registry.push` returns `oci.Pushed(digest, uploaded)`: uploaded is False when every blob was there and the tag already named the manifest (then no manifest PUT either). The ui builds an `AirGappedSystem` for `demo.demo_urls` and `demo.status`. Bugs fixed: images counted as uploaded when Gitea had them (bug 7); the backup's sha256 read the whole archive and was skipped above 2 GB (bug 8, now `sha256_file`); generic, Debian, Alpine and RPM uploads read the whole file into memory (now streamed); the API token was on curl's command line on the Gitea server in setup and restore (now `service.token_works`, header on stdin); `docs/architecture/gitea.md` said the token's scope was `all`. Left for later: the admin password is still on the `gitea admin user create` command line during the first setup; `gitea/setup/seal.py` and `gitea/upload.py` still import `infra.egress`, `infra.hostsfile`, `infra.clients` (D moves them down); `hosts.record`/`hosts.inspect` keep their old names (D); the runner's registration token is on `gitea-runner register`'s command line (`infra/runner.py`, D). |
 
 ### D. Infrastructure, servers, report, dashboard, lab
 

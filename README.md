@@ -355,9 +355,9 @@ outpost/
   box.py oci/     manifest, pack, sign; pull and push images over HTTP
   ssh/ http.py    Host.run / write / put / get, the Tunnel; urllib with a private CA
   pki.py          CA, server certificate, box signing, with the openssl CLI
-  gitea/          client (API + registries), setup over SSH, upload, connect (tunnel)
+  gitea/          setup over ssh, upload, backup, connect (tunnel), client (API), packages (registries)
   infra/          clients (config files), common steps, egress, compose, swarm, k3s, runner, verify
-  checks/ demo.py smoke checks; the demo project's workflow, push and status
+  checks/ demo/   smoke checks; the demo project's workflow, push and status
   hosts.py        one SSH round trip per server: versions, seal, workloads, cached in state/hosts/
   report.py       the proof report, one HTML page from state/
   ui/             the dashboard: server.py, status.py, explain.py (errors into sentences), projects.py, index.html
