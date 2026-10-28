@@ -158,8 +158,11 @@ def test_2_gitea_setup(rig):
 
 
 def test_2b_backup_and_restore(rig):
+    before = set((rig / "backups").glob("gitea-*.tar.gz"))
     assert main(["--dir", str(rig), "gitea", "backup"]) == 0
-    archive = sorted((rig / "backups").glob("gitea-*.tar.gz"))[-1]
+    made = set((rig / "backups").glob("gitea-*.tar.gz")) - before
+    assert len(made) == 1, "gitea backup writes to backups/ in the workspace, wherever outpost runs"
+    archive = made.pop()
     assert archive.stat().st_size > 1000
     assert main(["--dir", str(rig), "gitea", "restore", str(archive)]) == 0
     token = (rig / "secrets" / "gitea-token").read_text().strip()
