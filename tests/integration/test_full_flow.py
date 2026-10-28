@@ -139,8 +139,10 @@ def test_4_infra_setup_and_verify(rig):
 def test_5_check(rig):
     assert main(["--dir", str(rig), "check", "--infra", "dev"]) == 0
     results = json.loads((rig / "state" / "check-dev.json").read_text())["results"]
-    assert results[0]["ok"], json.dumps(results, indent=1)
-    assert "Hello from Outpost" in results[0]["steps"][1]["output"]
+    by_name = {r["name"]: r for r in results}
+    assert {"hello-python", "hello-alpine"} <= set(by_name) and all(r["ok"] for r in by_name.values()), json.dumps(results, indent=1)
+    assert "Hello from Outpost" in by_name["hello-python"]["steps"][1]["output"]
+    assert "curl" in by_name["hello-alpine"]["steps"][1]["output"]   # curl came from Gitea's Alpine registry
 
 
 def test_6_egress_toggle(rig):
