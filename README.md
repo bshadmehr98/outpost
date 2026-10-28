@@ -6,7 +6,7 @@
   <img alt="version 0.1" src="https://img.shields.io/badge/version-0.1-blue">
   <img alt="python 3.11+" src="https://img.shields.io/badge/python-3.11%2B-3776ab">
   <img alt="dependencies: PyYAML only" src="https://img.shields.io/badge/dependencies-PyYAML%20only-success">
-  <img alt="tests: 153 unit, 23 integration" src="https://img.shields.io/badge/tests-153%20unit%20%C2%B7%2023%20integration-success">
+  <img alt="tests: 217 unit, 29 integration" src="https://img.shields.io/badge/tests-217%20unit%20%C2%B7%2029%20integration-success">
   <img alt="license MIT" src="https://img.shields.io/badge/license-MIT-lightgrey">
 </p>
 
@@ -100,7 +100,7 @@ afternoon:
   Gitea, `pki rotate` for the CA, `report` for one HTML page of evidence.
 - **A lab.** `outpost lab up` makes throwaway servers in Docker (systemd, sshd, real iptables),
   so the whole flow runs on one machine. The integration tests use the same lab.
-- **No framework.** About 4,500 lines of Python, standard library plus PyYAML. Servers get
+- **No framework.** About 7,900 lines of Python, standard library plus PyYAML. Servers get
   shell scripts and static binaries you can read in `outpost/infra/`.
 
 ## Try it in twenty minutes
@@ -353,7 +353,7 @@ outpost/
   cli.py          the commands, in the order you use them
   needs/ fetch/   lockfile parsers; one fetcher per kind (images, pypi, npm, apt, apk, rpm, files)
   box.py oci.py   manifest, pack, sign; pull and push images over HTTP
-  ssh.py http.py  Host.run / write / put, the Tunnel; urllib with a private CA
+  ssh/ http.py    Host.run / write / put / get, the Tunnel; urllib with a private CA
   pki.py          CA, server certificate, box signing, with the openssl CLI
   gitea/          client (API + registries), setup over SSH, upload, connect (tunnel)
   infra/          clients (config files), common steps, egress, compose, swarm, k3s, runner, verify
@@ -363,7 +363,7 @@ outpost/
   ui/             the dashboard: server.py, status.py, explain.py (errors into sentences), projects.py, index.html
   lab.py          throwaway servers in Docker
   templates/      what `outpost init` copies, and the lab server's Dockerfile
-tests/            134 unit tests with a fake SSH host and a fake Gitea speaking real HTTP
+tests/            217 unit tests with a fake SSH host and a fake Gitea speaking real HTTP
 tests/integration real Gitea container and Docker Hub; the full flow on the lab (fetch, a Gitea upgrade,
                   backup and restore, compose, swarm, k3s, the demo, a reboot, the dashboard's server side)
 ```

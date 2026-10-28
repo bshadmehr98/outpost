@@ -14,6 +14,8 @@ OUTPOST_INTEGRATION=1 .venv/bin/python -m pytest tests/integration   # real Gite
 
 - **`FakeHost`** stands in for `outpost.ssh.Host`. It records every script and file that a
   command would send to a server, and answers scripts from a list of `(regex, stdout)` pairs.
+  Its `run()` has the real signature: a failing `Result` is returned, and raises `CommandFailed`
+  only with `raise_on_failure=True`.
   Tests then assert on what was sent and in which order: "the binary was not re-uploaded",
   "the seal came before the Docker install", "no `generate-access-token` on the second run".
 - **`FakeGitea`** is a real HTTP server in a thread that implements enough of Gitea's API and

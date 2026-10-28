@@ -39,7 +39,7 @@ dashboard runs the same commands and appends `[outpost exit N after Ss]` to each
 
 | variable | effect |
 |---|---|
-| `OUTPOST_SSH_CONFIG` | ssh config file to use instead of `~/.ssh/config` (what `ssh_config:` in `servers.yml` sets) |
+| `OUTPOST_SSH_CONFIG` | ssh config file to use instead of `~/.ssh/config` (what `ssh_config:` in `servers.yml` sets). Both may be set only if they name the same file; two different files are an error. A file that does not exist fails at once, before any ssh call |
 | `OUTPOST_INTEGRATION=1` | lets the integration tests run |
 | `OUTPOST_BOX`, `OUTPOST_RIG_DIR`, `OUTPOST_KEEP_RIG`, `OUTPOST_PREVIOUS_GITEA` | integration test knobs; see [testing](../development/testing.md) |
 

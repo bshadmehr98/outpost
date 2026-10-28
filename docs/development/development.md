@@ -24,7 +24,7 @@ outpost/
   pki.py          CA, server cert, box signing (openssl CLI)
   oci.py          pull and push container images over HTTP
   http.py         urllib wrapper: private CA, Host header, auth, downloads
-  ssh.py          Host.run / write / put and the Tunnel
+  ssh/            Host.run / write / put / get and the Tunnel (one module per job; see its __init__.py)
   gitea/          client (API + registries), setup (install over SSH), upload, connect
   infra/          clients (config files), egress, common steps, compose, swarm, k3s, verify, runner
   demo.py         the demo project: workflow generation, push through Gitea's API, status
