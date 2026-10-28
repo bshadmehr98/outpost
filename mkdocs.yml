@@ -48,7 +48,9 @@ nav:
       - reference/maintenance.md
       - reference/distribution.md
       - reference/limits.md
+  - Glossary: glossary.md
   - Development:
       - development/development.md
       - development/testing.md
       - development/decisions.md
+      - development/style.md
