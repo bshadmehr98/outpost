@@ -20,6 +20,7 @@ from outpost.client_config import PATH_CA, PATH_NODE_RESOLV_CONF
 from outpost.endpoints import ProxyEndpoint
 from outpost.infra import node
 from outpost.infra.context import NodeContext
+from outpost.infra.verify import output_contains
 from outpost.ssh import Host
 
 CONFIGMAP = "outpost-proxy"
@@ -64,7 +65,7 @@ def verifications(ctx: NodeContext) -> list[tuple[str, str]]:
     """What a k3s node runs on top of the node verifications."""
     return [
         ("k3s installed", "k3s --version | head -1"),
-        (f"k3s at pinned version {versions.K3S}", f"k3s --version | head -1 | grep -q {versions.K3S.split('+')[0]}"),
+        (f"k3s at pinned version {versions.K3S}", output_contains("k3s --version", versions.K3S.split("+")[0])),
         ("registries.yaml points at gitea", f"grep -q {ctx.gitea.name} {REGISTRIES_PATH}"),
         ("k3s service active", "systemctl is-active k3s || systemctl is-active k3s-agent"),
     ]

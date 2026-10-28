@@ -62,7 +62,7 @@ def node_verifications(ctx: NodeContext) -> list[tuple[str, str]]:
         ("egress script is the current one", "grep -q 'build_chain $ipt security DROP' /usr/local/sbin/outpost-egress"),
         (
             f"coredns at pinned version {versions.COREDNS}",
-            f"/usr/local/bin/coredns -version | grep -q {versions.COREDNS}",
+            output_contains("/usr/local/bin/coredns -version", versions.COREDNS),
         ),
         (
             "pip.conf unchanged",
@@ -110,6 +110,16 @@ def by_family(apt: str, apk: str, rpm: str) -> str:
         '. /etc/os-release 2>/dev/null; case " ${ID:-} ${ID_LIKE:-} " in '
         f"*alpine*) {apk} ;; *rhel*|*fedora*|*centos*|*rocky*|*almalinux*) {rpm} ;; *) {apt} ;; esac"
     )
+
+
+def output_contains(command: str, text: str) -> str:
+    """A shell test that passes when the output of command contains text.
+
+    Not `command | grep -q text`: grep -q exits at the first match, and a command that writes again
+    afterwards (coredns -version writes two lines) dies of SIGPIPE, which `set -o pipefail` from
+    Host.run turns into a failed verification, now and then, under load.
+    """
+    return f'grep -qF -- {shlex.quote(text)} <<<"$({command})"'
 
 
 def gitea_only_sources_by_family(g: GiteaEndpoint) -> dict[str, str]:

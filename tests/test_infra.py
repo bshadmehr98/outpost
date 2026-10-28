@@ -496,6 +496,37 @@ def test_upgrade_script_works_without_id_like_under_set_u(tmp_path):
         assert out.returncode == 0 and ran in out.stdout, out.stderr
 
 
+def test_a_version_verification_survives_a_tool_that_writes_after_the_match(tmp_path):
+    """Flaky: `coredns -version | grep -q 1.15.0` failed now and then after a reboot. grep -q exits at
+    the first match, coredns then writes its second line into a closed pipe and dies of SIGPIPE, and
+    `set -o pipefail` makes that the verification's result."""
+    writes_twice = "{ echo CoreDNS-1.15.0; sleep 0.3; echo linux/amd64; }"
+    assert run_like_host_run(f"{writes_twice} | grep -q 1.15.0", tmp_path / "os-release").returncode != 0
+    script = verify.verification_script([("coredns", verify.output_contains(writes_twice, "1.15.0"))])
+    out = run_like_host_run(script, tmp_path / "os-release")
+    assert verify.parse_verifications(out.stdout) == [{"name": "coredns", "ok": True, "detail": ""}], out.stderr
+    script = verify.verification_script([("coredns", verify.output_contains(writes_twice, "1.16.0"))])
+    assert verify.parse_verifications(run_like_host_run(script, tmp_path / "x").stdout)[0]["ok"] is False
+
+
+def test_no_verification_pipes_into_grep_q():
+    """Every verification that looks for a version or a source reads the whole output (output_contains)."""
+    from outpost.config import ProxyConfig
+    from outpost.infra import runner
+    from outpost.infra.proxy import host_verifications
+
+    every = (
+        verify.node_verifications(CTX)
+        + compose.verifications(CTX)
+        + swarm.verifications(CTX)
+        + k3s.verifications(CTX)
+        + runner.verifications()
+        + host_verifications(CTX, ProxyConfig(host="gitea-1", allow=["api.twilio.com"]))
+    )
+    piped = [name for name, command in every if "version | grep -q" in command or "policy tinyproxy | grep" in command]
+    assert piped == [] and any("coredns" in name for name, _ in every)
+
+
 def test_k3s_args_reach_the_installer_exactly(tmp_path):
     """INSTALL_K3S_EXEC was quoted with Python's repr(): an `args:` with a ' got double quotes, in which
     the shell expands $ and backticks."""

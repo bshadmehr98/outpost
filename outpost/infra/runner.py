@@ -24,6 +24,7 @@ from outpost.client_config import RUNNER_HOME
 from outpost.config import Servers
 from outpost.infra import node
 from outpost.infra.context import NodeContext
+from outpost.infra.verify import output_contains
 from outpost.ssh import Host
 from outpost.system import AirGappedSystem
 
@@ -136,7 +137,7 @@ def verifications() -> list[tuple[str, str]]:
         ("actions runner active", f"test ! -s {REGISTRATION} || systemctl is-active outpost-runner"),
         (
             f"runner at pinned version {versions.RUNNER}",
-            f"test ! -s {REGISTRATION} || {BIN} --version | grep -q {versions.RUNNER}",
+            f"test ! -s {REGISTRATION} || {output_contains(f'{BIN} --version', versions.RUNNER)}",
         ),
     ]
 

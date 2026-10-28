@@ -3,6 +3,7 @@
 from outpost import versions
 from outpost.infra import node
 from outpost.infra.context import NodeContext
+from outpost.infra.verify import output_contains
 from outpost.ssh import Host
 
 
@@ -21,9 +22,9 @@ def verifications(ctx: NodeContext) -> list[tuple[str, str]]:
         ("docker running", "docker info --format '{{.ServerVersion}}'"),
         (
             f"docker at pinned version {versions.DOCKER}",
-            f"docker info --format '{{{{.ServerVersion}}}}' | grep -q {versions.DOCKER}",
+            output_contains("docker info --format '{{.ServerVersion}}'", versions.DOCKER),
         ),
-        (f"compose at pinned version {versions.COMPOSE}", f"docker compose version | grep -q {versions.COMPOSE}"),
+        (f"compose at pinned version {versions.COMPOSE}", output_contains("docker compose version", versions.COMPOSE)),
         ("compose plugin", "docker compose version"),
         ("buildx plugin", "docker buildx version"),
         ("docker trusts and reaches gitea registry", node.registry_verification(ctx)),

@@ -360,12 +360,11 @@ def test_10_reboot_keeps_the_seal_and_the_apps(rig):
     """Restarting a lab container is the closest thing to a reboot: systemd starts from scratch, so the
     egress unit, CoreDNS, Docker, k3s and the runner must all come back, sealed, and the demo must serve."""
     state = json.loads((rig / "state" / "demo.json").read_text())
-    for alias in ("lab-node-1", "lab-k3s"):
+    services = {"lab-node-1": "outpost-egress outpost-dns docker", "lab-k3s": "outpost-egress outpost-dns k3s"}
+    for alias, wanted in services.items():
         sh("docker", "restart", alias)
-        for _ in range(60):
-            if ssh(
-                alias, "systemctl is-active outpost-egress docker k3s 2>/dev/null | grep -c active", check=False
-            ).stdout.strip() not in ("", "0"):
+        for _ in range(60):  # is-active exits 0 only when every unit named is active
+            if ssh(alias, f"systemctl is-active {wanted}", check=False).returncode == 0:
                 break
             time.sleep(2)
         time.sleep(5)

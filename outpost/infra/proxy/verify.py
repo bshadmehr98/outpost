@@ -8,7 +8,7 @@ from outpost.config import ProxyConfig
 from outpost.infra.context import NodeContext
 from outpost.infra.proxy.allow_list import allow_file, probe_name, refused_name
 from outpost.infra.proxy.tinyproxy import ALLOW_PATH, LOG_PATH, USER
-from outpost.infra.verify import by_family, run_verifications
+from outpost.infra.verify import by_family, output_contains, run_verifications
 from outpost.needs import PROXY_PACKAGE
 from outpost.ssh import Host
 
@@ -68,9 +68,9 @@ def host_verifications(ctx: NodeContext, cfg: ProxyConfig) -> list[tuple[str, st
         (
             "tinyproxy installed from gitea",
             by_family(
-                apt=f"dpkg -s {PROXY_PACKAGE} >/dev/null 2>&1 && apt-cache policy {PROXY_PACKAGE} | grep -q {shlex.quote(g.apt_repo)} && {PROXY_PACKAGE} -v",
+                apt=f"dpkg -s {PROXY_PACKAGE} >/dev/null 2>&1 && {output_contains(f'apt-cache policy {PROXY_PACKAGE}', g.apt_repo)} && {PROXY_PACKAGE} -v",
                 apk="echo 'Alpine is not supported as a proxy host'; false",
-                rpm=f"rpm -q {PROXY_PACKAGE} && dnf -q list --installed {PROXY_PACKAGE} 2>/dev/null | grep -q '@outpost-'",
+                rpm=f"rpm -q {PROXY_PACKAGE} && {output_contains(f'dnf -q list --installed {PROXY_PACKAGE} 2>/dev/null', '@outpost-')}",
             ),
         ),
         (
