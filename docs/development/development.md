@@ -42,7 +42,11 @@ outpost/
                   verify (the verifications and their script), proxy/ (the egress proxy: tinyproxy)
   demo/           the demo project: workflow generation, push through Gitea's API, status
   checks/         smoke checks: check, load, run
-  ui/             the dashboard: server.py (JSON endpoints), projects.py (folder scan), index.html
+  hosts/          what each server runs: inspect_server, the state/hosts/ cache, roles, version drift
+  report/         the proof report: data (from state/), verdict, html (one function per section)
+  ui/             the dashboard: server.py (route tables, same-origin guard), overview.py, files.py,
+                  servers_form.py, reach.py (ssh from the page), runs.py, status/, projects/ (folder scan),
+                  explain.py, index.html
   lab.py          throwaway servers in Docker (`outpost lab`)
   templates/      what `outpost init` copies (incl. demo/), and the lab server's Dockerfile
 tests/            unit tests with a fake SSH host and a fake Gitea speaking real HTTP

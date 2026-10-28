@@ -358,9 +358,9 @@ outpost/
   gitea/          setup over ssh, upload, backup, connect (tunnel), client (API), packages (registries)
   infra/          clients (config files), common steps, egress, compose, swarm, k3s, runner, verify
   checks/ demo/   smoke checks; the demo project's workflow, push and status
-  hosts.py        one SSH round trip per server: versions, seal, workloads, cached in state/hosts/
-  report.py       the proof report, one HTML page from state/
-  ui/             the dashboard: server.py, status.py, explain.py (errors into sentences), projects.py, index.html
+  hosts/          one SSH round trip per server: versions, seal, workloads, cached in state/hosts/
+  report/         the proof report, one HTML page from state/
+  ui/             the dashboard: server.py (routes), overview.py, status/, projects/, explain.py, index.html
   lab.py          throwaway servers in Docker
   templates/      what `outpost init` copies, and the lab server's Dockerfile
 tests/            unit tests with a fake SSH host and a fake Gitea speaking real HTTP
