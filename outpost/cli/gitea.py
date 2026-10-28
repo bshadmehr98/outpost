@@ -2,9 +2,8 @@
 
 from pathlib import Path
 
+from outpost import gitea
 from outpost.cli.output import say
-from outpost.gitea.backup import backup, restore
-from outpost.gitea.setup import setup
 from outpost.infra import egress
 from outpost.system import AirGappedSystem
 from outpost.workspace import STATE_GITEA
@@ -28,21 +27,20 @@ def run(args) -> int:
     if args.action == "setup":
         return _setup(system)
     if args.action == "backup":
-        out_dir = Path(args.out) if args.out else system.workspace.backups_dir
-        backup(system.workspace, system.servers, out_dir, keep_on_server=args.keep_on_server, log=say)
+        gitea.backup(system, Path(args.out) if args.out else None, keep_on_server=args.keep_on_server, log=say)
         return 0
     if args.action == "restore":
         if not args.archive:
             raise RuntimeError("gitea restore needs the archive: outpost gitea restore backups/gitea-....tar.gz")
-        restore(system.workspace, system.servers, Path(args.archive), log=say)
+        gitea.restore(system, Path(args.archive), log=say)
         return 0
     return _info(system)
 
 
 def _setup(system: AirGappedSystem) -> int:
-    gitea = setup(system.workspace, system.servers, log=say)
+    installed = gitea.setup(system, log=say)
     say()
-    say(f"Gitea {gitea['version']} is up at https://{gitea['name']} ({gitea['ip']})")
+    say(f"Gitea {installed['version']} is up at https://{installed['name']} ({installed['ip']})")
     say(f"  web login: {system.servers.gitea.user} / secrets/gitea-admin-password")
     say("Next: outpost upload")
     return 0

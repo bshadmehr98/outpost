@@ -2,8 +2,8 @@
 
 from pathlib import Path
 
+from outpost import gitea
 from outpost.cli.output import say
-from outpost.gitea.upload import upload
 from outpost.system import AirGappedSystem
 
 
@@ -15,6 +15,6 @@ def add_parser(commands) -> None:
 
 def run(args) -> int:
     system = AirGappedSystem.load(args.dir)
-    upload(system, sources=[Path(source) for source in args.source], log=say)
+    gitea.upload(system, sources=[Path(source) for source in args.source], log=say)
     say("Next: outpost infra setup <name>")
     return 0

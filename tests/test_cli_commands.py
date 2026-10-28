@@ -1,6 +1,7 @@
 """The command table in outpost/cli, the backup folder default, and upload's signature warnings."""
 
 import re
+from pathlib import Path
 
 import pytest
 
@@ -8,6 +9,7 @@ import outpost.cli
 from outpost.cli import build_parser, main
 from outpost.cli.main import COMMANDS
 from outpost.workspace import STATE_GITEA, Workspace
+from tests.conftest import FakeHost
 
 
 def test_every_command_module_declares_its_parser_and_run():
@@ -43,15 +45,15 @@ def _smallest_command_line(name: str) -> list[str]:
 
 @pytest.mark.parametrize("out", [None, "elsewhere"])
 def test_gitea_backup_goes_to_the_workspace_backups_by_default(workspace_dir, tmp_path, monkeypatch, out):
-    import outpost.cli.gitea as gitea_command
+    import outpost.system
 
-    seen = []
-    monkeypatch.setattr(gitea_command, "backup", lambda workspace, servers, out_dir, **kw: seen.append(out_dir))
+    gitea_server = FakeHost("gitea-1", responses=[(r"gitea --version", "gitea version 28.2.0 built with go")])
+    monkeypatch.setattr(outpost.system, "Host", lambda alias: gitea_server)
     monkeypatch.chdir(tmp_path)  # not the workspace: the default must not depend on where outpost runs
     argv = ["--dir", str(workspace_dir), "gitea", "backup"] + (["--out", out] if out else [])
     assert main(argv) == 0
     expected = Workspace(workspace_dir).backups_dir if out is None else tmp_path / out
-    assert seen[0].resolve() == expected.resolve()
+    assert Path(gitea_server.gets[0][1]).parent.resolve() == expected.resolve()
 
 
 def test_upload_warns_when_it_cannot_check_the_signature(workspace_dir, capsys):

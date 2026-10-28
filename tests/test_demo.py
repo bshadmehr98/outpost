@@ -2,12 +2,14 @@ import json
 
 import yaml
 
+import outpost.gitea
 from outpost import demo
 from outpost.cli import main
 from outpost.config import load_servers
 from outpost.endpoints import GiteaEndpoint
 from outpost.infra import runner
 from outpost.infra.context import NodeContext
+from outpost.system import AirGappedSystem
 from outpost.workspace import Workspace
 from tests.conftest import FakeHost
 
@@ -81,7 +83,7 @@ def test_urls_come_from_setup_state(tmp_path):
     (tmp_path / "servers.yml").write_text(SERVERS)
     workspace = Workspace(tmp_path)
     workspace.write_state("infra-dev", {"type": "compose", "nodes": {"n1": {"ip": "10.0.0.11"}}})
-    u = demo.urls(workspace, load_servers(workspace.servers_file))
+    u = demo.demo_urls(AirGappedSystem(workspace, load_servers(workspace.servers_file)))
     assert u["dev"] == {
         "type": "compose",
         "node": "n1",
@@ -107,7 +109,7 @@ class FakeClient:
         self.secrets[name] = value
 
     def repo_files(self, owner, repo):
-        return {p: demo._blob_sha(c) for p, c in self.files.items()}
+        return {p: demo.git_blob_sha(c) for p, c in self.files.items()}
 
     def commit_files(self, owner, repo, files, message, existing):
         self.commits.append(files)
@@ -147,10 +149,10 @@ def test_push_commits_only_changes_and_makes_one_package_token(tmp_path, monkeyp
         def __exit__(self, *a):
             return False
 
-    monkeypatch.setattr(demo, "connect", lambda p, s: Conn())
-    servers = load_servers(workspace.servers_file)
+    monkeypatch.setattr(outpost.gitea, "connect", lambda system: Conn())
+    system = AirGappedSystem.load(tmp_path)
 
-    result = demo.push(workspace, servers)
+    result = demo.push(system)
     assert (
         client.secrets == {"PACKAGE_TOKEN": "pkgtoken"} and workspace.read_secret("gitea-package-token") == "pkgtoken"
     )
@@ -163,10 +165,10 @@ def test_push_commits_only_changes_and_makes_one_package_token(tmp_path, monkeyp
     )
     assert json.loads((tmp_path / "state" / "demo.json").read_text())["commit"] == "abc123def456"
 
-    demo.push(workspace, servers)
+    demo.push(system)
     assert len(client.commits) == 1 and client.tokens_made == 1  # nothing changed, token kept
     (tmp_path / "demo" / "README.md").write_text("changed\n")
-    demo.push(workspace, servers)
+    demo.push(system)
     assert list(client.commits[1]) == ["README.md"]
     assert "nothing changed" in capsys.readouterr().out
 
@@ -178,7 +180,7 @@ def test_push_refuses_without_a_set_up_infrastructure(tmp_path, monkeypatch):
     import pytest
 
     with pytest.raises(RuntimeError, match="infra setup"):
-        demo.push(Workspace(tmp_path), load_servers(tmp_path / "servers.yml"))
+        demo.push(AirGappedSystem.load(tmp_path))
 
 
 def test_runner_labels_and_install(tmp_path):
@@ -230,8 +232,8 @@ def test_push_replaces_a_package_token_gitea_does_not_know(tmp_path, monkeypatch
         def __exit__(self, *a):
             return False
 
-    monkeypatch.setattr(demo, "connect", lambda p, s: Conn())
-    demo.push(workspace, load_servers(workspace.servers_file))
+    monkeypatch.setattr(outpost.gitea, "connect", lambda system: Conn())
+    demo.push(AirGappedSystem.load(tmp_path))
     assert (
         client.tokens_made == 1
         and workspace.read_secret("gitea-package-token") == "pkgtoken"

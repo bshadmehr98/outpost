@@ -14,8 +14,7 @@ to run on any node that has Docker.
 
 import shlex
 
-from .. import versions
-from ..gitea.connect import connect
+from .. import gitea, versions
 from ..system import AirGappedSystem
 from . import common
 from .context import NodeContext
@@ -68,7 +67,7 @@ def labels_for(servers, alias: str) -> list[str]:
 def install_runner_for(system: AirGappedSystem, ctx: NodeContext, host, log=print) -> dict:
     """A runner on host (the first node of an infrastructure), registered with the system's Gitea, so
     `outpost demo push` (or your own workflows) can deploy there."""
-    with connect(system.workspace, system.servers) as client:
+    with gitea.connect(system) as client:
         token = client.runner_registration_token()
         known = {runner["name"] for runner in client.runners()}
     return install(host, ctx, labels_for(system.servers, host.alias), token, known, log=log)

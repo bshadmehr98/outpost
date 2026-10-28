@@ -4,11 +4,11 @@ from contextlib import contextmanager
 
 import pytest
 
-from outpost import versions
-from outpost.config import load_servers
-from outpost.gitea import setup as setupmod
+import outpost.gitea
+import outpost.system
+from outpost import gitea, versions
 from outpost.ssh import Result
-from outpost.workspace import Workspace
+from outpost.system import AirGappedSystem
 from tests.conftest import FakeHost
 
 
@@ -35,19 +35,20 @@ def prepared(workspace_dir, monkeypatch):
             (r"test -s /etc/gitea/app.ini", Result(1, "", "")),
         ],
     )
-    monkeypatch.setattr(setupmod, "Host", lambda alias: host)
+    monkeypatch.setattr(outpost.system, "Host", lambda alias: host)
 
     @contextmanager
-    def fake_connect(workspace, servers):
+    def fake_connect(system):
         yield FakeClient()
 
-    monkeypatch.setattr(setupmod, "connect", fake_connect)
-    return Workspace(workspace_dir), load_servers(workspace_dir / "servers.yml"), host
+    monkeypatch.setattr(outpost.gitea, "connect", fake_connect)
+    return AirGappedSystem.load(workspace_dir), host
 
 
 def test_setup_installs_everything_in_order(prepared):
-    workspace, servers, host = prepared
-    info = setupmod.setup(workspace, servers, log=lambda *_: None)
+    system, host = prepared
+    workspace = system.workspace
+    info = gitea.setup(system, log=lambda *_: None)
     assert info == {"name": "gitea.internal", "ip": "10.0.0.5", "version": "28.2.0"}
 
     assert host.puts == [
@@ -80,8 +81,9 @@ def test_setup_installs_everything_in_order(prepared):
 
 
 def test_setup_is_idempotent(prepared):
-    workspace, servers, host = prepared
-    setupmod.setup(workspace, servers, log=lambda *_: None)
+    system, host = prepared
+    workspace = system.workspace
+    gitea.setup(system, log=lambda *_: None)
     host.responses = [
         (r"gitea --version", f"Gitea version {versions.GITEA} built with go"),
         (r"admin user list", "outpost\n"),
@@ -91,7 +93,7 @@ def test_setup_is_idempotent(prepared):
     host.puts.clear()
     host.scripts.clear()
     token_before = workspace.read_secret("gitea-token")
-    setupmod.setup(workspace, servers, log=lambda *_: None)
+    gitea.setup(system, log=lambda *_: None)
     assert host.puts == []  # binary not re-uploaded
     assert not any("admin user create" in s for s in host.scripts)
     assert not any("generate-access-token" in s for s in host.scripts)
@@ -100,29 +102,66 @@ def test_setup_is_idempotent(prepared):
 
 def test_setup_needs_the_binary(workspace_dir):
     with pytest.raises(RuntimeError, match="outpost fetch --only files"):
-        setupmod.setup(Workspace(workspace_dir), load_servers(workspace_dir / "servers.yml"), log=lambda *_: None)
+        gitea.setup(AirGappedSystem.load(workspace_dir), log=lambda *_: None)
 
 
 def test_setup_replaces_a_token_this_gitea_does_not_accept(prepared):
     """After `lab down` and `lab up` (or a reinstall) the old secrets/gitea-token is unknown to Gitea."""
-    workspace, servers, host = prepared
+    system, host = prepared
+    workspace = system.workspace
     workspace.write_secret("gitea-token", "stale")
     host.responses.insert(0, (r"api/v1/user", "401"))
-    setupmod.setup(workspace, servers, log=lambda *a: None)
+    gitea.setup(system, log=lambda *a: None)
     assert workspace.read_secret("gitea-token") == "abc123token"
 
 
 def test_setup_again_keeps_the_proxy_exception_on_the_gitea_host(prepared):
-    workspace, servers, host = prepared
-    setupmod.setup(workspace, servers, log=lambda *_: None)
+    system, host = prepared
+    workspace = system.workspace
+    gitea.setup(system, log=lambda *_: None)
     assert "--uid-owner" not in host.files["/usr/local/sbin/outpost-egress"]  # no proxy: the plain seal
     path = workspace.servers_file
     path.write_text(path.read_text() + "\negress_proxy: {allow: [api.twilio.com]}\n")
     workspace.write_state("proxy", {"host": "gitea-1", "url": "http://10.0.0.5:3128", "allow": ["api.twilio.com"]})
-    setupmod.setup(workspace, load_servers(path), log=lambda *_: None)
+    gitea.setup(AirGappedSystem.load(workspace.root), log=lambda *_: None)
     script = host.files["/usr/local/sbin/outpost-egress"]
     assert 'PROXY_USER="outpost-proxy"' in script and "--uid-owner" in script
     # the proxy moved elsewhere: the Gitea host gets the plain seal back
     path.write_text(path.read_text().replace("{allow: [api.twilio.com]}", "{host: proxy-1, allow: [api.twilio.com]}"))
-    setupmod.setup(workspace, load_servers(path), log=lambda *_: None)
+    gitea.setup(AirGappedSystem.load(workspace.root), log=lambda *_: None)
     assert "--uid-owner" not in host.files["/usr/local/sbin/outpost-egress"]
+
+
+def test_the_token_is_never_on_a_command_line(prepared):
+    """`ps` on the Gitea server shows every command line; the token reaches curl on stdin instead."""
+    system, host = prepared
+    system.workspace.write_secret("gitea-token", "secret-token-123")
+    gitea.setup(system, log=lambda *_: None)
+    check = next(s for s in host.scripts if "api/v1/user" in s)
+    curl_line, *here_document = check.splitlines()
+    assert "secret-token-123" not in curl_line and "-H @-" in curl_line
+    assert here_document == ["Authorization: token secret-token-123", "OUTPOST_TOKEN_HEADER"]
+
+
+def test_token_works_hands_curl_the_header_on_stdin(tmp_path):
+    """Run the real script with bash and a curl that records what it got."""
+    import subprocess
+
+    from outpost.gitea.service import token_works
+
+    (tmp_path / "curl").write_text(f'#!/bin/sh\necho "$@" > {tmp_path}/argv\ncat > {tmp_path}/stdin\nprintf 200\n')
+    (tmp_path / "curl").chmod(0o755)
+
+    class LocalHost:
+        def run(self, script, raise_on_failure=False, timeout=0):
+            done = subprocess.run(
+                ["bash", "-c", "set -euo pipefail\n" + script],
+                capture_output=True,
+                text=True,
+                env={"PATH": f"{tmp_path}:/usr/bin:/bin"},
+            )
+            return Result(done.returncode, done.stdout, done.stderr)
+
+    assert token_works(LocalHost(), "secret-token-123")
+    assert "secret-token-123" not in (tmp_path / "argv").read_text()
+    assert (tmp_path / "stdin").read_text() == "Authorization: token secret-token-123\n"

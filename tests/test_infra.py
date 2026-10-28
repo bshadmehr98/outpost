@@ -2,7 +2,7 @@ import json
 
 from outpost import versions
 from outpost.endpoints import GiteaEndpoint
-from outpost.gitea.client import AlpineKey
+from outpost.gitea import AlpineKey
 from outpost.infra import clients, common, compose, egress, k3s, swarm, verify
 from outpost.infra.context import NodeContext
 from tests.conftest import FakeHost

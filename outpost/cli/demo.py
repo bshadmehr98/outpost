@@ -18,9 +18,9 @@ def add_parser(commands) -> None:
 def run(args) -> int:
     system = AirGappedSystem.load(args.dir)
     if args.action == "push":
-        demo.push(system.workspace, system.servers, log=say)
+        demo.push(system, log=say)
         return 0
-    status = demo.status(system.workspace, system.servers)
+    status = demo.status(system)
     _say_workflow_runs(status)
     _say_what_is_served(status)
     return 0

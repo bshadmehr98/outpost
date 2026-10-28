@@ -1,36 +1,50 @@
-"""How the laptop reaches Gitea's API: an SSH tunnel to the Gitea host's port 443.
+"""How the laptop reaches Gitea's API: an ssh tunnel to the Gitea server's port 443.
 
-We never assume the laptop can resolve or route to the Gitea name. SSH already works
-(it is how everything else is done), so the API rides on it too.
+    with gitea.connect(system) as client:     # a GiteaClient, logged in as the outpost admin user
+        client.version()
+
+We never assume the laptop can resolve or route to the Gitea name. ssh already works (it is how
+everything else is done), so the API rides on it too.
 """
 
+from collections.abc import Iterator
 from contextlib import contextmanager
 
-from ..config import Servers
-from ..http import Http
-from ..ssh import Tunnel
-from ..workspace import Workspace
-from .client import GiteaClient
-
-
-def token_for(workspace: Workspace) -> str:
-    token = workspace.read_secret("gitea-token")
-    if not token:
-        raise RuntimeError("secrets/gitea-token is missing. Run `outpost gitea setup` first.")
-    return token
+from outpost.gitea.client import GiteaClient
+from outpost.http import Http
+from outpost.ssh import Tunnel
+from outpost.system import AirGappedSystem
+from outpost.workspace import GITEA_TOKEN
 
 
 @contextmanager
-def connect(workspace: Workspace, servers: Servers):
-    """`with connect(workspace, servers) as client:` talks to Gitea as the outpost admin user."""
-    cfg = servers.gitea
-    token = token_for(workspace)
-    with Tunnel(cfg.host, 443) as tunnel:
+def connect(system: AirGappedSystem) -> Iterator[GiteaClient]:
+    """A GiteaClient for the system's Gitea, through a tunnel that is closed when the `with` ends.
+
+    Raises:
+        RuntimeError: secrets/gitea-token is missing.
+        Unreachable: the tunnel could not be opened.
+    """
+    gitea = system.servers.gitea
+    token = api_token(system)
+    with Tunnel(gitea.host, 443) as tunnel:
         http = Http(
             f"https://127.0.0.1:{tunnel.port}",
-            ca_file=workspace.pki_dir / "ca.crt",
-            verify_hostname=False,
-            host_header=cfg.name,
-            basic=(cfg.user, token),
+            ca_file=system.workspace.ca_cert,
+            verify_hostname=False,  # the tunnel already reached the right server
+            host_header=gitea.name,
+            basic=(gitea.user, token),
         )
-        yield GiteaClient(http, cfg.org, public_url=cfg.url)
+        yield GiteaClient(http, gitea.org, public_url=gitea.url)
+
+
+def api_token(system: AirGappedSystem) -> str:
+    """The API token `gitea setup` made (secrets/gitea-token).
+
+    Raises:
+        RuntimeError: it is missing.
+    """
+    token = system.secret(GITEA_TOKEN)
+    if not token:
+        raise RuntimeError("secrets/gitea-token is missing. Run `outpost gitea setup` first.")
+    return token

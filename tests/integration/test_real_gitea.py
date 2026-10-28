@@ -21,7 +21,7 @@ from outpost import oci, versions
 from outpost.config import Mirrors
 from outpost.endpoints import GiteaEndpoint
 from outpost.fetch import apk as apkmod
-from outpost.gitea.client import GiteaClient
+from outpost.gitea import GiteaClient
 from outpost.http import Http, HttpError
 from outpost.infra import clients
 
@@ -137,8 +137,8 @@ def test_version(gitea):
 def test_generic(gitea, tmp_path):
     f = tmp_path / "tool"
     f.write_bytes(b"#!/bin/sh\necho hi\n")
-    assert gitea.upload_generic("tool", "1.0", f) == "uploaded"
-    assert gitea.upload_generic("tool", "1.0", f) == "exists"
+    assert gitea.packages.upload_generic("tool", "1.0", f) == "uploaded"
+    assert gitea.packages.upload_generic("tool", "1.0", f) == "exists"
     assert urllib.request.urlopen(f"{URL}/api/packages/pkgs/generic/tool/1.0/tool").read() == f.read_bytes()
 
 
@@ -146,16 +146,16 @@ def test_pypi(gitea, tmp_path):
     meta = json.loads(urllib.request.urlopen("https://pypi.org/pypi/six/1.16.0/json").read())
     wheel_url = next(u["url"] for u in meta["urls"] if u["filename"].endswith(".whl"))
     whl = fetch(wheel_url, tmp_path / wheel_url.rsplit("/", 1)[1])
-    assert gitea.upload_pypi(whl) == "uploaded"
-    assert gitea.upload_pypi(whl) == "exists"
+    assert gitea.packages.upload_pypi(whl) == "uploaded"
+    assert gitea.packages.upload_pypi(whl) == "exists"
     simple = urllib.request.urlopen(f"{URL}/api/packages/pkgs/pypi/simple/six/").read().decode()
     assert whl.name in simple
 
 
 def test_npm(gitea, tmp_path):
     tgz = fetch("https://registry.npmjs.org/chalk/-/chalk-5.3.0.tgz", tmp_path / "chalk-5.3.0.tgz")
-    assert gitea.upload_npm(tgz) == "uploaded"
-    assert gitea.upload_npm(tgz) == "exists"
+    assert gitea.packages.upload_npm(tgz) == "uploaded"
+    assert gitea.packages.upload_npm(tgz) == "exists"
     doc = json.loads(urllib.request.urlopen(f"{URL}/api/packages/pkgs/npm/chalk").read())
     assert doc["dist-tags"]["latest"] == "5.3.0"
     served = urllib.request.urlopen(doc["versions"]["5.3.0"]["dist"]["tarball"]).read()
@@ -166,10 +166,10 @@ def test_debian(gitea, tmp_path):
     deb = fetch(
         "http://deb.debian.org/debian/pool/main/h/hello/hello_2.10-3_amd64.deb", tmp_path / "hello_2.10-3_amd64.deb"
     )
-    assert gitea.upload_debian(deb, "bookworm") == "uploaded"
-    assert gitea.upload_debian(deb, "bookworm") == "exists"
-    assert gitea.debian_has_distro("bookworm") and not gitea.debian_has_distro("noble")
-    assert "BEGIN PGP PUBLIC KEY BLOCK" in gitea.debian_key()
+    assert gitea.packages.upload_debian(deb, "bookworm") == "uploaded"
+    assert gitea.packages.upload_debian(deb, "bookworm") == "exists"
+    assert gitea.packages.debian_has_distro("bookworm") and not gitea.packages.debian_has_distro("noble")
+    assert "BEGIN PGP PUBLIC KEY BLOCK" in gitea.packages.debian_key()
 
 
 @pytest.fixture(scope="module")
@@ -186,13 +186,15 @@ def test_alpine(gitea, apk_files):
     """Real .apk files land in Gitea's Alpine registry; Gitea signs the index with a key named after the owner and
     a fingerprint, reported in Content-Disposition, and serves an APKINDEX for the branch and architecture."""
     first = apk_files[0]
-    assert gitea.upload_alpine(first, "v3.20") == "uploaded"
-    assert gitea.upload_alpine(first, "v3.20") == "exists"
+    assert gitea.packages.upload_alpine(first, "v3.20") == "uploaded"
+    assert gitea.packages.upload_alpine(first, "v3.20") == "exists"
     for path in apk_files[1:]:
-        gitea.upload_alpine(path, "v3.20")
-    key = gitea.alpine_key()
+        gitea.packages.upload_alpine(path, "v3.20")
+    key = gitea.packages.alpine_key()
     assert key.name.startswith("pkgs@") and key.name.endswith(".rsa.pub") and "BEGIN PUBLIC KEY" in key.content
-    assert gitea.alpine_has_branch("v3.20", "x86_64") and not gitea.alpine_has_branch("v3.19", "x86_64")
+    assert gitea.packages.alpine_has_branch("v3.20", "x86_64") and not gitea.packages.alpine_has_branch(
+        "v3.19", "x86_64"
+    )
     index = urllib.request.urlopen(f"{URL}/api/packages/pkgs/alpine/v3.20/main/x86_64/APKINDEX.tar.gz").read()
     assert index[:2] == b"\x1f\x8b"
 
@@ -206,8 +208,8 @@ def test_generated_image_names_are_accepted_by_gitea(gitea, tmp_path, ref):
     find it listed as one container package of the organisation."""
     r = oci.parse_ref(ref)
     layout = oci.build_layout({"/hello": (ref.encode(), 0o644)}, tmp_path / "img", r.short)
-    gitea.push_image(layout, "pkgs", r.mirror_name, r.tag)
-    pulled = gitea.registry().pull(
+    gitea.packages.push_image(layout, "pkgs", r.mirror_name, r.tag)
+    pulled = gitea.packages.registry().pull(
         oci.Ref(registry="gitea", repo=f"pkgs/{r.mirror_name}", tag=r.tag), tmp_path / "back"
     )
     assert json.loads((pulled / "index.json").read_text())["manifests"]
@@ -219,7 +221,7 @@ def test_gitea_rejects_a_double_hyphen(gitea, tmp_path):
     """The name of the first cut, kept as a record of why the nested path was chosen."""
     layout = oci.build_layout({"/hello": (b"x", 0o644)}, tmp_path / "img", "x:1")
     with pytest.raises(HttpError, match="NAME_INVALID"):
-        gitea.push_image(layout, "pkgs", "library--python", "1")
+        gitea.packages.push_image(layout, "pkgs", "library--python", "1")
 
 
 def test_pull_from_docker_hub_and_push_to_gitea(gitea, tmp_path):
@@ -228,9 +230,10 @@ def test_pull_from_docker_hub_and_push_to_gitea(gitea, tmp_path):
     layout = oci.Registry(Http("https://registry-1.docker.io")).pull(ref, tmp_path / "alpine")
     assert oci.layout_ref(layout) == "alpine:3.20"
     assert ref.mirror_name == "library/alpine"
-    gitea.push_image(layout, "pkgs", ref.mirror_name, "3.20")
-    gitea.push_image(layout, "pkgs", ref.mirror_name, "outpost-only")  # a tag Docker Hub does not have
-    listed = gitea.registry().call("GET", "/v2/pkgs/library/alpine/tags/list", "pkgs/library/alpine")
+    gitea.packages.push_image(layout, "pkgs", ref.mirror_name, "3.20")
+    assert not gitea.packages.push_image(layout, "pkgs", ref.mirror_name, "3.20").uploaded  # Gitea has it all
+    assert gitea.packages.push_image(layout, "pkgs", ref.mirror_name, "outpost-only").uploaded  # a new tag is new
+    listed = gitea.packages.registry().call("GET", "/v2/pkgs/library/alpine/tags/list", "pkgs/library/alpine")
     assert listed.status == 200 and {"3.20", "outpost-only"} <= set(listed.json()["tags"])
     assert gitea.http.get("/api/v1/orgs/library").status == 404  # no organisation per image owner any more
 
@@ -281,7 +284,7 @@ def test_config_image_is_usable_in_a_build(gitea, tmp_path):
     info = GiteaEndpoint(name="gitea.internal", ip="10.0.0.5", org="pkgs")
     files = clients.config_image_files(info, "CA PEM", "APT KEY", ["bookworm"])
     layout = oci.build_layout(files, tmp_path / "config", info.config_image)
-    gitea.push_image(layout, "pkgs", "config", "latest")
+    gitea.packages.push_image(layout, "pkgs", "config", "latest")
     (tmp_path / "ctx").mkdir()
     (tmp_path / "ctx" / "Dockerfile").write_text(
         f"FROM {host}/pkgs/config:latest AS config\nFROM {host}/pkgs/library/alpine:3.20\nCOPY --from=config / /\n"
@@ -301,7 +304,9 @@ def test_apk_add_from_gitea_with_the_config_image_key(gitea, apk_files):
     with the plain-http URL this test's Gitea answers on; on a real platform client_files writes the https one."""
     host = URL.split("//")[1]
     info = GiteaEndpoint(name="gitea.internal", ip="10.0.0.5", org="pkgs")
-    files = clients.config_image_files(info, "CA PEM", None, [], apk_key=gitea.alpine_key(), apk_branches=["v3.20"])
+    files = clients.config_image_files(
+        info, "CA PEM", None, [], apk_key=gitea.packages.alpine_key(), apk_branches=["v3.20"]
+    )
     key_paths = [p for p in files if p.startswith("/etc/apk/keys/")]
     assert (
         len(key_paths) == 1
@@ -310,7 +315,7 @@ def test_apk_add_from_gitea_with_the_config_image_key(gitea, apk_files):
     layout = oci.build_layout(
         files, Path(tempfile_dir := tempfile.mkdtemp(prefix="outpost-it-apk-")) / "config", info.config_image
     )
-    gitea.push_image(layout, "pkgs", "config", "apk-test")
+    gitea.packages.push_image(layout, "pkgs", "config", "apk-test")
     ctx = Path(tempfile_dir) / "ctx"
     ctx.mkdir()
     (ctx / "Dockerfile").write_text(

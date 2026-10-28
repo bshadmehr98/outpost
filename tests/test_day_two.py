@@ -1,14 +1,17 @@
 """Backup and restore, the host facts cache, upgrades, error translation, the report, and architectures."""
 
+import hashlib
 import json
 import urllib.error
+from pathlib import Path
 
 import pytest
 
-from outpost import hosts, report, versions
+import outpost.gitea
+import outpost.system
+from outpost import gitea, hosts, report, versions
 from outpost.cli import build_parser, main
 from outpost.config import ConfigError, Mirrors, load_servers
-from outpost.gitea import backup as backupmod
 from outpost.http import Http
 from outpost.infra.upgrade import upgrade_nodes
 from outpost.ssh import Result
@@ -56,8 +59,7 @@ def amd64():
 # -- backup and restore -----------------------------------------------------------
 
 
-def test_backup_pauses_gitea_archives_and_copies_home(workspace_dir):
-    workspace, servers = Workspace(workspace_dir), load_servers(workspace_dir / "servers.yml")
+def test_backup_pauses_gitea_archives_and_copies_home(workspace_dir, monkeypatch):
     host = FakeHost(
         "gitea-1",
         responses=[
@@ -66,7 +68,11 @@ def test_backup_pauses_gitea_archives_and_copies_home(workspace_dir):
             (r"curl -sk", ""),
         ],
     )
-    local = backupmod.backup(workspace, servers, workspace_dir / "backups", log=lambda *_: None, host=host)
+    monkeypatch.setattr(outpost.system, "Host", lambda alias: host)
+    system = AirGappedSystem.load(workspace_dir)
+    workspace = system.workspace
+    local = gitea.backup(system, log=lambda *_: None)
+    assert local.parent == workspace.backups_dir  # the workspace's backups/, wherever outpost runs
     assert local.exists() and local.name.startswith("gitea-gitea.internal-") and local.suffix == ".gz"
     archive = next(s for s in host.scripts if "tar -C /" in s)
     assert (
@@ -80,24 +86,39 @@ def test_backup_pauses_gitea_archives_and_copies_home(workspace_dir):
     assert workspace.read_state("backup")["gitea"] == "28.2.0" and workspace.read_state("backup")["bytes"] == len(
         b"archive-bytes"
     )
+    assert workspace.read_state("backup")["sha256"] == hashlib.sha256(b"archive-bytes").hexdigest()
 
 
-def test_backup_needs_an_installed_gitea(workspace_dir):
-    workspace, servers = Workspace(workspace_dir), load_servers(workspace_dir / "servers.yml")
+def test_backup_hashes_the_archive_in_chunks_whatever_its_size(workspace_dir, monkeypatch):
+    """The sha256 is read in chunks, so a 3 GB archive is hashed too (it was skipped above 2 GB, and read whole below)."""
+    host = FakeHost(
+        "gitea-1", responses=[(r"gitea --version", "gitea version 28.2.0 built with go"), (r"stat -c %s", "3000000000")]
+    )
+    monkeypatch.setattr(outpost.system, "Host", lambda alias: host)
+    monkeypatch.setattr(Path, "read_bytes", lambda self: pytest.fail("the archive must not be read whole"))
+    system = AirGappedSystem.load(workspace_dir)
+    gitea.backup(system, log=lambda *_: None)
+    assert system.state("backup")["sha256"] == hashlib.sha256(b"archive-bytes").hexdigest()
+
+
+def test_backup_needs_an_installed_gitea(workspace_dir, monkeypatch):
+    monkeypatch.setattr(outpost.system, "Host", lambda alias: FakeHost(alias))
     with pytest.raises(RuntimeError, match="not installed"):
-        backupmod.backup(workspace, servers, workspace_dir / "backups", log=lambda *_: None, host=FakeHost("gitea-1"))
+        gitea.backup(AirGappedSystem.load(workspace_dir), log=lambda *_: None)
 
 
-def test_restore_moves_current_data_aside_and_checks_the_token(workspace_dir, tmp_path):
-    workspace, servers = Workspace(workspace_dir), load_servers(workspace_dir / "servers.yml")
+def test_restore_moves_current_data_aside_and_checks_the_token(workspace_dir, tmp_path, monkeypatch):
+    system = AirGappedSystem.load(workspace_dir)
+    workspace = system.workspace
     archive = tmp_path / "gitea-x.tar.gz"
     archive.write_bytes(b"tar")
     workspace.write_secret("gitea-token", "tok")
     host = FakeHost(
         "gitea-1", responses=[(r"gitea --version", "gitea version 28.2.0 built with go"), (r"api/v1/user", "401")]
     )
+    monkeypatch.setattr(outpost.system, "Host", lambda alias: host)
     messages = []
-    backupmod.restore(workspace, servers, archive, log=messages.append, host=host)
+    gitea.restore(system, archive, log=messages.append)
     joined = "\n".join(host.scripts)
     assert host.puts == [(str(archive), "/var/tmp/outpost-backups/restore.tar.gz")]
     assert (
@@ -115,8 +136,6 @@ def test_restore_moves_current_data_aside_and_checks_the_token(workspace_dir, tm
 def test_gitea_setup_backs_up_before_upgrading(workspace_dir, monkeypatch):
     from contextlib import contextmanager
 
-    from outpost.gitea import setup as setupmod
-
     binary = workspace_dir / "box" / "files" / "gitea" / versions.GITEA / "gitea"
     binary.parent.mkdir(parents=True)
     binary.write_bytes(b"ELF")
@@ -132,7 +151,7 @@ def test_gitea_setup_backs_up_before_upgrading(workspace_dir, monkeypatch):
             (r"test -s /etc/gitea/app.ini", Result(1, "", "")),
         ],
     )
-    monkeypatch.setattr(setupmod, "Host", lambda alias: host)
+    monkeypatch.setattr(outpost.system, "Host", lambda alias: host)
 
     class Client:
         def ensure_org(self, name):
@@ -142,11 +161,11 @@ def test_gitea_setup_backs_up_before_upgrading(workspace_dir, monkeypatch):
             return versions.GITEA
 
     @contextmanager
-    def fake_connect(workspace, servers):
+    def fake_connect(system):
         yield Client()
 
-    monkeypatch.setattr(setupmod, "connect", fake_connect)
-    setupmod.setup(Workspace(workspace_dir), load_servers(workspace_dir / "servers.yml"), log=lambda *_: None)
+    monkeypatch.setattr(outpost.gitea, "connect", fake_connect)
+    gitea.setup(AirGappedSystem.load(workspace_dir), log=lambda *_: None)
     tar = next(i for i, s in enumerate(host.scripts) if "tar -C /" in s)
     stop = next(i for i, s in enumerate(host.scripts) if s.startswith("systemctl stop gitea 2>/dev/null"))
     assert (

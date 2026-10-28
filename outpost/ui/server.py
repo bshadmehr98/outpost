@@ -47,6 +47,7 @@ from ..config import ConfigError, load_mirrors, load_servers
 from ..http import HttpError
 from ..needs import Needs, add_pinned_files, add_proxy_package, load_needs, read_needs_file
 from ..ssh import SshError
+from ..system import AirGappedSystem
 from ..workspace import Workspace
 from . import explain, projects, status
 
@@ -201,7 +202,7 @@ def overview(workspace: Workspace) -> dict:
     data["running"] = [{"id": rid, "args": r["args"]} for rid, r in RUNS.items() if r["proc"].poll() is None]
     data["demo"] = {
         "local": (workspace.root / "demo").exists(),
-        "urls": demo.urls(workspace, servers) if data["servers"] else {},  # pyright: ignore[reportArgumentType]  servers is set when data["servers"] is
+        "urls": demo.demo_urls(AirGappedSystem(workspace, servers)) if servers else {},
         "files": sorted(demo.project_files(workspace.root / "demo")) if (workspace.root / "demo").exists() else [],
         "status": workspace.read_state("demo-status"),
     }
@@ -593,9 +594,7 @@ class Handler(BaseHTTPRequestHandler):
             elif path == "/api/hosts":
                 self._json(refresh_hosts(self.workspace, self._body().get("aliases")))
             elif path == "/api/demo":
-                servers = load_servers(self.workspace.servers_file)
-                ssh.use_config(servers.ssh_config)
-                self._json(demo.status(self.workspace, servers))
+                self._json(demo.status(AirGappedSystem.load(self.workspace.root)))
             elif path == "/api/project/scan":
                 try:  # the Gitea name and org let a literal gitea.internal/pkgs/... FROM be read back into its need
                     g = load_servers(self.workspace.servers_file).gitea
