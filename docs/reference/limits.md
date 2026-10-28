@@ -4,8 +4,8 @@ Things Outpost does not do, on purpose or not yet.
 
 - **Nothing it was not told about.** There is no magic mirror of the internet. If a build
   needs something, it must be in a needs file. The upside is that every dependency is written down.
-- **One architecture per platform folder.** `arch: amd64` (default) or `arm64` in `servers.yml`
-  selects every download; a mixed fleet needs two platform folders. arm64 is wired through every
+- **One architecture per workspace.** `arch: amd64` (default) or `arm64` in `servers.yml`
+  selects every download; a mixed fleet needs two workspaces. arm64 is wired through every
   fetcher but has not been run against ARM servers yet.
 - **One Gitea, no high availability.** `outpost gitea backup` makes the archive and `restore`
   puts it back, and an upgrade backs up first; scheduling the backup is yours (cron on the laptop,

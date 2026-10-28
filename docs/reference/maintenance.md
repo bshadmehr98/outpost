@@ -1,6 +1,6 @@
 # Day-two commands: backup, updates, rotation, evidence
 
-Once a platform runs, five things matter over time. Each is one command, and each has a card on
+Once an air-gapped system runs, five things matter over time. Each is one command, and each has a card on
 the dashboard's **Keep it healthy** page that says what it will do before you press it.
 
 ## What every server runs: `outpost hosts`

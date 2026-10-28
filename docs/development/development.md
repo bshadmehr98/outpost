@@ -3,15 +3,26 @@
 ```
 git clone ... && cd outpost
 uv venv && uv pip install -e '.[dev]' pip      # or python -m venv .venv && pip install -e '.[dev]'
-pytest                                           # fast, no network, no SSH
-OUTPOST_INTEGRATION=1 pytest tests/integration   # real Gitea in Docker, real Docker Hub, and the full flow
+python -m pytest -q                                          # unit: fast, no network, no SSH
+OUTPOST_INTEGRATION=1 python -m pytest -q tests/integration  # real Gitea, real Docker Hub, the full flow
 ```
 
-Unit tests take about ten seconds and need no network. The integration suite takes a few minutes
-and needs Docker and the internet; [testing](testing.md) describes both.
+The 272 unit tests take about 25 seconds and need no network. The 29 integration tests take 30
+minutes or more and need Docker and the internet; [testing](testing.md) describes both.
 
-Before a commit, run `scripts/format.sh`, `ruff check outpost tests` and `pyright`; CI runs them
-too. How the code is written: [style](style.md). The words it uses: [glossary](../glossary.md).
+Before a commit, run these four; CI runs them too:
+
+```
+scripts/format.sh             # ruff format + import sort (--check only checks)
+ruff check outpost tests      # lint; the rules are in pyproject.toml
+pyright                       # types, outpost/ only
+python -m pytest -q           # unit tests
+```
+
+To run the format and the lint on each commit, install the git hook once in your clone:
+`pip install pre-commit && pre-commit install` (rules in `.pre-commit-config.yaml`).
+
+How the code is written: [style](style.md). The words it uses: [glossary](../glossary.md).
 
 ## Layout
 
@@ -67,7 +78,7 @@ Create `outpost/infra/<type>.py` with `setup(ctx, hosts, log)` and `verification
 
 ## Principles
 
-- Files are the state. The CLI and the UI read and write the same folder.
+- Files are the state. The CLI and the dashboard read and write the same workspace.
 - No framework. A plugin is a module with one or two functions.
 - The standard library plus PyYAML. Servers get shell scripts, never Python.
 - Every remote step is idempotent and logged. Verification is a separate command that only reads.

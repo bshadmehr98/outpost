@@ -44,7 +44,7 @@ nav:
       - reference/needs.md
       - reference/dockerfiles.md
       - reference/checks.md
-      - reference/platform-folder.md
+      - reference/workspace.md
       - reference/dashboard.md
       - reference/maintenance.md
       - reference/distribution.md

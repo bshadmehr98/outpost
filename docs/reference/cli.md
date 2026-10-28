@@ -1,17 +1,17 @@
 # CLI reference
 
-Every command reads and writes the platform folder it is run in. `--dir <folder>` selects
+Every command reads and writes the workspace it is run in. `--dir <folder>` selects
 another one. `outpost <command> --help` prints the options.
 
 | command | what it does | needs |
 |---|---|---|
-| `outpost init [folder]` | create a platform folder: `servers.yml`, `needs/demo.yml`, `checks/`, `demo/`, `mirrors.yml`, `.gitignore` | nothing |
-| `outpost needs` | print the merged needs, including the pinned platform files (and tinyproxy for the proxy host when `servers.yml` has `egress_proxy`) | nothing |
+| `outpost init [folder]` | create a workspace: `servers.yml`, `needs/demo.yml`, `checks/`, `demo/`, `mirrors.yml`, `.gitignore` | nothing |
+| `outpost needs` | print the merged needs, including the pinned downloads (and tinyproxy for the proxy host when `servers.yml` has `egress_proxy`) | nothing |
 | `outpost fetch [--only kinds]` | download everything into `box/`; incremental; failures listed at the end | internet; Docker for apt, apk and rpm; pip for pypi |
 | `outpost pack [--out dist]` | one `tar.xz` per kind plus a signed manifest, for releases or USB | openssl |
 | `outpost gitea setup` | install or upgrade Gitea on its server (a backup is taken before an upgrade), make certificates, admin, token, org; seal it | ssh, openssl |
 | `outpost gitea info` | print the Gitea address, organisation, version and seal status | ssh |
-| `outpost gitea backup [--out backups] [--keep-on-server]` | pause Gitea, archive its data and config, copy the archive here | ssh |
+| `outpost gitea backup [--out folder] [--keep-on-server]` | pause Gitea, archive its data and config, copy the archive to `backups/` in the workspace (or `--out`), with its sha256 | ssh |
 | `outpost gitea restore <archive>` | put a backup back on the Gitea server, keeping the current data aside | ssh |
 | `outpost upload [source ...]` | push a box folder or `tar.xz` files into Gitea; build the config image | ssh |
 | `outpost infra setup <name>` | prepare, seal, install the runtime and the runner on the nodes; verify | ssh |
@@ -39,9 +39,22 @@ dashboard runs the same commands and appends `[outpost exit N after Ss]` to each
 
 | variable | effect |
 |---|---|
-| `OUTPOST_SSH_CONFIG` | ssh config file to use instead of `~/.ssh/config` (what `ssh_config:` in `servers.yml` sets). Both may be set only if they name the same file; two different files are an error. A file that does not exist fails at once, before any ssh call |
+| `OUTPOST_SSH_CONFIG` | ssh config file to use instead of `~/.ssh/config`. See the rules below |
 | `OUTPOST_INTEGRATION=1` | lets the integration tests run |
 | `OUTPOST_BOX`, `OUTPOST_RIG_DIR`, `OUTPOST_KEEP_RIG`, `OUTPOST_PREVIOUS_GITEA` | integration test knobs; see [testing](../development/testing.md) |
+
+## Which ssh config file
+
+Every ssh and scp call uses the same config file, chosen once when `servers.yml` is read:
+
+1. `ssh_config:` in `servers.yml`, a path relative to the workspace (`lab up` writes `lab/ssh_config`);
+2. else `OUTPOST_SSH_CONFIG`;
+3. else ssh's own `~/.ssh/config`.
+
+Both 1 and 2 may be set only if they name the same file; two different files are an error. A
+file that does not exist is an error too, at once, before any ssh call (ssh would only fail later,
+with exit 255, which looks like a server that is down). The dashboard shows either error as a
+message on the page.
 
 ## The order you use them
 

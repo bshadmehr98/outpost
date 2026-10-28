@@ -42,21 +42,21 @@ ssh -V && openssl version && docker --version && python3 -m pip --version
 If Docker is not available, `fetch` still works for everything except OS packages (apt, apk, rpm), and you
 will need real servers instead of the lab.
 
-## A platform folder
+## A workspace
 
-Outpost keeps everything about one setup in one directory, the *platform folder*. Create one:
+Outpost keeps everything about one setup in one directory, the *workspace*. Create one:
 
 ```
-outpost init ~/my-platform
-cd ~/my-platform
+outpost init ~/my-workspace
+cd ~/my-workspace
 ```
 
 It contains `servers.yml` (which hosts play which role), `needs/` (what to fetch), `checks/`
 (smoke tests), `demo/` (a sample project), `mirrors.yml`, and a `.gitignore` that excludes
 `secrets/`, `box/`, `dist/`, `state/runs/` and `lab/`. Everything else is meant to be committed,
-so a platform is reproducible from git plus a box. The [platform folder reference](../reference/platform-folder.md)
+so an air-gapped system is reproducible from git plus a box. The [workspace reference](../reference/workspace.md)
 describes every file.
 
-From here on, every command is run inside this folder (or with `--dir ~/my-platform`).
+From here on, every command is run inside this folder (or with `--dir ~/my-workspace`).
 
 Next: [Build a lab](03-lab.md)

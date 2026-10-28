@@ -1,6 +1,6 @@
 # CI on sealed nodes
 
-A platform that can only *build* by hand is half a platform. Gitea ships Actions, a
+An air-gapped system that can only *build* by hand is only half done. Gitea ships Actions, a
 GitHub-Actions-compatible CI, and Outpost installs its runner on the nodes so that a push to
 Gitea builds and deploys without anything ever leaving the sealed network.
 

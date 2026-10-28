@@ -1,10 +1,10 @@
-# The platform folder
+# The workspace
 
 Everything Outpost knows about one setup is in one directory, created by `outpost init`.
 It is meant to be committed to git, minus the two folders that must not be.
 
 ```
-my-platform/
+my-workspace/
   servers.yml            which SSH hosts play which role                      commit
   mirrors.yml            where to download from, if the defaults are blocked  commit
   needs/*.yml            what your projects need                              commit

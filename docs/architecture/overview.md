@@ -1,14 +1,15 @@
 # Architecture overview
 
-Outpost is about 4,500 lines of Python with one dependency, PyYAML. It is a control tool, not a
+Outpost is about 12,900 lines of Python (with docstrings) with one dependency, PyYAML. It is a control tool, not a
 service: nothing of it runs on the servers. The servers get shell scripts, static binaries and
-small config files, all of which you can read in `outpost/infra/` and `outpost/gitea/`.
+small config files, all of which you can read in `outpost/infra/`, `outpost/egress.py`,
+`outpost/client_config/` and `outpost/gitea/`.
 
 ## The pieces
 
 ```mermaid
 flowchart TB
-    subgraph laptop["Laptop: the platform folder"]
+    subgraph laptop["Laptop: the workspace"]
         direction LR
         cfg["servers.yml<br/>needs/*.yml"]
         box["box/"]
@@ -37,19 +38,22 @@ flowchart TB
 | piece | lives in | job |
 |---|---|---|
 | CLI (`outpost/cli/`) | laptop | one file per command, in the order you use them |
+| workspace, config, system (`outpost/workspace.py`, `outpost/config/`, `outpost/system.py`) | laptop | the folder, `servers.yml` and `mirrors.yml`, and `AirGappedSystem`, the one object every command gets |
 | needs + fetch (`outpost/needs`, `outpost/fetch`) | laptop | lockfiles in, box out |
 | box (`outpost/box.py`, `outpost/oci/`) | laptop | manifest, OCI layouts, pack, sign |
 | ssh (`outpost/ssh/`) | laptop | `Host.run / write / put / get` and `Tunnel`; the only way servers are touched |
 | Gitea client + setup + upload (`outpost/gitea`) | laptop | install over SSH, speak the registry APIs through the tunnel |
-| infra (`outpost/infra`) | laptop, writes to nodes | common steps, egress, compose, swarm, k3s, runner, verify |
+| seal, names, client files (`outpost/egress.py`, `outpost/hostsfile.py`, `outpost/client_config/`) | laptop, writes to servers | the `outpost-egress` script, `/etc/hosts`, the pip, npm, apt, apk, dnf and Docker files |
+| infra (`outpost/infra`) | laptop, writes to nodes | `node/` (the steps every node shares), compose, swarm, k3s, runner, verify, upgrade, `proxy/` |
+| hosts, report (`outpost/hosts`, `outpost/report`) | laptop | what each server runs, cached in `state/hosts/`; the proof report |
 | checks, demo (`outpost/checks`, `outpost/demo`) | laptop | smoke tests and the demo pipeline |
-| dashboard (`outpost/ui`) | laptop, localhost only | reads the platform folder, runs the CLI |
+| dashboard (`outpost/ui`) | laptop, localhost only | reads the workspace, runs the CLI |
 | lab (`outpost/lab.py`) | laptop | throwaway servers in Docker |
 
 ## The data flow
 
 1. **Needs** are read from `needs/*.yml` and the lockfiles they point at, merged with the
-   pinned platform files (Gitea, Docker, k3s, CoreDNS, the runner).
+   pinned downloads (Gitea, Docker, k3s, CoreDNS, the runner).
 2. **Fetch** downloads into `box/` and writes `manifest.json`. The box is a plain folder and
    can be moved by any means.
 3. **Gitea setup** installs Gitea over SSH from the binary in the box, issues certificates from
@@ -66,7 +70,7 @@ JSON file in `state/`, which is how the dashboard knows what is in sync.
 ## Trust boundaries
 
 - **The laptop is trusted.** It holds the CA key, the Gitea admin token and the box signing
-  key, all under `secrets/`. Whoever controls the platform folder controls the platform.
+  key, all under `secrets/`. Whoever controls the workspace controls the air-gapped system.
 - **Gitea is the only server nodes trust.** They trust it through a private CA you own, over
   HTTPS, by a name you chose. Nothing else is reachable, which is enforced below the clients,
   in the kernel's firewall, not by configuration the clients could ignore.
@@ -83,7 +87,7 @@ JSON file in `state/`, which is how the dashboard knows what is in sync.
 - **Gitea for everything.** One binary, one SQLite file, five registries, git and CI. The
   alternatives (aptly, devpi, Verdaccio, Harbor, a git server, a CI server) each work, and
   together they are a project of their own.
-- **Files as state.** The platform folder is readable, diffable and committable. There is no
+- **Files as state.** The workspace is readable, diffable and committable. There is no
   database, no daemon, no lock. The dashboard is a viewer and a button panel over the same files.
 - **Lockfiles as the source of truth.** The versions your project tested with are already
   written down; Outpost reads them rather than inventing another list.

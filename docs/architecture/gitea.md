@@ -85,6 +85,11 @@ Both stored tokens are checked against the server when used: if Gitea does not k
 server, `secrets/gitea-token` is checked with a `curl` that reads its header on stdin, so the
 token never shows in `ps`.
 
+The admin password stays out of `ps` too. On the first setup, `gitea admin user create
+--random-password` makes it and prints it, and Outpost saves it in `secrets/gitea-admin-password`.
+When that file already holds a password (the server was reinstalled), it is set back through
+Gitea's admin API by a `curl` that reads its whole request on stdin.
+
 ## Signing keys
 
 Gitea signs what it serves with keys it makes per owner, and the clients need the public half:
