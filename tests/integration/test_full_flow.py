@@ -184,7 +184,7 @@ def test_6b_proxy(rig):
     refused = ssh("lab-node-1", f'docker run --rm {via} {image} python -c "{fetch}" example.com', check=False)
     assert refused.returncode != 0 and "403" in refused.stderr, refused.stderr
     # every CONNECT and every refusal is in the proxy's log
-    log = ssh("lab-gitea", "cat /var/log/outpost-proxy.log").stdout
+    log = ssh("lab-gitea", "cat /var/log/tinyproxy/tinyproxy.log").stdout
     assert "CONNECT example.org:443" in log and 'filtered domain "example.com"' in log
     # and the smoke check that says the same
     assert main(["--dir", str(rig), "check", "hello-proxy", "--infra", "dev"]) == 0

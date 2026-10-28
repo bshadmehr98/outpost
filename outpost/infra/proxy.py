@@ -7,15 +7,23 @@ are reached through one outbound forward proxy that checks the *name* a client a
     container --HTTPS_PROXY--> tinyproxy on a private address --only allowed names--> the internet
                    CONNECT api.twilio.com:443                  TLS stays end to end
 
-  /etc/outpost/proxy.conf              tinyproxy configuration (below)
-  /etc/outpost/proxy.allow             one anchored extended regex per allowed name
-  /var/log/outpost-proxy.log           every CONNECT with its host name, and every refusal
-  outpost-proxy.service                tinyproxy -d -c /etc/outpost/proxy.conf as user outpost-proxy
+  /etc/tinyproxy/tinyproxy.conf        tinyproxy configuration (below), in place of the package's
+  /usr/share/tinyproxy/outpost.allow   one anchored extended regex per allowed name
+  /var/log/tinyproxy/tinyproxy.log     every CONNECT with its host name, and every refusal
+  outpost-proxy.service                tinyproxy -d -c /etc/tinyproxy/tinyproxy.conf as user outpost-proxy
   outpost-egress                       the seal, plus the one exception: user outpost-proxy may open
                                        TCP 443 and 80 (egress.py, chain OUTPOST-OUT, OUTPUT only)
 
 tinyproxy comes from the distro's own package, through Gitea (apt on Debian and Ubuntu, dnf on the RHEL
 family; Alpine hosts are refused). The distro's stock tinyproxy unit is masked; ours runs it.
+
+The paths are the package's own because tinyproxy may be confined by path. Newer AppArmor profile
+sets (Ubuntu 26.04's, on GitHub's runner image) have a profile `tinyproxy` for /usr/bin/tinyproxy, which
+the kernel applies inside privileged containers too. It lets tinyproxy read /etc/tinyproxy/tinyproxy.conf
+and /usr/share/tinyproxy/*, write /var/log/tinyproxy/tinyproxy.log and /run/tinyproxy/tinyproxy.pid, and
+nothing else: a configuration in /etc/outpost was "Could not open config file" even for root. So the
+configuration replaces the package's, the allow list sits next to the package's error pages (the one
+other readable place), and the log is the package's log. Without a profile the same paths work as well.
 
 The directives used, as documented in tinyproxy.conf(5) (https://tinyproxy.github.io/, the manual page
 of the 1.11 series, docs/man5/tinyproxy.conf.txt.in in the source) and checked against src/conf.c,
@@ -54,14 +62,21 @@ from . import clients, common, egress
 from .clients import GiteaInfo, ProxyInfo
 
 USER = common.PROXY_USER
-CONF_PATH = "/etc/outpost/proxy.conf"
-ALLOW_PATH = "/etc/outpost/proxy.allow"
-LOG_PATH = "/var/log/outpost-proxy.log"
+CONF_PATH = "/etc/tinyproxy/tinyproxy.conf"          # the only configuration the AppArmor profile lets it read
+ALLOW_PATH = "/usr/share/tinyproxy/outpost.allow"   # /usr/share/tinyproxy/* is readable; /etc/tinyproxy/* is not
+LOG_DIR = "/var/log/tinyproxy"
+LOG_PATH = f"{LOG_DIR}/tinyproxy.log"                # the only log file the profile lets it write
 UNIT_PATH = "/etc/systemd/system/outpost-proxy.service"
-LOGROTATE_PATH = "/etc/logrotate.d/outpost-proxy"
+LOGROTATE_PATH = "/etc/logrotate.d/tinyproxy"       # replaces the package's, which reloads the masked stock unit
+OLD_PATHS = ("/etc/outpost/proxy.conf", "/etc/outpost/proxy.allow", "/etc/logrotate.d/outpost-proxy")   # written by earlier versions
 STOCK_UNIT = "tinyproxy.service"
 PACKAGE = "tinyproxy"
 REFUSAL_PROBES = ("example.com", "example.net", "example.org")   # documentation domains, IANA reserved
+
+# tinyproxy opens its log after dropping to USER, and the package's postinst gives the directory to its own
+# user (tinyproxy:adm, 0750) on every upgrade; this runs as root before each start and hands it back
+LOG_PREP = (f"mkdir -p {LOG_DIR} && chown {USER}:{USER} {LOG_DIR} && chmod 0750 {LOG_DIR} && "
+            f"touch {LOG_PATH} && chown {USER}:{USER} {LOG_PATH} && chmod 0640 {LOG_PATH}")
 
 LOGROTATE = f"""{LOG_PATH} {{
     weekly
@@ -165,6 +180,7 @@ After=network-online.target outpost-egress.service
 [Service]
 User={USER}
 Group={USER}
+ExecStartPre=+/bin/sh -c '{LOG_PREP}'
 ExecStart={binary} -d -c {CONF_PATH}
 ExecReload=/bin/kill -HUP $MAINPID
 Restart=always
@@ -324,14 +340,16 @@ def setup(host, ctx: common.NodeContext, cfg: ProxyConfig, *, egress_allow: list
     host.run(
         f"getent group {USER} >/dev/null || groupadd --system {USER}\n"
         f"id -u {USER} >/dev/null 2>&1 || useradd --system --gid {USER} --no-create-home --home-dir /nonexistent --shell /usr/sbin/nologin {USER}\n"
-        f"mkdir -p /etc/outpost && chmod 0755 /etc/outpost && touch {LOG_PATH} && chown {USER}:{USER} {LOG_PATH} && chmod 0640 {LOG_PATH}\n"
+        f"mkdir -p /etc/tinyproxy /usr/share/tinyproxy && chmod 0755 /etc/tinyproxy /usr/share/tinyproxy && {LOG_PREP}\n"
+        f"rm -f {' '.join(OLD_PATHS)}\n"
     )
     host.write(CONF_PATH, conf(p.ip, cfg.port, client_allow, version or "1.11.1"))
     host.write(ALLOW_PATH, allow_file(list(cfg.allow), g.name))
     host.write(LOGROTATE_PATH, LOGROTATE)
-    readable = host.run(f"runuser -u {USER} -- test -r {CONF_PATH} && runuser -u {USER} -- test -r {ALLOW_PATH}", check=False)
+    readable = host.run(f"runuser -u {USER} -- test -r {CONF_PATH} && runuser -u {USER} -- test -r {ALLOW_PATH} && "
+                        f"runuser -u {USER} -- test -w {LOG_PATH}", check=False)
     if not readable.ok:
-        raise RuntimeError(f"[{host.alias}] {USER} cannot read its configuration:\n{_access_report(host)}")
+        raise RuntimeError(f"[{host.alias}] {USER} cannot read its configuration or write its log:\n{_access_report(host)}")
     log(f"  [{host.alias}] allows {', '.join(cfg.allow)} (and {g.name}); everything else gets 403")
 
     log("==> [5/6] service outpost-proxy")
@@ -353,7 +371,7 @@ def access_script(binary: str | None = None) -> str:
     """Why tinyproxy may not get at its files: every directory on the way with its mode, what the proxy user
     can read, and, with `binary`, tinyproxy run by hand as that user outside systemd's sandbox for two seconds."""
     lines = ["set +e +o pipefail",
-             f"echo '--- namei -l {CONF_PATH}'; namei -l {CONF_PATH} 2>&1",
+             *[f"echo '--- namei -l {p}'; namei -l {p} 2>&1" for p in (CONF_PATH, ALLOW_PATH, LOG_PATH)],
              f"echo '--- id {USER}'; id {USER} 2>&1",
              f"echo '--- as {USER}'; runuser -u {USER} -- head -c 80 {CONF_PATH} >/dev/null 2>/tmp/outpost-proxy-read.err && echo readable || cat /tmp/outpost-proxy-read.err"]
     if binary:

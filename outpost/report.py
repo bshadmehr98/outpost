@@ -203,7 +203,7 @@ def _named_exceptions(data: dict, e) -> list[str]:
         out.append("<tr><th>Note</th><td class='fail'>servers.yml allows other names than the proxy was set up with; run <code>outpost proxy setup</code></td></tr>")
     tail = (data["hosts"].get(cfg.get("host")) or {}).get("proxy_log_tail") or []
     out.append("<tr><th>Proxy log</th><td>" + (f"<pre class='small'>{e(chr(10).join(tail))}</pre>" if tail else "<span class='muted'>no lines recorded</span>") +
-               "<div class='small muted'>The last lines of /var/log/outpost-proxy.log when the host was last inspected: every CONNECT with its name, and every refusal.</div></td></tr>")
+               "<div class='small muted'>The last lines of /var/log/tinyproxy/tinyproxy.log when the host was last inspected: every CONNECT with its name, and every refusal.</div></td></tr>")
     out.append("</table>")
     return out
 

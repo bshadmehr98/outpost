@@ -114,7 +114,7 @@ With an [egress proxy](../architecture/proxy.md), the names sealed workloads may
 
 ```
 # edit servers.yml: egress_proxy.allow
-outpost proxy setup        # rewrites /etc/outpost/proxy.allow, restarts the proxy, verifies
+outpost proxy setup        # rewrites /usr/share/tinyproxy/outpost.allow, restarts the proxy, verifies
 outpost upload             # optional: refreshes OUTPOST_PROXY_ALLOWED in the config image
 ```
 
@@ -128,7 +128,7 @@ host's seal drops the exception.
 What went through it:
 
 ```
-ssh gitea-1 tail -f /var/log/outpost-proxy.log
+ssh gitea-1 tail -f /var/log/tinyproxy/tinyproxy.log
 ```
 
 ```
@@ -138,7 +138,7 @@ NOTICE    Oct 28 10:00:09.802 [4211]: Proxying refused on filtered domain "examp
 
 Every request line names the host and port asked for; every refusal names the host. URLs and
 bodies of HTTPS requests are not there, because the proxy never sees them. The log is rotated
-weekly and kept eight weeks (`/etc/logrotate.d/outpost-proxy`). `outpost hosts --refresh` copies the
+weekly and kept eight weeks (`/etc/logrotate.d/tinyproxy`). `outpost hosts --refresh` copies the
 last 20 lines into `state/hosts/<alias>.json`, the Machines page and the proof report.
 `outpost proxy verify` re-runs the checks.
 

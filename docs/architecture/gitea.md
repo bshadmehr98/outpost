@@ -24,9 +24,9 @@ See [the tutorial chapter](../tutorial/05-gitea.md) for the step-by-step. What e
 
 With an [egress proxy](proxy.md) on the Gitea host (the default), `outpost proxy setup` adds
 tinyproxy from Gitea's own Debian or RPM registry (the Gitea host gets the same apt or dnf source
-that nodes have, pointing at itself, and its stock sources are parked), `/etc/outpost/proxy.conf`,
-`/etc/outpost/proxy.allow`, `outpost-proxy.service` running as user `outpost-proxy`,
-`/var/log/outpost-proxy.log`, and the one exception in the seal: that user may open TCP 443 and 80.
+that nodes have, pointing at itself, and its stock sources are parked), `/etc/tinyproxy/tinyproxy.conf`,
+`/usr/share/tinyproxy/outpost.allow`, `outpost-proxy.service` running as user `outpost-proxy`,
+`/var/log/tinyproxy/tinyproxy.log`, and the one exception in the seal: that user may open TCP 443 and 80.
 `gitea setup` keeps the exception when `state/proxy.json` says the proxy runs here.
 
 On the laptop: `pki/ca.crt` and `pki/gitea.crt` (public), `secrets/ca.key`, `secrets/gitea.key`,

@@ -61,7 +61,7 @@ docker run --rm gitea.lab/pkgs/library/python:3.12-slim python -c \
 docker run --rm -e HTTPS_PROXY= -e https_proxy= gitea.lab/pkgs/library/python:3.12-slim python -c "..."
 # fails: without the variables a container is sealed exactly as before
 
-ssh -F lab/ssh_config lab-gitea tail -3 /var/log/outpost-proxy.log
+ssh -F lab/ssh_config lab-gitea tail -3 /var/log/tinyproxy/tinyproxy.log
 # ... CONNECT example.org:443 HTTP/1.1
 ```
 

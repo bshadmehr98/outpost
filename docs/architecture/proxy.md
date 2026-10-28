@@ -60,11 +60,25 @@ The proxy is a host process under a systemd unit, by default on the Gitea host:
 | path | what |
 |---|---|
 | tinyproxy | the distro's own package (`apt` on Debian and Ubuntu, `dnf` on the RHEL family), installed from Gitea like any other package; the distro's `tinyproxy.service` is masked |
-| `/etc/outpost/proxy.conf` | the configuration below |
-| `/etc/outpost/proxy.allow` | one anchored extended regular expression per allowed name |
-| `outpost-proxy.service` | `tinyproxy -d -c /etc/outpost/proxy.conf`, as the system user `outpost-proxy` |
-| `/var/log/outpost-proxy.log` | every request line and every refusal; rotated weekly by `/etc/logrotate.d/outpost-proxy` |
+| `/etc/tinyproxy/tinyproxy.conf` | the configuration below |
+| `/usr/share/tinyproxy/outpost.allow` | one anchored extended regular expression per allowed name |
+| `outpost-proxy.service` | `tinyproxy -d -c /etc/tinyproxy/tinyproxy.conf`, as the system user `outpost-proxy` |
+| `/var/log/tinyproxy/tinyproxy.log` | every request line and every refusal; rotated weekly by `/etc/logrotate.d/tinyproxy` |
 | `/usr/local/sbin/outpost-egress` | the seal, with the one exception below |
+
+The paths are the package's own on purpose. tinyproxy may run under an AppArmor profile named
+`tinyproxy` (Ubuntu 26.04 loads one; a host's kernel applies it inside privileged containers too)
+that lets `/usr/bin/tinyproxy` read `/etc/tinyproxy/tinyproxy.conf` and `/usr/share/tinyproxy/*`
+and write `/var/log/tinyproxy/tinyproxy.log` and `/run/tinyproxy/tinyproxy.pid`, and nothing else,
+whatever the file permissions say. So Outpost's configuration replaces the package's, the allow list
+sits next to the package's error pages, the log is the package's log, and Outpost's logrotate file
+replaces the package's (which would reload the masked stock unit). Outpost adds no AppArmor rules,
+and the same paths work on a host without a profile. tinyproxy opens its log after it has dropped to
+`outpost-proxy`, and a package upgrade gives `/var/log/tinyproxy` back to the package's own user, so
+the unit hands the directory and the log to `outpost-proxy` as root before every start
+(`ExecStartPre=+`). A setup from an earlier version left `/etc/outpost/proxy.conf`,
+`/etc/outpost/proxy.allow` and `/etc/logrotate.d/outpost-proxy`; `proxy setup` removes them, and
+the old `/var/log/outpost-proxy.log` is left for reading.
 
 On the Gitea host nothing of a node is prepared: it already resolves its own name and reaches
 itself. It only gets an apt or dnf source pointing at Gitea (the same code nodes use), so it can
@@ -80,11 +94,11 @@ The directives Outpost writes, as documented in tinyproxy.conf(5) of the 1.11 se
 | `Port`, `Listen` | 3128 on the host's private address | not on every interface |
 | `Allow` | 127.0.0.1, the private ranges, the infrastructures' `allow:` addresses | with any `Allow`, everyone else is refused |
 | `ConnectPort` | 443 and 80 | CONNECT only to the two ports the firewall exception opens |
-| `Filter` | `"/etc/outpost/proxy.allow"` | the allow list |
+| `Filter` | `"/usr/share/tinyproxy/outpost.allow"` | the allow list |
 | `FilterURLs` | `Off` | match the host name only (HTTPS has no URL to match) |
 | `FilterType` | `ere` (from 1.11.1; `FilterExtended On` on 1.10 and 1.11.0, chosen from the installed version) | extended regular expressions for `(^|\.)sendgrid\.net$` |
 | `FilterDefaultDeny` | `Yes` | turns the filter list from a block list into an allow list |
-| `LogFile`, `LogLevel` | `"/var/log/outpost-proxy.log"`, `Connect` | request lines are logged at the Connect level, refusals at Notice, both kept |
+| `LogFile`, `LogLevel` | `"/var/log/tinyproxy/tinyproxy.log"`, `Connect` | request lines are logged at the Connect level, refusals at Notice, both kept |
 | `User`, `Group`, `Timeout`, `MaxClients`, `DisableViaHeader` | `outpost-proxy`, 600, 100, `Yes` | |
 
 Matching is case-insensitive and on the bare host name, without the port. `api.twilio.com`
@@ -163,7 +177,7 @@ allowed name through the proxy, is refused another, and cannot reach the allowed
 
 ## What is logged
 
-`/var/log/outpost-proxy.log` on the proxy host has a line for every request, with the name asked
+`/var/log/tinyproxy/tinyproxy.log` on the proxy host has a line for every request, with the name asked
 for, such as `Request (file descriptor 7): CONNECT api.twilio.com:443 HTTP/1.1`, and one for every
 refusal, `Proxying refused on filtered domain "example.com"`. It does not have URLs, headers or
 bodies of HTTPS requests: the proxy never sees them. `outpost hosts` records the last 20 lines, which

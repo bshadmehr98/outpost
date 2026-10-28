@@ -105,8 +105,8 @@ def test_conf_uses_documented_directives_only():
     assert directives == {"User", "Group", "Port", "Listen", "Timeout", "MaxClients", "LogFile", "LogLevel", "Allow",
                           "ConnectPort", "Filter", "FilterURLs", "FilterType", "FilterDefaultDeny", "DisableViaHeader"}
     assert "Listen 10.0.0.5" in lines and "Port 3128" in lines and "User outpost-proxy" in lines
-    assert 'LogFile "/var/log/outpost-proxy.log"' in lines and "LogLevel Connect" in lines
-    assert 'Filter "/etc/outpost/proxy.allow"' in lines and "FilterURLs Off" in lines and "FilterDefaultDeny Yes" in lines
+    assert 'LogFile "/var/log/tinyproxy/tinyproxy.log"' in lines and "LogLevel Connect" in lines
+    assert 'Filter "/usr/share/tinyproxy/outpost.allow"' in lines and "FilterURLs Off" in lines and "FilterDefaultDeny Yes" in lines
     assert "FilterType ere" in lines and ["ConnectPort 443", "ConnectPort 80"] == [x for x in lines if x.startswith("ConnectPort")]
     assert [x for x in lines if x.startswith("Allow")] == ["Allow 127.0.0.1", "Allow 10.0.0.0/8", "Allow 172.16.0.0/12",
                                                            "Allow 192.168.0.0/16", "Allow 203.0.113.9", "Allow 198.51.100.0/24"]
@@ -116,8 +116,19 @@ def test_conf_uses_documented_directives_only():
 
 def test_unit_runs_tinyproxy_in_the_foreground_as_its_user():
     unit = proxy.unit("/usr/bin/tinyproxy")
-    assert "ExecStart=/usr/bin/tinyproxy -d -c /etc/outpost/proxy.conf" in unit
+    assert "ExecStart=/usr/bin/tinyproxy -d -c /etc/tinyproxy/tinyproxy.conf" in unit
     assert "User=outpost-proxy" in unit and "Restart=always" in unit and "WantedBy=multi-user.target" in unit
+    # as root before every start: the package's postinst hands the log directory back to its own user on upgrade
+    assert f"ExecStartPre=+/bin/sh -c '{proxy.LOG_PREP}'" in unit and "'" not in proxy.LOG_PREP and "$" not in proxy.LOG_PREP
+
+
+def test_files_are_where_an_apparmor_tinyproxy_profile_allows():
+    """The stock profile `tinyproxy` lets /usr/bin/tinyproxy read /etc/tinyproxy/tinyproxy.conf and
+    /usr/share/tinyproxy/*, and write /var/log/tinyproxy/tinyproxy.log; any other path is denied, even to root."""
+    assert proxy.CONF_PATH == "/etc/tinyproxy/tinyproxy.conf"
+    assert proxy.ALLOW_PATH.startswith("/usr/share/tinyproxy/") and proxy.ALLOW_PATH.count("/") == 4
+    assert proxy.LOG_PATH == "/var/log/tinyproxy/tinyproxy.log" and proxy.LOGROTATE.startswith(proxy.LOG_PATH + " {")
+    assert "copytruncate" in proxy.LOGROTATE and "postrotate" not in proxy.LOGROTATE   # the stock unit is masked, nothing to reload
 
 
 # -- the seal's one exception ---------------------------------------------------------
@@ -295,7 +306,7 @@ def test_setup_on_the_gitea_host_order(monkeypatch):
     source = host.first("sources.list.d/outpost.list")
     package = host.first("apt-get install -y")
     user = host.first("useradd --system")
-    conf = host.first("write: /etc/outpost/proxy.conf")
+    conf = host.first("write: /etc/tinyproxy/tinyproxy.conf")
     unit = host.first("write: /etc/systemd/system/outpost-proxy.service")
     egress_script = host.first(f"write: {egress.SCRIPT_PATH}")
     seal = host.first(f"{egress.SCRIPT_PATH} seal")
@@ -349,19 +360,22 @@ def test_missing_package_error_shows_what_the_package_manager_saw():
 
 def test_unreadable_configuration_and_failed_start_say_why():
     facts = {"id": "ubuntu", "codename": "noble", "arch": "x86_64", "ip": "10.0.0.5"}
-    report = "--- namei -l /etc/outpost/proxy.conf\n drwx------ root root outpost\n"
-    host = FakeHost("gitea-1", facts=facts, responses=INSTALLED + [(r"--- namei", report), (r"test -r /etc/outpost/proxy.conf", Result(1, "", ""))])
-    with pytest.raises(RuntimeError, match=r"outpost-proxy cannot read its configuration:\n--- namei -l /etc/outpost/proxy.conf\n drwx------"):
+    report = "--- namei -l /etc/tinyproxy/tinyproxy.conf\n drwx------ root root tinyproxy\n"
+    host = FakeHost("gitea-1", facts=facts, responses=INSTALLED + [(r"--- namei", report), (r"test -r /etc/tinyproxy/tinyproxy.conf", Result(1, "", ""))])
+    with pytest.raises(RuntimeError, match=r"outpost-proxy cannot read its configuration or write its log:\n--- namei -l /etc/tinyproxy/tinyproxy.conf\n drwx------"):
         proxy.setup(host, NodeContext(gitea=G, ca_pem="CA", proxy=ON_GITEA), CFG, egress_allow=[], client_allow=[], log=lambda *_: None)
-    assert any("chmod 0755 /etc/outpost" in s for s in host.scripts)
+    prep = next(s for s in host.scripts if "useradd --system" in s)
+    assert proxy.LOG_PREP in prep and "chown outpost-proxy:outpost-proxy /var/log/tinyproxy/tinyproxy.log" in prep
+    assert "rm -f /etc/outpost/proxy.conf /etc/outpost/proxy.allow /etc/logrotate.d/outpost-proxy" in prep   # an earlier setup's files
+    assert any("test -w /var/log/tinyproxy/tinyproxy.log" in s for s in host.scripts)
 
     host = FakeHost("gitea-1", facts=facts, responses=INSTALLED + [(r"--- namei", report + "--- /usr/bin/tinyproxy -d -c\nexit 124\n"),
                                                               (r"systemctl restart outpost-proxy", Result(3, "failed", ""))])
     with pytest.raises(RuntimeError, match=r"did not start:(.|\n)*exit 124"):
         proxy.setup(host, NodeContext(gitea=G, ca_pem="CA", proxy=ON_GITEA), CFG, egress_allow=[], client_allow=[], log=lambda *_: None)
     script = proxy.access_script("/usr/bin/tinyproxy")
-    assert script.startswith("set +e +o pipefail\n") and "namei -l /etc/outpost/proxy.conf" in script
-    assert "timeout 2 runuser -u outpost-proxy -- /usr/bin/tinyproxy -d -c /etc/outpost/proxy.conf" in script
+    assert script.startswith("set +e +o pipefail\n") and "namei -l /etc/tinyproxy/tinyproxy.conf" in script
+    assert "timeout 2 runuser -u outpost-proxy -- /usr/bin/tinyproxy -d -c /etc/tinyproxy/tinyproxy.conf" in script
     assert "/sys/kernel/security/apparmor/profiles" in script and "-c /tmp/outpost-proxy-copy.conf" in script
     assert "tinyproxy -d" not in proxy.access_script()
 
@@ -452,7 +466,7 @@ def test_inspect_reads_tinyproxy_and_the_log_tail(tmp_path):
     data = hosts.inspect(FakeHost(responses=[(r"egress_boot", facts)]))
     assert data["installed"]["tinyproxy"] == "1.11.1" and data["services"]["outpost-proxy"] == "active"
     assert data["proxy_log_tail"][1].endswith("CONNECT api.twilio.com:443 HTTP/1.1") and hosts.drift(data) == []
-    assert "proxy_log_tail=" in hosts.SCRIPT and "if [ -f /var/log/outpost-proxy.log ]" in hosts.SCRIPT
+    assert "proxy_log_tail=" in hosts.SCRIPT and "if [ -f /var/log/tinyproxy/tinyproxy.log ]" in hosts.SCRIPT
     servers = load_servers(servers_yml(tmp_path, "egress_proxy: {host: proxy-1, allow: [api.twilio.com]}\n"))
     assert hosts.roles(servers)["proxy-1"] == ["egress proxy"]
     on_gitea = load_servers(servers_yml(tmp_path, "egress_proxy: {allow: [api.twilio.com]}\n"))

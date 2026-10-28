@@ -261,7 +261,7 @@ command shows its steps, and a failed one is explained in a sentence with what t
 | containers and pods are sealed too | the same chains on routed traffic | `hello-python` and `hello-k3s` checks |
 | the seal survives a reboot | a oneshot unit before Docker and k3s | `verify` |
 | every exception is written down and every opening is logged | `allow:` in `servers.yml`; `/var/log/outpost-egress.log` | `iptables -S OUTPOST`; the node page |
-| a named exception reaches only its names, and only for programs that ask | the egress proxy's allow list; one owner match for its user on TCP 443 and 80, on its host only | `outpost proxy verify`; `proxy refuses unknown names` on every node; `hello-proxy` checks; `/var/log/outpost-proxy.log` |
+| a named exception reaches only its names, and only for programs that ask | the egress proxy's allow list; one owner match for its user on TCP 443 and 80, on its host only | `outpost proxy verify`; `proxy refuses unknown names` on every node; `hello-proxy` checks; `/var/log/tinyproxy/tinyproxy.log` |
 
 Not covered: root on a node can remove the rule (and it will be logged); Gitea is a single
 server with no HA; content is mirrored as the lockfiles say, not vetted; inbound ports are
