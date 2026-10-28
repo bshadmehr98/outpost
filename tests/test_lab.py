@@ -1,10 +1,12 @@
 from pathlib import Path
 
+import pytest
 import yaml
 
 from outpost import lab, ssh
 from outpost.cli import main
 from outpost.config import load_servers
+from outpost.ssh.options import ssh_options
 
 
 def test_lab_servers_yml_loads_and_points_ssh_at_the_lab(tmp_path):
@@ -22,14 +24,41 @@ def test_ssh_config_text_has_every_alias():
     assert "lab-k3s" not in text and "IdentityFile /x/id_ed25519" in text
 
 
-def test_ssh_use_config_adds_dash_f(monkeypatch):
+def test_ssh_use_config_adds_dash_f(tmp_path, monkeypatch):
     monkeypatch.delenv("OUTPOST_SSH_CONFIG", raising=False)
-    ssh.use_config("/tmp/some_config")
+    config = tmp_path / "ssh_config"
+    config.write_text("Host x\n")
+    ssh.use_config(config)
     try:
-        assert ["-F", "/tmp/some_config"] == ssh._base_opts(5)[-2:]
+        assert ["-F", str(config)] == ssh_options(5)[-2:]
     finally:
         ssh.use_config(None)
-    assert "-F" not in ssh._base_opts(5)
+    assert "-F" not in ssh_options(5)
+
+
+def test_ssh_config_that_does_not_exist_fails_at_once(tmp_path, monkeypatch):
+    monkeypatch.delenv("OUTPOST_SSH_CONFIG", raising=False)
+    with pytest.raises(ssh.SshError, match="does not exist.*servers.yml"):
+        ssh.use_config(tmp_path / "missing")
+    monkeypatch.setenv("OUTPOST_SSH_CONFIG", str(tmp_path / "missing"))
+    with pytest.raises(ssh.SshError, match="does not exist.*OUTPOST_SSH_CONFIG"):
+        ssh.use_config(None)
+
+
+def test_ssh_config_from_the_environment_or_servers_yml_but_not_two_different(tmp_path, monkeypatch):
+    one, two = tmp_path / "one", tmp_path / "two"
+    one.write_text("Host x\n")
+    two.write_text("Host y\n")
+    monkeypatch.setenv("OUTPOST_SSH_CONFIG", str(one))
+    try:
+        ssh.use_config(None)
+        assert ["-F", str(one)] == ssh_options(5)[-2:]
+        ssh.use_config(one)                      # the same file twice is fine
+        with pytest.raises(ssh.SshError, match="two ssh config files"):
+            ssh.use_config(two)
+    finally:
+        monkeypatch.delenv("OUTPOST_SSH_CONFIG")
+        ssh.use_config(None)
 
 
 def test_lab_command_exists_and_needs_docker(tmp_path, monkeypatch, capsys):

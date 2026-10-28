@@ -39,6 +39,12 @@ include = ["outpost*"]
 [tool.setuptools.package-data]
 outpost = ["ui/*.html", "templates/lab/*", "templates/platform/*", "templates/platform/.gitignore", "templates/platform/needs/*", "templates/platform/needs/*.example", "templates/platform/demo/*", "templates/platform/demo/app/*", "templates/platform/demo/app/templates/*", "templates/platform/checks/*", "templates/platform/checks/*/*"]
 
+[tool.ruff]
+line-length = 120
+
+[tool.ruff.lint.isort]
+known-first-party = ["outpost", "tests"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]   # so `from tests.conftest import FakeHost` works under a plain `pytest`, not only `python -m pytest`
