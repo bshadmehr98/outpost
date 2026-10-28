@@ -12,6 +12,7 @@ and you can poke at it with `ssh -F /tmp/outpost-rig/lab/ssh_config lab-node-1`.
 
 import json
 import os
+import re
 import shutil
 import subprocess
 import time
@@ -174,15 +175,19 @@ def test_6b_proxy(rig):
     # a container with HTTPS_PROXY reaches example.org through it; without the variables it does not, and
     # through it a name that is not on the list is refused by the proxy (403)
     image = f"{GITEA_NAME}/pkgs/library/python:3.12-slim"
-    fetch = "import sys, urllib.request as u; print(u.urlopen('https://' + sys.argv[1] + '/', timeout=20).status)"
+    # any HTTP status means the far end answered through the tunnel (example.org answers urllib's user agent
+    # with 403 these days); a CONNECT the proxy refuses is a URLError, "Tunnel connection failed: 403 Filtered"
+    fetch = ("import sys, urllib.request as u, urllib.error as e\n"
+             "try: print(u.urlopen('https://' + sys.argv[1] + '/', timeout=20).status)\n"
+             "except e.HTTPError as x: print('HTTP', x.code)")
     via = f"-e HTTPS_PROXY=http://{GITEA_NAME}:3128 -e https_proxy=http://{GITEA_NAME}:3128"
     unset = "-e HTTPS_PROXY= -e https_proxy= -e HTTP_PROXY= -e http_proxy="   # also overrides the Docker client config
     reached = ssh("lab-node-1", f'docker run --rm {via} {image} python -c "{fetch}" example.org', check=False)
-    assert reached.returncode == 0 and "200" in reached.stdout, reached.stderr
+    assert reached.returncode == 0 and re.search(r"\b[1-5]\d\d\b", reached.stdout), reached.stderr
     direct = ssh("lab-node-1", f'docker run --rm {unset} {image} python -c "{fetch}" example.org', check=False)
     assert direct.returncode != 0, direct.stdout
     refused = ssh("lab-node-1", f'docker run --rm {via} {image} python -c "{fetch}" example.com', check=False)
-    assert refused.returncode != 0 and "403" in refused.stderr, refused.stderr
+    assert refused.returncode != 0 and "Tunnel connection failed: 403" in refused.stderr, refused.stderr
     # every CONNECT and every refusal is in the proxy's log
     log = ssh("lab-gitea", "cat /var/log/tinyproxy/tinyproxy.log").stdout
     assert "CONNECT example.org:443" in log and 'filtered domain "example.com"' in log
