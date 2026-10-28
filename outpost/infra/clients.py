@@ -29,8 +29,8 @@ Swarm service opts in with `env_file: /etc/outpost/proxy.env`. k3s gets a Config
 
 import json
 import shlex
-from dataclasses import dataclass, field
-from urllib.parse import quote
+
+from ..endpoints import GiteaEndpoint, ProxyEndpoint
 
 PATH_CA = "/etc/outpost/ca.crt"
 PATH_CA_DIR = "/etc/ssl/certs"  # OpenSSL's default CA directory, looked up by subject hash
@@ -42,7 +42,6 @@ PATH_RPM_REPO = "/etc/yum.repos.d/outpost.repo"
 PATH_PROXY_ENV = "/etc/outpost/proxy.env"
 PATH_PROFILE = "/etc/profile.d/outpost.sh"
 PATH_ENVIRONMENT = "/etc/environment"
-PRIVATE_NETS = ("10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16")
 NO_PROXY_ENV = "# No egress proxy is configured (servers.yml has no egress_proxy). Kept so env_file: can name it.\n"
 
 # The repo files the official RHEL-family images ship. A single-layer config image cannot move them
@@ -73,69 +72,7 @@ STOCK_RPM_REPOS = (
 )
 
 
-@dataclass(frozen=True)
-class GiteaInfo:
-    name: str  # DNS name, e.g. gitea.internal
-    ip: str
-    org: str  # organisation holding pip, npm, apt, apk, rpm and files
-
-    @property
-    def url(self) -> str:
-        return f"https://{self.name}"
-
-    @property
-    def pypi_index(self) -> str:
-        return f"{self.url}/api/packages/{self.org}/pypi/simple"
-
-    @property
-    def npm_registry(self) -> str:
-        return f"{self.url}/api/packages/{self.org}/npm/"
-
-    @property
-    def apt_repo(self) -> str:
-        return f"{self.url}/api/packages/{self.org}/debian"
-
-    @property
-    def apk_repo(self) -> str:
-        return f"{self.url}/api/packages/{self.org}/alpine"
-
-    @property
-    def rpm_repo(self) -> str:
-        return f"{self.url}/api/packages/{self.org}/rpm"
-
-    def generic(self, name: str, version: str, filename: str) -> str:
-        return f"{self.url}/api/packages/{self.org}/generic/{quote(name, safe='')}/{quote(version, safe='')}/{quote(filename, safe='')}"
-
-    @property
-    def config_image(self) -> str:
-        return f"{self.name}/{self.org}/config:latest"
-
-
-@dataclass(frozen=True)
-class ProxyInfo:
-    """Where the egress proxy is, as the nodes see it. Built by infra/proxy.py from servers.yml."""
-
-    url: str  # http://<gitea address>:3128, or http://proxy.internal:3128 on another host
-    no_proxy: str  # what must never go through the proxy: Gitea, loopback, private networks
-    ip: str  # the address the proxy listens on
-    name: str  # the name nodes use for it (the Gitea name when it runs on the Gitea host)
-    allowed: tuple[str, ...] = field(default_factory=tuple)  # servers.yml egress_proxy.allow
-    host: str = ""  # SSH alias of the proxy host
-    on_gitea: bool = True  # runs on the Gitea host, so nodes need no new address or name
-
-    def env(self) -> dict[str, str]:
-        """The variables, in the order they are written everywhere."""
-        return {
-            "HTTPS_PROXY": self.url,
-            "HTTP_PROXY": self.url,
-            "NO_PROXY": self.no_proxy,
-            "https_proxy": self.url,
-            "http_proxy": self.url,
-            "no_proxy": self.no_proxy,
-        }
-
-
-def proxy_env(proxy: ProxyInfo) -> str:
+def proxy_env(proxy: ProxyEndpoint) -> str:
     """/etc/outpost/proxy.env: KEY=value lines for env_file: and `set -a; . file`. OUTPOST_PROXY_ALLOWED is
     informational (the demo app probes those names); the proxy enforces the list, not the client."""
     lines = [f"{k}={v}" for k, v in proxy.env().items()] + [f"OUTPOST_PROXY_ALLOWED={','.join(proxy.allowed)}"]
@@ -145,11 +82,11 @@ def proxy_env(proxy: ProxyInfo) -> str:
     )
 
 
-def proxy_exports(proxy: ProxyInfo) -> str:
+def proxy_exports(proxy: ProxyEndpoint) -> str:
     return "".join(f"export {k}={v}\n" for k, v in proxy.env().items())
 
 
-def docker_client_config(existing: str, proxy: ProxyInfo | None, gitea_name: str) -> str | None:
+def docker_client_config(existing: str, proxy: ProxyEndpoint | None, gitea_name: str) -> str | None:
     """~/.docker/config.json with `proxies.default` set (or removed), everything else (auths from
     `docker login`) kept. None when nothing has to change or the file is not JSON we can safely edit.
     Without a proxy, only a `default` entry Outpost wrote is removed: its noProxy starts with the Gitea name."""
@@ -176,7 +113,7 @@ def docker_client_config(existing: str, proxy: ProxyInfo | None, gitea_name: str
     return json.dumps(data, indent=2) + "\n"
 
 
-def environment_script(proxy: ProxyInfo | None) -> str:
+def environment_script(proxy: ProxyEndpoint | None) -> str:
     """Shell that puts the proxy lines into /etc/environment (pam_env reads KEY=value, no `export`) after
     removing earlier ones, rewriting the file in place. Without a proxy it only cleans up what Outpost wrote."""
     marker = "# Outpost egress proxy"
@@ -193,15 +130,15 @@ def environment_script(proxy: ProxyInfo | None) -> str:
     )
 
 
-def apt_source_line(gitea: GiteaInfo, distro: str) -> str:
+def apt_source_line(gitea: GiteaEndpoint, distro: str) -> str:
     return f"deb [signed-by={PATH_APT_KEY}] {gitea.apt_repo} {distro} main"
 
 
-def apk_repository_line(gitea: GiteaInfo, branch: str, repository: str = "main") -> str:
+def apk_repository_line(gitea: GiteaEndpoint, branch: str, repository: str = "main") -> str:
     return f"{gitea.apk_repo}/{branch}/{repository}"
 
 
-def rpm_repo_section(gitea: GiteaInfo, distro: str) -> str:
+def rpm_repo_section(gitea: GiteaEndpoint, distro: str) -> str:
     """One [section] of outpost.repo: Gitea serves one RPM repository per group, and the group is the distro.
     gpgcheck stays on: Gitea signs the repository metadata and the packages it serves with the key at gpgkey."""
     return (
@@ -211,7 +148,7 @@ def rpm_repo_section(gitea: GiteaInfo, distro: str) -> str:
 
 
 def client_files(
-    gitea: GiteaInfo,
+    gitea: GiteaEndpoint,
     ca_pem: str,
     apt_key: str | None,
     distros: list[str],
@@ -219,7 +156,7 @@ def client_files(
     apk_branches: list[str] | None = None,
     rpm_key: str | None = None,
     rpm_distros: list[str] | None = None,
-    proxy: ProxyInfo | None = None,
+    proxy: ProxyEndpoint | None = None,
 ) -> dict[str, str]:
     """path -> content. Shared by nodes and the config image. `apk_key` is an AlpineKey (name, content):
     the file under /etc/apk/keys must carry the name Gitea signed with, and it is only written when a
@@ -287,7 +224,7 @@ def corefile(node_ip: str) -> str:
     )
 
 
-def profile_script(gitea: GiteaInfo, proxy: ProxyInfo | None = None) -> str:
+def profile_script(gitea: GiteaEndpoint, proxy: ProxyEndpoint | None = None) -> str:
     return (
         f"export PIP_INDEX_URL={gitea.pypi_index}\nexport PIP_CERT={PATH_CA}\n"
         f"export NPM_CONFIG_REGISTRY={gitea.npm_registry}\nexport NPM_CONFIG_CAFILE={PATH_CA}\n"
@@ -295,7 +232,7 @@ def profile_script(gitea: GiteaInfo, proxy: ProxyInfo | None = None) -> str:
     )
 
 
-def host_files(gitea: GiteaInfo, ca_pem: str, node_ip: str, proxy: ProxyInfo | None = None) -> dict[str, str]:
+def host_files(gitea: GiteaEndpoint, ca_pem: str, node_ip: str, proxy: ProxyEndpoint | None = None) -> dict[str, str]:
     """Extra files that only make sense on a real host. With a proxy, profile.d also exports its variables
     (~/.docker/config.json and /etc/environment are merged on the host, see common.apply_proxy)."""
     return {
@@ -309,7 +246,7 @@ def host_files(gitea: GiteaInfo, ca_pem: str, node_ip: str, proxy: ProxyInfo | N
 
 
 def config_image_files(
-    gitea: GiteaInfo,
+    gitea: GiteaEndpoint,
     ca_pem: str,
     apt_key: str | None,
     distros: list[str],
@@ -317,7 +254,7 @@ def config_image_files(
     apk_branches: list[str] | None = None,
     rpm_key: str | None = None,
     rpm_distros: list[str] | None = None,
-    proxy: ProxyInfo | None = None,
+    proxy: ProxyEndpoint | None = None,
     ca_hash: str | None = None,
 ) -> dict[str, tuple[bytes, int]]:
     """Text files only: the config image is copied onto any base, so it must not carry a distro's binaries.

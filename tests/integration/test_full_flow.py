@@ -384,11 +384,11 @@ def test_10_reboot_keeps_the_seal_and_the_apps(rig):
 
 def test_11_dashboard_endpoints_against_the_rig(rig):
     """The dashboard's server-side pieces, against real state and real machines."""
-    from outpost.paths import Platform
     from outpost.ui import server
+    from outpost.workspace import Workspace
 
-    platform = Platform(rig)
-    data = server.overview(platform)
+    workspace = Workspace(rig)
+    data = server.overview(workspace)
     assert data["report"]["ok"] and set(data["hosts"]) >= {"lab-gitea", "lab-node-1"} and data["drift"] == {}
-    fresh = server.refresh_hosts(platform, ["lab-node-1"])
+    fresh = server.refresh_hosts(workspace, ["lab-node-1"])
     assert fresh["lab-node-1"]["workloads"]["compose_projects"] == ["demo-dev"]

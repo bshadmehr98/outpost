@@ -16,8 +16,8 @@ def test_init_creates_platform(tmp_path, capsys):
     assert "already has" in capsys.readouterr().out
 
 
-def test_needs_lists_platform_files(platform_dir, capsys):
-    assert main(["--dir", str(platform_dir), "needs"]) == 0
+def test_needs_lists_platform_files(workspace_dir, capsys):
+    assert main(["--dir", str(workspace_dir), "needs"]) == 0
     out = capsys.readouterr().out
     assert "image  python:3.12-slim" in out and "file   gitea" in out and "file   docker " in out
     assert "k3s" not in out  # template only has a compose infrastructure
@@ -28,22 +28,22 @@ def test_missing_platform_is_explained(tmp_path, capsys):
     assert "outpost init" in capsys.readouterr().err
 
 
-def test_infra_needs_name(platform_dir, capsys):
-    assert main(["--dir", str(platform_dir), "infra", "setup"]) == 2
-    assert main(["--dir", str(platform_dir), "infra", "list"]) == 0
+def test_infra_needs_name(workspace_dir, capsys):
+    assert main(["--dir", str(workspace_dir), "infra", "setup"]) == 2
+    assert main(["--dir", str(workspace_dir), "infra", "list"]) == 0
     assert "dev" in capsys.readouterr().out
-    assert main(["--dir", str(platform_dir), "infra", "verify", "nope"]) == 1
+    assert main(["--dir", str(workspace_dir), "infra", "verify", "nope"]) == 1
     assert "No infrastructure named 'nope'" in capsys.readouterr().err
 
 
-def test_check_without_gitea_state(platform_dir, capsys):
-    assert main(["--dir", str(platform_dir), "check", "--infra", "dev"]) == 1
+def test_check_without_gitea_state(workspace_dir, capsys):
+    assert main(["--dir", str(workspace_dir), "check", "--infra", "dev"]) == 1
     assert "gitea setup" in capsys.readouterr().err
 
 
-def test_upload_explains_what_is_missing(platform_dir, capsys):
-    assert main(["--dir", str(platform_dir), "upload"]) == 1
+def test_upload_explains_what_is_missing(workspace_dir, capsys):
+    assert main(["--dir", str(workspace_dir), "upload"]) == 1
     assert "outpost fetch" in capsys.readouterr().err
-    (platform_dir / "box").mkdir()
-    assert main(["--dir", str(platform_dir), "upload"]) == 1
+    (workspace_dir / "box").mkdir()
+    assert main(["--dir", str(workspace_dir), "upload"]) == 1
     assert "gitea setup" in capsys.readouterr().err

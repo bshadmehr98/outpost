@@ -331,7 +331,7 @@ def fake_gitea():
 
 
 @pytest.fixture
-def platform_dir(tmp_path):
+def workspace_dir(tmp_path):
     """A platform folder made with `outpost init`."""
     from outpost.cli import main
 

@@ -43,11 +43,11 @@ def test_ref_names():
 )
 def test_every_image_lives_under_the_organisation(ref, mirror_name, full):
     """library/redis and bitnami/redis must not collide, so the original path stays below the organisation."""
-    from outpost.infra.clients import GiteaInfo
+    from outpost.endpoints import GiteaEndpoint
 
     r = oci.parse_ref(ref)
     assert r.mirror_name == mirror_name
-    assert oci.gitea_ref(GiteaInfo(name="gitea.internal", ip="10.0.0.5", org="pkgs"), r) == full
+    assert oci.gitea_ref(GiteaEndpoint(name="gitea.internal", ip="10.0.0.5", org="pkgs"), r) == full
 
 
 def test_original_ref_inverts_mirror_name():

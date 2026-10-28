@@ -49,9 +49,9 @@ def test_read_dockerfile_collects_apk_and_rpm_packages_separately(tmp_path):
     assert d["apk"] == ["curl", "jq"] and d["rpm"] == ["git", "python3-pip", "tar", "gzip"] and d["apt"] == ["curl"]
 
 
-def test_scan_and_write_needs_emit_apk_and_rpm(tmp_path, platform_dir):
+def test_scan_and_write_needs_emit_apk_and_rpm(tmp_path, workspace_dir):
     from outpost.needs import load_needs
-    from outpost.paths import Platform
+    from outpost.workspace import Workspace
 
     project = tmp_path / "mixed"
     project.mkdir()
@@ -69,7 +69,7 @@ def test_scan_and_write_needs_emit_apk_and_rpm(tmp_path, platform_dir):
     assert "apk" not in projects.scan(plain) and "rpm" not in projects.scan(
         plain
     )  # no Alpine or RHEL image: no block proposed
-    path = projects.write_needs(Platform(platform_dir), {**s, "name": "mixed"})
+    path = projects.write_needs(Workspace(workspace_dir), {**s, "name": "mixed"})
     assert path.name == "mixed.yml" and "apt:" not in path.read_text()  # no apt packages, so no apt block
     alone = tmp_path / "only-mixed"
     alone.mkdir()

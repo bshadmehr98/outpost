@@ -17,15 +17,15 @@ import time
 from pathlib import Path
 
 from ..config import Servers
-from ..paths import Platform
 from ..ssh import Host
+from ..workspace import Workspace
 from .service import CONF_DIR, DATA_DIR, installed_version, wait_for_gitea
 
 REMOTE_DIR = "/var/tmp/outpost-backups"  # on disk, readable by the SSH user, cleaned after the copy
 
 
 def backup(
-    platform: Platform, servers: Servers, out_dir: Path, keep_on_server: bool = False, log=print, host=None
+    workspace: Workspace, servers: Servers, out_dir: Path, keep_on_server: bool = False, log=print, host=None
 ) -> Path:
     cfg = servers.gitea
     host = host or Host(cfg.host)
@@ -55,7 +55,7 @@ def backup(
     if not keep_on_server:
         host.run(f"rm -f {remote}", raise_on_failure=True)
     digest = hashlib.sha256(local.read_bytes()).hexdigest() if size < 2_000_000_000 else ""
-    platform.write_state(
+    workspace.write_state(
         "backup",
         {
             "file": str(local),
@@ -70,7 +70,7 @@ def backup(
     return local
 
 
-def restore(platform: Platform, servers: Servers, archive: Path, log=print, host=None) -> None:
+def restore(workspace: Workspace, servers: Servers, archive: Path, log=print, host=None) -> None:
     cfg = servers.gitea
     host = host or Host(cfg.host)
     if not archive.exists():
@@ -93,7 +93,7 @@ def restore(platform: Platform, servers: Servers, archive: Path, log=print, host
         raise_on_failure=True,
     )
     # the certificate on the laptop is the one every node trusts; an archive may carry an older one
-    cert, key = platform.pki_dir / "gitea.crt", platform.secrets_dir / "gitea.key"
+    cert, key = workspace.pki_dir / "gitea.crt", workspace.secrets_dir / "gitea.key"
     if cert.exists() and key.exists():
         host.write(f"{CONF_DIR}/gitea.crt", cert.read_text())
         host.write(f"{CONF_DIR}/gitea.key", key.read_text(), mode="0640")
@@ -101,7 +101,7 @@ def restore(platform: Platform, servers: Servers, archive: Path, log=print, host
     wait_for_gitea(host)
     version = installed_version(host)
     log(f"[{cfg.host}] Gitea {version} is up with the restored data")
-    token = platform.read_secret("gitea-token")
+    token = workspace.read_secret("gitea-token")
     code = (
         host.run(
             f"curl -sk --max-time 5 -o /dev/null -w '%{{http_code}}' -H 'Authorization: token {token}' https://127.0.0.1/api/v1/user"
@@ -113,8 +113,8 @@ def restore(platform: Platform, servers: Servers, archive: Path, log=print, host
         log(
             "the token in secrets/gitea-token does not belong to this data; run `outpost gitea setup` to make a new one"
         )
-    state = platform.read_state("gitea") or {}
-    platform.write_state(
+    state = workspace.read_state("gitea") or {}
+    workspace.write_state(
         "gitea",
         {
             **state,

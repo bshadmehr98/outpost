@@ -15,7 +15,10 @@ to run on any node that has Docker.
 import shlex
 
 from .. import versions
+from ..gitea.connect import connect
+from ..system import AirGappedSystem
 from . import common
+from .context import NodeContext
 
 HOME = "/var/lib/outpost-runner"
 CONFIG = "/etc/outpost/runner.yaml"
@@ -62,8 +65,17 @@ def labels_for(servers, alias: str) -> list[str]:
     return labels
 
 
+def install_runner_for(system: AirGappedSystem, ctx: NodeContext, host, log=print) -> dict:
+    """A runner on host (the first node of an infrastructure), registered with the system's Gitea, so
+    `outpost demo push` (or your own workflows) can deploy there."""
+    with connect(system.workspace, system.servers) as client:
+        token = client.runner_registration_token()
+        known = {runner["name"] for runner in client.runners()}
+    return install(host, ctx, labels_for(system.servers, host.alias), token, known, log=log)
+
+
 def install(
-    host, ctx: common.NodeContext, labels: list[str], registration_token: str, registered: set[str], log=print
+    host, ctx: NodeContext, labels: list[str], registration_token: str, registered: set[str], log=print
 ) -> dict:
     """Install, register (once) and start the runner. `registered` holds the runner names Gitea
     already knows, so a node that was set up before is not registered twice, and one whose Gitea

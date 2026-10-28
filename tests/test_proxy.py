@@ -12,20 +12,21 @@ import yaml
 
 from outpost import hosts, report
 from outpost.checks import load_checks
-from outpost.cli import build_parser, cmd_proxy, main
+from outpost.cli import build_parser, main
+from outpost.cli import proxy as proxy_command
 from outpost.config import ConfigError, ProxyConfig, load_servers
+from outpost.endpoints import GiteaEndpoint, make_proxy_endpoint
 from outpost.infra import clients, common, egress, k3s, proxy, verify
-from outpost.infra.clients import GiteaInfo
-from outpost.infra.common import NodeContext
+from outpost.infra.context import NodeContext
 from outpost.needs import Needs
-from outpost.paths import Platform
 from outpost.ssh import Result
+from outpost.workspace import Workspace
 from tests.conftest import FakeHost
 
-G = GiteaInfo(name="gitea.internal", ip="10.0.0.5", org="pkgs")
+G = GiteaEndpoint(name="gitea.internal", ip="10.0.0.5", org="pkgs")
 CFG = ProxyConfig(host="gitea-1", allow=["api.twilio.com", "*.sendgrid.net"])
-ON_GITEA = proxy.info(CFG, G, "gitea-1")
-ELSEWHERE = proxy.info(ProxyConfig(host="proxy-1", allow=["api.twilio.com"]), G, "gitea-1", ip="10.0.0.40")
+ON_GITEA = make_proxy_endpoint(CFG, G, "gitea-1")
+ELSEWHERE = make_proxy_endpoint(ProxyConfig(host="proxy-1", allow=["api.twilio.com"]), G, "gitea-1", ip="10.0.0.40")
 NO_PROXY = "gitea.internal,10.0.0.5,localhost,127.0.0.1,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16"
 
 
@@ -92,7 +93,7 @@ def test_info_on_the_gitea_host_and_elsewhere():
     assert ELSEWHERE.url == "http://proxy.internal:3128" and not ELSEWHERE.on_gitea
     assert ELSEWHERE.no_proxy == NO_PROXY + ",proxy.internal,10.0.0.40"
     with pytest.raises(RuntimeError, match="no known address"):
-        proxy.info(ProxyConfig(host="proxy-1", allow=["a.example.com"]), G, "gitea-1")
+        make_proxy_endpoint(ProxyConfig(host="proxy-1", allow=["a.example.com"]), G, "gitea-1")
     ctx = NodeContext(gitea=G, ca_pem="CA", proxy=ELSEWHERE)
     assert ctx.hosts_entries() == [("10.0.0.5", "gitea.internal"), ("10.0.0.40", "proxy.internal")]
     assert ctx.proxy_user_for("proxy-1") == "outpost-proxy" and ctx.proxy_user_for("dev-1") is None
@@ -636,63 +637,63 @@ def test_needs_get_tinyproxy_for_the_proxy_hosts_distro():
         proxy.add_package(Needs(), ProxyConfig(host="g", allow=["a.example.com"], distro="windows"), None)
 
 
-def test_outpost_needs_shows_tinyproxy(platform_dir, capsys):
-    path = platform_dir / "servers.yml"
+def test_outpost_needs_shows_tinyproxy(workspace_dir, capsys):
+    path = workspace_dir / "servers.yml"
     path.write_text(path.read_text() + "\negress_proxy:\n  allow: [api.twilio.com]\n  distro: noble\n")
-    assert main(["--dir", str(platform_dir), "needs"]) == 0
+    assert main(["--dir", str(workspace_dir), "needs"]) == 0
     out = capsys.readouterr().out
     assert "apt    (noble) tinyproxy" in out and "egress proxy on gitea-1" in out
     path.write_text(path.read_text().replace("  distro: noble\n", ""))
-    assert main(["--dir", str(platform_dir), "needs"]) == 1
+    assert main(["--dir", str(workspace_dir), "needs"]) == 1
     assert "Set `distro:` under egress_proxy" in capsys.readouterr().err
 
 
 # -- the CLI and the checks -----------------------------------------------------------
 
 
-def test_cli_parses_proxy_setup_and_verify(platform_dir, capsys):
+def test_cli_parses_proxy_setup_and_verify(workspace_dir, capsys):
     for action in ("setup", "verify"):
         args = build_parser().parse_args(["proxy", action])
-        assert args.func is cmd_proxy and args.action == action
+        assert args.run is proxy_command.run and args.action == action
     with pytest.raises(SystemExit):
         build_parser().parse_args(["proxy", "open"])
-    assert main(["--dir", str(platform_dir), "proxy", "setup"]) == 1
+    assert main(["--dir", str(workspace_dir), "proxy", "setup"]) == 1
     assert "no egress_proxy section" in capsys.readouterr().err
 
 
-def test_check_needing_the_proxy_is_skipped_without_one(platform_dir, monkeypatch, capsys):
+def test_check_needing_the_proxy_is_skipped_without_one(workspace_dir, monkeypatch, capsys):
     import outpost.checks as checksmod
-    import outpost.cli as climod
+    import outpost.system as systemmod
 
-    Platform(platform_dir).write_state("gitea", {"ip": "10.0.0.5"})
-    monkeypatch.setattr(climod, "Host", lambda alias: FakeHost(alias))
+    Workspace(workspace_dir).write_state("gitea", {"ip": "10.0.0.5"})
+    monkeypatch.setattr(systemmod, "Host", lambda alias: FakeHost(alias))
     monkeypatch.setattr(checksmod, "run_check", lambda *a, **k: pytest.fail("must not run"))
-    assert main(["--dir", str(platform_dir), "check", "hello-proxy", "--infra", "dev"]) == 0
+    assert main(["--dir", str(workspace_dir), "check", "hello-proxy", "--infra", "dev"]) == 0
     assert "check hello-proxy: skipped, it needs the egress proxy" in capsys.readouterr().out
     with pytest.raises(ConfigError, match="requires"):
-        (platform_dir / "checks" / "odd.yml").write_text("steps: [true]\nrequires: [vpn]\n")
-        load_checks(platform_dir / "checks")
+        (workspace_dir / "checks" / "odd.yml").write_text("steps: [true]\nrequires: [vpn]\n")
+        load_checks(workspace_dir / "checks")
 
 
-def test_check_env_comes_from_the_proxy_state(platform_dir, monkeypatch):
+def test_check_env_comes_from_the_proxy_state(workspace_dir, monkeypatch):
     import outpost.checks as checksmod
-    import outpost.cli as climod
+    import outpost.system as systemmod
 
-    path = platform_dir / "servers.yml"
+    path = workspace_dir / "servers.yml"
     path.write_text(path.read_text() + "\negress_proxy: {allow: ['*.sendgrid.net', example.org]}\n")
-    platform = Platform(platform_dir)
-    platform.write_state("gitea", {"ip": "10.0.0.5"})
-    platform.write_state(
+    workspace = Workspace(workspace_dir)
+    workspace.write_state("gitea", {"ip": "10.0.0.5"})
+    workspace.write_state(
         "proxy", {"url": "http://10.0.0.5:3128", "allow": ["*.sendgrid.net", "example.org"], "host": "gitea-1"}
     )
     seen = []
-    monkeypatch.setattr(climod, "Host", lambda alias: FakeHost(alias))
+    monkeypatch.setattr(systemmod, "Host", lambda alias: FakeHost(alias))
     monkeypatch.setattr(
         checksmod,
         "run_check",
         lambda check, host, env, log=print: seen.append(env) or {"name": check.name, "ok": True, "steps": []},
     )
-    assert main(["--dir", str(platform_dir), "check", "hello-proxy", "--infra", "dev"]) == 0
+    assert main(["--dir", str(workspace_dir), "check", "hello-proxy", "--infra", "dev"]) == 0
     assert (
         seen[0]["PROXY_URL"] == "http://10.0.0.5:3128"
         and seen[0]["PROXY_ALLOWED"] == "example.org"
@@ -718,13 +719,13 @@ def test_inspect_reads_tinyproxy_and_the_log_tail(tmp_path):
     assert hosts.roles(on_gitea)["gitea-1"] == ["gitea", "egress proxy"]
 
 
-def test_report_has_a_named_exceptions_section(platform_dir):
-    platform = Platform(platform_dir)
-    assert "There is no egress proxy" in report.render(report.build(platform, load_servers(platform.servers_file)))
-    path = platform.servers_file
+def test_report_has_a_named_exceptions_section(workspace_dir):
+    workspace = Workspace(workspace_dir)
+    assert "There is no egress proxy" in report.render(report.build(workspace, load_servers(workspace.servers_file)))
+    path = workspace.servers_file
     path.write_text(path.read_text() + "\negress_proxy: {allow: [api.twilio.com]}\n")
     servers = load_servers(path)
-    platform.write_state(
+    workspace.write_state(
         "proxy",
         {
             "host": "gitea-1",
@@ -737,24 +738,24 @@ def test_report_has_a_named_exceptions_section(platform_dir):
         },
     )
     hosts.record(
-        platform,
+        workspace,
         "gitea-1",
         {"reachable": True, "egress": "sealed", "installed": {}, "proxy_log_tail": ["CONNECT api.twilio.com:443"]},
     )
-    page = report.render(report.build(platform, servers))
+    page = report.render(report.build(workspace, servers))
     section = page[page.index("<h2>Named exceptions</h2>") :]
     assert (
         "<code>api.twilio.com</code>" in section and "tinyproxy 1.11.1" in section and "2026-10-28T10:00:00" in section
     )
     assert "CONNECT api.twilio.com:443" in section and "all checks passed" in section
-    platform.write_state(
+    workspace.write_state(
         "proxy",
         {
-            **platform.read_state("proxy"),
+            **workspace.read_state("proxy"),
             "verify": {"result": "problems", "checks": [{"name": "proxy reachable", "ok": False}], "when": "x"},
         },
     )
-    assert "egress proxy" in report.verdict(report.build(platform, servers))["problems"]
+    assert "egress proxy" in report.verdict(report.build(workspace, servers))["problems"]
 
 
 def test_explain_knows_the_proxy_failures():
@@ -778,16 +779,16 @@ def test_explain_knows_the_proxy_failures():
     assert explain.summarize(["proxy", "setup"], "", 0) == "Set up and verified the egress proxy"
 
 
-def test_proxy_setup_command_records_state_and_updates_set_up_nodes(platform_dir, monkeypatch, capsys):
-    import outpost.cli as climod
+def test_proxy_setup_command_records_state_and_updates_set_up_nodes(workspace_dir, monkeypatch, capsys):
+    import outpost.system as systemmod
 
-    path = platform_dir / "servers.yml"
+    path = workspace_dir / "servers.yml"
     path.write_text(path.read_text() + "\negress_proxy: {allow: [api.twilio.com]}\n")
-    platform = Platform(platform_dir)
-    platform.write_state("gitea", {"ip": "10.0.0.5"})
-    platform.write_state("infra-dev", {"type": "compose"})
-    (platform_dir / "pki").mkdir(exist_ok=True)
-    (platform_dir / "pki" / "ca.crt").write_text("CA")
+    workspace = Workspace(workspace_dir)
+    workspace.write_state("gitea", {"ip": "10.0.0.5"})
+    workspace.write_state("infra-dev", {"type": "compose"})
+    (workspace_dir / "pki").mkdir(exist_ok=True)
+    (workspace_dir / "pki" / "ca.crt").write_text("CA")
     made = {}
     checks = "CHECK|proxy service active|OK|active\nCHECK|proxy reachable|OK|api.twilio.com through the proxy -> 200\n"
 
@@ -799,9 +800,9 @@ def test_proxy_setup_command_records_state_and_updates_set_up_nodes(platform_dir
         )
         return made[alias]
 
-    monkeypatch.setattr(climod, "Host", make)
-    assert main(["--dir", str(platform_dir), "proxy", "setup"]) == 0
-    state = platform.read_state("proxy")
+    monkeypatch.setattr(systemmod, "Host", make)
+    assert main(["--dir", str(workspace_dir), "proxy", "setup"]) == 0
+    state = workspace.read_state("proxy")
     assert (
         state["host"] == "gitea-1"
         and state["ip"] == "10.0.0.5"
@@ -811,11 +812,11 @@ def test_proxy_setup_command_records_state_and_updates_set_up_nodes(platform_dir
     assert state["tinyproxy"] == "1.11.1" and state["when"] and state["verify"]["result"] == "ok"
     assert "HTTPS_PROXY=http://10.0.0.5:3128" in made["dev-1"].files[clients.PATH_PROXY_ENV]  # the node set up before
     assert "--uid-owner" in made["gitea-1"].files[egress.SCRIPT_PATH] and egress.SCRIPT_PATH not in made["dev-1"].files
-    assert (platform_dir / "state" / "hosts" / "gitea-1.json").exists()
+    assert (workspace_dir / "state" / "hosts" / "gitea-1.json").exists()
     assert "Next: outpost check hello-proxy" in capsys.readouterr().out
 
 
-DEMO = Path(__file__).resolve().parents[1] / "outpost" / "templates" / "platform" / "demo"
+DEMO = Path(__file__).resolve().parents[1] / "outpost" / "templates" / "workspace" / "demo"
 
 
 def test_demo_probes_the_proxy_and_still_deploys_without_one(monkeypatch):

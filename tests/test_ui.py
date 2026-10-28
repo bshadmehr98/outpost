@@ -7,13 +7,13 @@ from pathlib import Path
 
 import pytest
 
-from outpost.paths import Platform
 from outpost.ui.server import Handler
+from outpost.workspace import Workspace
 
 
 @pytest.fixture
-def ui(platform_dir):
-    handler = type("H", (Handler,), {"platform": Platform(platform_dir)})
+def ui(workspace_dir):
+    handler = type("H", (Handler,), {"workspace": Workspace(workspace_dir)})
     server = ThreadingHTTPServer(("127.0.0.1", 0), handler)
     threading.Thread(target=server.serve_forever, daemon=True).start()
     yield f"http://127.0.0.1:{server.server_address[1]}"
@@ -77,7 +77,7 @@ def test_overview_has_step_data(ui):
     assert data["servers"]["is_lab"] is False and data["running"] == []
 
 
-def test_servers_form_writes_valid_yaml(ui, platform_dir):
+def test_servers_form_writes_valid_yaml(ui, workspace_dir):
     form = {
         "gitea": {"host": "g1", "name": "Gitea.Local"},
         "infrastructures": {
@@ -95,7 +95,7 @@ def test_servers_form_writes_valid_yaml(ui, platform_dir):
     assert json.loads(call(ui + "/api/overview")[1])["servers"]["gitea"]["host"] == "g1"
 
 
-def test_project_scan_and_save(ui, platform_dir, tmp_path):
+def test_project_scan_and_save(ui, workspace_dir, tmp_path):
     project = tmp_path / "my-api"
     project.mkdir()
     (project / "requirements.txt").write_text("flask==3.0.0\nhttpx==0.27.0\n")
@@ -138,7 +138,7 @@ def test_project_scan_and_save(ui, platform_dir, tmp_path):
     }
     status, resp = call(ui + "/api/project/save", "POST", body)
     assert status == 200 and json.loads(resp)["saved"] == "needs/my-api.yml"
-    text = (platform_dir / "needs" / "my-api.yml").read_text()
+    text = (workspace_dir / "needs" / "my-api.yml").read_text()
     assert "file: ../../" in text or "file: ../" in text  # relative to needs/
     data = json.loads(call(ui + "/api/overview")[1])
     mine = next(f for f in data["needs_files"] if f["name"] == "my-api")
@@ -154,43 +154,43 @@ def test_project_scan_and_save(ui, platform_dir, tmp_path):
     assert "python:3.11-slim" in data["needs_detail"]["images"] and "3.11" in data["needs_detail"]["pypi"]
     assert call(ui + "/api/file?name=needs/my-api.yml", "DELETE")[0] == 200
     assert call(ui + "/api/file?name=servers.yml", "DELETE")[0] == 400
-    assert not (platform_dir / "needs" / "my-api.yml").exists()
+    assert not (workspace_dir / "needs" / "my-api.yml").exists()
 
 
-def test_lockfile_upload(ui, platform_dir):
+def test_lockfile_upload(ui, workspace_dir):
     req = urllib.request.Request(
         ui + "/api/lockfile?project=Shop&filename=requirements.txt", method="PUT", data=b"django==5.0\n"
     )
     with urllib.request.urlopen(req) as resp:
         info = json.loads(resp.read())
     assert info["kind"] == "python" and info["count"] == 1
-    assert (platform_dir / "needs" / "shop" / "requirements.txt").read_text() == "django==5.0\n"
+    assert (workspace_dir / "needs" / "shop" / "requirements.txt").read_text() == "django==5.0\n"
     status, body = call(
         ui + "/api/project/save", "POST", {"name": "shop", "python": "3.12", "pypi_files": [info["path"]]}
     )
-    assert status == 200 and "file: shop/requirements.txt" in (platform_dir / "needs" / "shop.yml").read_text()
+    assert status == 200 and "file: shop/requirements.txt" in (workspace_dir / "needs" / "shop.yml").read_text()
     req = urllib.request.Request(ui + "/api/lockfile?project=x&filename=../evil", method="PUT", data=b"")
     with urllib.request.urlopen(req) as resp:
         assert json.loads(resp.read())["error"]  # file name sanitised to "evil", which is not a lockfile
-    assert not (platform_dir / "needs" / "evil").exists()
+    assert not (workspace_dir / "needs" / "evil").exists()
 
 
 def test_ssh_check_rejects_odd_aliases(ui):
     assert json.loads(call(ui + "/api/ssh-check", "POST", {"alias": "a b; rm"})[1])["ok"] is False
 
 
-def test_overview_sync_box_status_and_preflight(ui, platform_dir):
+def test_overview_sync_box_status_and_preflight(ui, workspace_dir):
     data = json.loads(call(ui + "/api/overview")[1])
     assert data["sync"]["arrows"]["fetch"]["state"] == "none" and data["sync"]["arrows"]["setup"]["why"]
     bs = data["box_status"]
-    assert bs["missing_total"] >= 4  # images, pypi, npm, apt from the example, plus the platform files
+    assert bs["missing_total"] >= 4  # images, pypi, npm, apt from the example, plus the pinned files
     assert "python:3.12-slim" in bs["missing"]["images"]
     names = {c["name"] for c in data["preflight"]}
     assert {"ssh", "openssl", "docker", "pip"} <= names
     assert data["runs"] == []
 
 
-def test_search_and_run_history(ui, platform_dir):
+def test_search_and_run_history(ui, workspace_dir):
     status, body = call(ui + "/api/search?q=flask")
     r = json.loads(body)
     assert status == 200 and r["needs"][0]["text"].startswith("flask") and r["box"] == []
@@ -213,31 +213,31 @@ def test_server_status_rejects_odd_aliases(ui):
     assert json.loads(call(ui + "/api/server-status", "POST", {"alias": "x;y"})[1])["ok"] is False
 
 
-def test_ssh_config_problems_are_messages_and_the_environment_still_counts(platform_dir, monkeypatch, tmp_path):
+def test_ssh_config_problems_are_messages_and_the_environment_still_counts(workspace_dir, monkeypatch, tmp_path):
     from outpost import ssh
     from outpost.ui.server import server_status, ssh_check
 
-    platform = Platform(platform_dir)
+    workspace = Workspace(workspace_dir)
     monkeypatch.setenv("OUTPOST_SSH_CONFIG", str(tmp_path / "missing"))
     try:
         for check in (ssh_check, server_status):
-            result = check(platform, "node-1")
+            result = check(workspace, "node-1")
             assert result["ok"] is False and "does not exist" in result["message"]
         # servers.yml that does not load: OUTPOST_SSH_CONFIG is still the choice
         config = tmp_path / "ssh_config"
         config.write_text("Host x\n")
         monkeypatch.setenv("OUTPOST_SSH_CONFIG", str(config))
-        platform.servers_file.write_text("gitea: [not, a, mapping]\n")
+        workspace.servers_file.write_text("gitea: [not, a, mapping]\n")
         from outpost.ui.server import _choose_ssh_config
 
-        assert _choose_ssh_config(platform) is None
+        assert _choose_ssh_config(workspace) is None
         assert ["-F", str(config)] == ssh.options.ssh_options(5)[-2:]
     finally:
         monkeypatch.delenv("OUTPOST_SSH_CONFIG")
         ssh.use_config(None)
 
 
-def test_servers_form_round_trips_the_egress_proxy(ui, platform_dir):
+def test_servers_form_round_trips_the_egress_proxy(ui, workspace_dir):
     from outpost.config import load_servers
 
     form = {
@@ -251,29 +251,29 @@ def test_servers_form_round_trips_the_egress_proxy(ui, platform_dir):
         },
     }
     assert call(ui + "/api/servers", "POST", form)[0] == 200
-    proxy = load_servers(platform_dir / "servers.yml").egress_proxy
+    proxy = load_servers(workspace_dir / "servers.yml").egress_proxy
     assert (
         proxy.host == "g1"
         and proxy.port == 3128
         and proxy.allow == ["api.twilio.com", "*.sendgrid.net"]
         and proxy.distro == "noble"
     )
-    assert "port" not in (platform_dir / "servers.yml").read_text()  # defaults stay out of the file
+    assert "port" not in (workspace_dir / "servers.yml").read_text()  # defaults stay out of the file
     data = json.loads(call(ui + "/api/overview")[1])["servers"]["egress_proxy"]
     assert data["allow"] == ["api.twilio.com", "*.sendgrid.net"] and data["host"] == "g1"
     # a form without the card keeps the section; an empty allow list removes it; a bad entry is refused
     assert call(ui + "/api/servers", "POST", {k: v for k, v in form.items() if k != "egress_proxy"})[0] == 200
-    assert load_servers(platform_dir / "servers.yml").egress_proxy.allow == ["api.twilio.com", "*.sendgrid.net"]
+    assert load_servers(workspace_dir / "servers.yml").egress_proxy.allow == ["api.twilio.com", "*.sendgrid.net"]
     status, body = call(
         ui + "/api/servers", "POST", {**form, "egress_proxy": {"allow": "https://api.twilio.com", "port": "3128"}}
     )
     assert status == 400 and "egress_proxy.allow" in json.loads(body)["error"]
     other = {**form, "egress_proxy": {"allow": "api.twilio.com", "host": "p1", "port": "8888"}}
     assert call(ui + "/api/servers", "POST", other)[0] == 200
-    proxy = load_servers(platform_dir / "servers.yml").egress_proxy
+    proxy = load_servers(workspace_dir / "servers.yml").egress_proxy
     assert (proxy.host, proxy.port) == ("p1", 8888)
     assert call(ui + "/api/servers", "POST", {**form, "egress_proxy": {"allow": ""}})[0] == 200
-    assert load_servers(platform_dir / "servers.yml").egress_proxy is None
+    assert load_servers(workspace_dir / "servers.yml").egress_proxy is None
 
 
 def test_proxy_commands_are_allowed_from_the_page():

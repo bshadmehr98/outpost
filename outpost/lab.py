@@ -14,7 +14,7 @@ import subprocess
 import time
 from pathlib import Path
 
-from .paths import Platform
+from .workspace import Workspace
 
 IMAGE = "outpost-lab-server"
 NETWORK, SUBNET = "outpost-lab", "172.31.252.0/24"
@@ -72,11 +72,11 @@ def _docker(*args, check=True) -> subprocess.CompletedProcess:
     return subprocess.run(["docker", *args], capture_output=True, text=True, check=check)
 
 
-def up(platform: Platform, k3s: bool = True, log=print) -> list[str]:
+def up(workspace: Workspace, k3s: bool = True, log=print) -> list[str]:
     if not shutil.which("docker"):
         raise RuntimeError("The lab needs Docker on this machine.")
     aliases = [a for a in SERVERS if k3s or a != "lab-k3s"]
-    lab = platform.root / "lab"
+    lab = workspace.root / "lab"
     lab.mkdir(parents=True, exist_ok=True)
 
     key = lab / "id_ed25519"
@@ -89,7 +89,7 @@ def up(platform: Platform, k3s: bool = True, log=print) -> list[str]:
     log("building the server image (Ubuntu 24.04 with systemd and sshd)")
     _docker("build", "-q", "-t", IMAGE, str(build))
 
-    down(platform, log=lambda *_: None)
+    down(workspace, log=lambda *_: None)
     _docker("network", "create", "--subnet", SUBNET, NETWORK)
     for alias in aliases:
         ip, extra = SERVERS[alias]
@@ -120,12 +120,12 @@ def up(platform: Platform, k3s: bool = True, log=print) -> list[str]:
         log(f"started {alias} at {ip}")
 
     (lab / "ssh_config").write_text(ssh_config(key, aliases))
-    platform.servers_file.write_text(servers_yml(k3s))
+    workspace.servers_file.write_text(servers_yml(k3s))
     # the servers are brand new, so what Outpost remembered about the old ones is wrong
     for stale in [
-        platform.secrets_dir / "gitea-token",
-        platform.secrets_dir / "gitea-admin-password",
-        *platform.state_dir.glob("*.json"),
+        workspace.secrets_dir / "gitea-token",
+        workspace.secrets_dir / "gitea-admin-password",
+        *workspace.state_dir.glob("*.json"),
     ]:
         stale.unlink(missing_ok=True)
 
@@ -145,7 +145,7 @@ def up(platform: Platform, k3s: bool = True, log=print) -> list[str]:
     return aliases
 
 
-def down(platform: Platform, log=print) -> None:
+def down(workspace: Workspace, log=print) -> None:
     _docker("rm", "-f", *SERVERS, check=False)
     _docker("network", "rm", NETWORK, check=False)
     _docker("volume", "rm", *VOLUMES, check=False)

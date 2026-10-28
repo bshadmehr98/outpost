@@ -1,12 +1,12 @@
-"""What the dashboard's overview is made of: is the platform in sync, what is missing, is this laptop ready.
+"""What the dashboard's overview is made of: is the workspace in sync, what is missing, is this laptop ready.
 
-  box_status(platform, needs)   per kind: how much is in the box, and which needs are not there yet
-  sync(platform, box)           needs -> box -> Gitea -> nodes: which arrow is stale and why
-  preflight(platform)           docker, ssh, openssl, free disk on this computer
-  runs(platform)                past dashboard runs, newest first, with their exit code and a one-line summary
-  search(platform, needs, q)    find a package or image in the needs and in the box
+  box_status(workspace, needs)   per kind: how much is in the box, and which needs are not there yet
+  sync(workspace, box)           needs -> box -> Gitea -> nodes: which arrow is stale and why
+  preflight(workspace)           docker, ssh, openssl, free disk on this computer
+  runs(workspace)                past dashboard runs, newest first, with their exit code and a one-line summary
+  search(workspace, needs, q)    find a package or image in the needs and in the box
   steps(log)                    the "==> " progress lines of a run, for the narrated progress panel
-  box_changes(platform, needs)  what is new in the box since the last upload, and what is in the box but not needed
+  box_changes(workspace, needs)  what is new in the box since the last upload, and what is in the box but not needed
 
 Everything is read from files; nothing here talks to a server.
 """
@@ -22,7 +22,7 @@ from .. import oci
 from ..box import KINDS
 from ..fetch.npm import tarball_name
 from ..needs import Needs
-from ..paths import Platform
+from ..workspace import Workspace
 from . import explain
 
 
@@ -36,9 +36,9 @@ def _spec_parts(spec: str) -> tuple[str, str | None]:
     return (_norm(m.group(1)), m.group(2)) if m else (_norm(spec), None)
 
 
-def box_status(platform: Platform, needs: Needs) -> dict:  # noqa: C901 too complex; split into named steps in the refactor
+def box_status(workspace: Workspace, needs: Needs) -> dict:  # noqa: C901 too complex; split into named steps in the refactor
     """{"kinds": {kind: {files, bytes}}, "missing": {kind: [...]}, "missing_total": n}"""
-    box = platform.box_dir
+    box = workspace.box_dir
     kinds = {k: {"files": 0, "bytes": 0} for k in KINDS}
     for kind in KINDS:
         root = box / kind
@@ -96,14 +96,14 @@ def _iso(ts: float | None) -> str | None:
     return datetime.fromtimestamp(ts, UTC).isoformat(timespec="seconds") if ts else None
 
 
-def sync(platform: Platform, box: dict, infra_names: list[str]) -> dict:
+def sync(workspace: Workspace, box: dict, infra_names: list[str]) -> dict:
     """Four stages and three arrows. Each arrow is 'ok', 'stale' or 'none' with a reason in words."""
-    manifest = platform.box_dir / "manifest.json"
+    manifest = workspace.box_dir / "manifest.json"
     fetched_at = _mtime(manifest)
-    needs_at = max([_mtime(p) or 0 for p in platform.needs_dir.glob("*.yml")] + [0]) or None
-    uploaded_at = _mtime(platform.state_dir / "upload.json")
-    gitea_at = _mtime(platform.state_dir / "gitea.json")
-    verified = {n: _mtime(platform.state_dir / f"verify-{n}.json") for n in infra_names}
+    needs_at = max([_mtime(p) or 0 for p in workspace.needs_dir.glob("*.yml")] + [0]) or None
+    uploaded_at = _mtime(workspace.state_dir / "upload.json")
+    gitea_at = _mtime(workspace.state_dir / "gitea.json")
+    verified = {n: _mtime(workspace.state_dir / f"verify-{n}.json") for n in infra_names}
 
     arrows = {}
     if not fetched_at:
@@ -143,7 +143,7 @@ def sync(platform: Platform, box: dict, infra_names: list[str]) -> dict:
     }
 
 
-def preflight(platform: Platform) -> list[dict]:
+def preflight(workspace: Workspace) -> list[dict]:
     """Things this computer needs, each {"name", "ok", "detail", "need"}; `need` says which step cares."""
     checks = []
     for tool, need, why in (
@@ -154,7 +154,7 @@ def preflight(platform: Platform) -> list[dict]:
         path = shutil.which(tool)
         checks.append({"name": tool, "ok": bool(path), "detail": path or f"not found; {why}", "need": need})
     try:
-        usage = shutil.disk_usage(platform.root)
+        usage = shutil.disk_usage(workspace.root)
         free_gb = usage.free / 1e9
         checks.append(
             {
@@ -176,12 +176,12 @@ def preflight(platform: Platform) -> list[dict]:
     return checks
 
 
-def runs(platform: Platform, limit: int = 50, live: set[str] | None = None) -> list[dict]:
+def runs(workspace: Workspace, limit: int = 50, live: set[str] | None = None) -> list[dict]:
     """Past runs from state/runs/*.log: when, which command, how it ended.
 
     `live` names the runs this server is still executing; a log without an exit line that is not
     live was cut short (the dashboard was closed) and is reported as exit None with running False."""
-    folder = platform.state_dir / "runs"
+    folder = workspace.state_dir / "runs"
     if not folder.exists():
         return []
     out = []
@@ -235,11 +235,11 @@ def steps(log: str) -> list[dict]:
     return out
 
 
-def box_changes(platform: Platform, needs: Needs) -> dict:  # noqa: C901 too complex; split into named steps in the refactor
+def box_changes(workspace: Workspace, needs: Needs) -> dict:  # noqa: C901 too complex; split into named steps in the refactor
     """Since the last upload: how many files are new in the box (by mtime). And what the box holds that no
     needs file asks for any more, so a stale box is visible before it is uploaded."""
-    box = platform.box_dir
-    uploaded_at = _mtime(platform.state_dir / "upload.json")
+    box = workspace.box_dir
+    uploaded_at = _mtime(workspace.state_dir / "upload.json")
     new_files, new_bytes = 0, 0
     if box.exists():
         for kind in KINDS:
@@ -289,7 +289,7 @@ def box_changes(platform: Platform, needs: Needs) -> dict:  # noqa: C901 too com
     }
 
 
-def search(platform: Platform, needs: Needs, q: str, limit: int = 40) -> dict:
+def search(workspace: Workspace, needs: Needs, q: str, limit: int = 40) -> dict:
     """Case-insensitive substring search over the needs and the box file names."""
     q = q.strip().lower()
     if len(q) < 2:
@@ -306,7 +306,7 @@ def search(platform: Platform, needs: Needs, q: str, limit: int = 40) -> dict:
             hits += [{"kind": f"{kind} ({distro})", "text": p} for p in pkgs if q in p.lower()]
     hits += [{"kind": "file", "text": f"{f.name} {f.version}"} for f in needs.files if q in f.name.lower()]
     box_hits = []
-    manifest = platform.box_dir / "manifest.json"
+    manifest = workspace.box_dir / "manifest.json"
     if manifest.exists():
         for item in json.loads(manifest.read_text()).get("items", []):
             path = item["path"]

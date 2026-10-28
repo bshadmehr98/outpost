@@ -10,7 +10,9 @@ Output is a list of {name, ok, detail}. The checks that matter most:
 import shlex
 
 from .. import versions
-from . import clients, common
+from ..endpoints import GiteaEndpoint
+from . import clients
+from .context import NodeContext
 
 
 def by_family(apt: str, apk: str, rpm: str) -> str:
@@ -23,7 +25,7 @@ def by_family(apt: str, apk: str, rpm: str) -> str:
     )
 
 
-def source_commands(g: clients.GiteaInfo) -> dict[str, str]:
+def source_commands(g: GiteaEndpoint) -> dict[str, str]:
     """At least one source points at Gitea, and none points anywhere else. Both halves matter: from 0.1.0
     the apt probe in setup used HEAD, which Gitea's Debian registry does not answer, so outpost.list was
     empty on every apt node, and a check that only looked for foreign sources passed on an empty list."""
@@ -65,7 +67,7 @@ def source_commands(g: clients.GiteaInfo) -> dict[str, str]:
     )
 
 
-def common_checks(ctx: common.NodeContext) -> list[tuple[str, str]]:
+def common_checks(ctx: NodeContext) -> list[tuple[str, str]]:
     g = ctx.gitea
     # the tool's own exit status, not tail's: a source that fails to download fails the check
     index_updates = by_family(
@@ -108,7 +110,7 @@ def common_checks(ctx: common.NodeContext) -> list[tuple[str, str]]:
     ] + proxy_checks(ctx)
 
 
-def proxy_checks(ctx: common.NodeContext, node: bool = True) -> list[tuple[str, str]]:
+def proxy_checks(ctx: NodeContext, node: bool = True) -> list[tuple[str, str]]:
     """With an egress proxy: CONNECT to an allowed name is answered 200 by the proxy and the far end then
     answers over the tunnel (any HTTP status: it was reached), and CONNECT to a name not on the list is
     answered by the proxy itself with 403. %{http_connect} is the proxy's answer to CONNECT, so the second
@@ -161,10 +163,21 @@ def parse(output: str) -> list[dict]:
     return results
 
 
-def verify_node(host, ctx: common.NodeContext, extra: list[tuple[str, str]]) -> list[dict]:
+def verify_node(host, ctx: NodeContext, extra: list[tuple[str, str]]) -> list[dict]:
     checks = common_checks(ctx) + extra
     result = host.run(script(checks), timeout=600)
     parsed = parse(result.stdout)
     if not parsed:
         parsed = [{"name": "connect", "ok": False, "detail": result.stderr.strip()[-300:] or "no output"}]
     return parsed
+
+
+def log_verifications(node: str, results: list[dict], log=print) -> bool:
+    """Log one node's verifications: a summary line, then one line each. Returns True when all passed."""
+    all_passed = all(result["ok"] for result in results)
+    log(f"  {node}: {'all good' if all_passed else 'PROBLEMS'}")
+    for result in results:
+        mark = "ok  " if result["ok"] else "FAIL"
+        detail = f"  ({result['detail'][:90]})" if result["detail"] and not result["ok"] else ""
+        log(f"    {mark} {result['name']}{detail}")
+    return all_passed

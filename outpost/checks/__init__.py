@@ -15,6 +15,9 @@
 Steps run on the first node, in the copied folder, as root, with $GITEA and $ORG set, and with an egress
 proxy also $PROXY_URL, $PROXY_ALLOWED (a name it lets through) and $PROXY_REFUSED (one it must refuse).
 A step passes when its command exits 0 and, if `expect:` is given, its output contains that text.
+
+    found = checks_for(system, system.infra("dev"), only=None)
+    results = run_checks(system, system.infra("dev"), found, log=print)    # also state/check-dev.json
 """
 
 import shlex
@@ -26,6 +29,10 @@ from pathlib import Path
 import yaml
 
 from ..config import ConfigError
+from ..endpoints import gitea_endpoint
+from ..infra.proxy import probe_name, refused_name
+from ..system import AirGappedSystem
+from ..workspace import STATE_PROXY, check_state
 
 REMOTE_ROOT = "/tmp/outpost-checks"
 REQUIREMENTS = ("proxy",)
@@ -86,7 +93,55 @@ def _tar_folder(folder: Path) -> Path:
     return archive
 
 
+def checks_for(system: AirGappedSystem, infra, only: str | None = None) -> list["Check"]:
+    """The checks in the workspace that apply to an infrastructure's type; only the one named `only`, if given."""
+    return [
+        check
+        for check in load_checks(system.workspace.checks_dir)
+        if check.applies_to(infra.type) and (not only or check.name == only)
+    ]
+
+
+def run_checks(system: AirGappedSystem, infra, checks: list["Check"], log=print) -> list[dict]:
+    """Run checks on the first node of an infrastructure and record them in state/check-<name>.json.
+
+    A check that needs the egress proxy is skipped, with a message, while no proxy is set up.
+
+    Returns:
+        One result per check that ran.
+    """
+    gitea = gitea_endpoint(system)
+    node = system.host(infra.nodes[0])
+    env = {"GITEA": gitea.name, "ORG": gitea.org, **proxy_check_env(system)}
+    results = []
+    for check in checks:
+        if "proxy" in check.requires and "PROXY_URL" not in env:
+            log(
+                f"check {check.name}: skipped, it needs the egress proxy and none is set up "
+                "(egress_proxy in servers.yml, then `outpost proxy setup`)"
+            )
+            continue
+        log(f"check {check.name} on {node.alias}: {check.description}")
+        results.append(run_check(check, node, env, log=log))
+    system.write_state(check_state(infra.name), {"results": results})
+    return results
+
+
+def proxy_check_env(system: AirGappedSystem) -> dict[str, str]:
+    """PROXY_URL, PROXY_ALLOWED (a name the proxy lets through) and PROXY_REFUSED (one it must refuse) for the
+    checks, from state/proxy.json; empty when no proxy is configured or it was never set up."""
+    state = system.state(STATE_PROXY) or {}
+    if not system.servers.egress_proxy or not state.get("url") or not state.get("allow"):
+        return {}
+    return {
+        "PROXY_URL": state["url"],
+        "PROXY_ALLOWED": probe_name(state["allow"]),
+        "PROXY_REFUSED": refused_name(state["allow"]),
+    }
+
+
 def run_check(check: Check, host, env: dict[str, str], log=print, timeout: int = 900) -> dict:
+    """Copy a check's folder to host and run its steps there, with env set; stop at the first failing step."""
     remote_dir = f"{REMOTE_ROOT}/{check.name}"
     exports = " ".join(f"{k}={shlex.quote(v)}" for k, v in env.items())
     host.run(f"rm -rf {remote_dir} && mkdir -p {remote_dir}", raise_on_failure=True)

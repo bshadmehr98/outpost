@@ -2,7 +2,7 @@
 
   scan(folder)                    look at a folder: lockfiles, Dockerfiles (images; apt, apk, rpm packages), Python version -> a proposal
   describe_lockfile(path)         what one lockfile is and how many packages it pins
-  write_needs(platform, project)  write needs/<name>.yml from a proposal the user accepted
+  write_needs(workspace, project)  write needs/<name>.yml from a proposal the user accepted
 
 Nothing here is clever. It finds the files you already have and reads them with the same parsers
 `outpost fetch` uses, so what the page shows is what will be fetched.
@@ -18,7 +18,7 @@ import yaml
 from .. import oci
 from ..config import ConfigError
 from ..needs import parsers
-from ..paths import Platform
+from ..workspace import Workspace
 
 PYTHON_LOCKFILES = ("requirements.txt", "requirements.in", "poetry.lock", "uv.lock", "Pipfile.lock")
 JS_LOCKFILES = ("package-lock.json", "npm-shrinkwrap.json", "pnpm-lock.yaml", "yarn.lock")
@@ -103,7 +103,7 @@ def needed_image(image: str, gitea: str | None = None) -> str | None:
 
     `${GITEA}/${ORG}/library/python:3.12-slim` and `gitea.internal/pkgs/library/python:3.12-slim` are what a
     converted Dockerfile says; the need that put them there is `python:3.12-slim`. `bitnami/redis:7` below the
-    organisation is `bitnami/redis:7`. `gitea` is `<name>/<org>` (gitea.internal/pkgs) when the platform knows
+    organisation is `bitnami/redis:7`. `gitea` is `<name>/<org>` (gitea.internal/pkgs) when the workspace knows
     it; without it only the `${GITEA}/${ORG}/...` form is read back. A `${BASE}` that hides the name is skipped."""
     tail = image.rsplit("/", 1)[-1]
     name = tail.partition(":")[0]
@@ -184,7 +184,7 @@ def python_version(folder: Path, images: list[str]) -> str | None:
 
 def scan(folder: str | Path, gitea: str | None = None) -> dict:
     """Everything a needs file could be made of, found in a folder. The user picks what to keep.
-    `gitea` is `<name>/<org>` of this platform's Gitea, when known (see needed_image)."""
+    `gitea` is `<name>/<org>` of this workspace's Gitea, when known (see needed_image)."""
     root = Path(os.path.expanduser(str(folder))).resolve()
     if not root.is_dir():
         raise ConfigError(f"{root} is not a folder on this computer")
@@ -224,12 +224,12 @@ def scan(folder: str | Path, gitea: str | None = None) -> dict:
     return out
 
 
-def write_needs(platform: Platform, project: dict) -> Path:
+def write_needs(workspace: Workspace, project: dict) -> Path:
     """Write needs/<name>.yml. Lockfile paths are stored relative to needs/, as `outpost fetch` reads them."""
     name = re.sub(r"[^a-z0-9._-]+", "-", str(project.get("name", "")).lower()).strip("-.")
     if not name:
         raise ConfigError("the project needs a name")
-    needs_dir = platform.needs_dir
+    needs_dir = workspace.needs_dir
     needs_dir.mkdir(parents=True, exist_ok=True)
 
     def rel(p: str) -> str:

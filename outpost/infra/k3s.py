@@ -15,14 +15,16 @@ through the proxy. Pods opt in instead, from a ConfigMap `outpost-proxy` in the 
 import json
 
 from .. import versions
+from ..endpoints import ProxyEndpoint
 from . import clients, common
+from .context import NodeContext
 
 CONFIGMAP = "outpost-proxy"
 
 IMAGES_DIR = "/var/lib/rancher/k3s/agent/images"
 
 
-def registries_yaml(ctx: common.NodeContext) -> str:
+def registries_yaml(ctx: NodeContext) -> str:
     g = ctx.gitea
     return (
         "mirrors:\n"
@@ -34,7 +36,7 @@ def registries_yaml(ctx: common.NodeContext) -> str:
     )
 
 
-def configmap_yaml(proxy: clients.ProxyInfo) -> str:
+def configmap_yaml(proxy: ProxyEndpoint) -> str:
     """The proxy variables as a ConfigMap. JSON strings are valid YAML scalars, so values are quoted safely."""
     data = {**proxy.env(), "OUTPOST_PROXY_ALLOWED": ",".join(proxy.allowed)}
     return (
@@ -44,7 +46,7 @@ def configmap_yaml(proxy: clients.ProxyInfo) -> str:
     )
 
 
-def apply_configmap(server, proxy: clients.ProxyInfo | None, log=print) -> None:
+def apply_configmap(server, proxy: ProxyEndpoint | None, log=print) -> None:
     """Idempotent: `kubectl apply` of the same ConfigMap changes nothing; without a proxy it is removed."""
     if proxy:
         server.run(
@@ -57,7 +59,7 @@ def apply_configmap(server, proxy: clients.ProxyInfo | None, log=print) -> None:
         )
 
 
-def _install(host, ctx: common.NodeContext, exec_args: str, env: str, log) -> None:
+def _install(host, ctx: NodeContext, exec_args: str, env: str, log) -> None:
     g = ctx.gitea
     if (
         versions.K3S.split("+")[0]
@@ -78,7 +80,7 @@ def _install(host, ctx: common.NodeContext, exec_args: str, env: str, log) -> No
     )
 
 
-def setup(ctx: common.NodeContext, hosts: list, log=print) -> dict:
+def setup(ctx: NodeContext, hosts: list, log=print) -> dict:
     facts = {}
     server = hosts[0]
     facts[server.alias] = common.prepare_node(server, ctx, log)
@@ -110,7 +112,7 @@ def setup(ctx: common.NodeContext, hosts: list, log=print) -> dict:
     return {"nodes": facts, "server": server.alias}
 
 
-def extra_checks(ctx: common.NodeContext) -> list[tuple[str, str]]:
+def extra_checks(ctx: NodeContext) -> list[tuple[str, str]]:
     return [
         ("k3s installed", "k3s --version | head -1"),
         (f"k3s at pinned version {versions.K3S}", f"k3s --version | head -1 | grep -q {versions.K3S.split('+')[0]}"),

@@ -112,8 +112,8 @@ def test_rpm_upload_per_group_and_key(client, fake_gitea, tmp_path):
 
 def test_upload_box_sends_apk_and_rpm_and_records_them_for_the_config_image(client, fake_gitea, tmp_path, ca_pem):
     from outpost import box as boxmod
+    from outpost.endpoints import GiteaEndpoint
     from outpost.gitea.upload import upload_box
-    from outpost.infra.clients import GiteaInfo
 
     box = tmp_path / "box"
     (box / "apk" / "v3.20").mkdir(parents=True)
@@ -129,7 +129,7 @@ def test_upload_box_sends_apk_and_rpm_and_records_them_for_the_config_image(clie
         and boxmod.distros_in(box, "rpm") == ["fedora40", "rocky9"]
     )
     stats = upload_box(
-        box, client, GiteaInfo(name="gitea.internal", ip="10.0.0.5", org="pkgs"), ca_pem, log=lambda *_: None
+        box, client, GiteaEndpoint(name="gitea.internal", ip="10.0.0.5", org="pkgs"), ca_pem, log=lambda *_: None
     )
     assert stats["apk"] == {"uploaded": 1, "exists": 0} and stats["rpm"] == {"uploaded": 2, "exists": 0}
     assert stats["config_image"] == {"distros": [], "apk_branches": ["v3.20"], "rpm_distros": ["fedora40", "rocky9"]}
@@ -145,15 +145,15 @@ def test_upload_puts_every_image_under_the_organisation(client, fake_gitea, tmp_
     """python:3.12-slim lands as pkgs/library/python, bitnami/redis as pkgs/bitnami/redis; no other org is made."""
     from outpost import box as boxmod
     from outpost import oci
+    from outpost.endpoints import GiteaEndpoint
     from outpost.gitea.upload import upload_box
-    from outpost.infra.clients import GiteaInfo
 
     box = tmp_path / "box"
     for ref in ("python:3.12-slim", "bitnami/redis:7", "ghcr.io/org/app:1.4"):
         r = oci.parse_ref(ref)
         oci.build_layout({"/hello": (ref.encode(), 0o644)}, box / "images" / r.safe_name, r.short)
     boxmod.write_manifest(box)
-    gitea = GiteaInfo(name="gitea.internal", ip="10.0.0.5", org="pkgs")
+    gitea = GiteaEndpoint(name="gitea.internal", ip="10.0.0.5", org="pkgs")
     lines = []
     stats = upload_box(box, client, gitea, ca_pem, log=lines.append)
     assert stats["images"] == {"uploaded": 3, "exists": 0}

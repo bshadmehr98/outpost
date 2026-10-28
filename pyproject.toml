@@ -37,7 +37,7 @@ dev = ["pytest>=8", "ruff>=0.6", "pyright>=1.1.380", "types-PyYAML"]
 include = ["outpost*"]
 
 [tool.setuptools.package-data]
-outpost = ["ui/*.html", "templates/lab/*", "templates/platform/*", "templates/platform/.gitignore", "templates/platform/needs/*", "templates/platform/needs/*.example", "templates/platform/demo/*", "templates/platform/demo/app/*", "templates/platform/demo/app/templates/*", "templates/platform/checks/*", "templates/platform/checks/*/*"]
+outpost = ["ui/*.html", "templates/lab/*", "templates/workspace/*", "templates/workspace/.gitignore", "templates/workspace/needs/*", "templates/workspace/needs/*.example", "templates/workspace/demo/*", "templates/workspace/demo/app/*", "templates/workspace/demo/app/templates/*", "templates/workspace/checks/*", "templates/workspace/checks/*/*"]
 
 [tool.ruff]
 line-length = 120

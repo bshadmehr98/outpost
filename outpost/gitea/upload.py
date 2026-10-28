@@ -8,6 +8,8 @@ reference that name explicitly.
 Already-present files are skipped (Gitea answers 409), so re-uploading a box is cheap.
 At the end the `config` image is built from the same client files every node gets,
 so a Dockerfile only needs:  COPY --from=gitea.internal/pkgs/config / /
+
+    upload(system, sources=[], log=print)      # the workspace's box/, or folders and tar.xz files
 """
 
 import tempfile
@@ -15,14 +17,74 @@ from pathlib import Path
 
 from .. import box as boxmod
 from .. import oci, pki
+from ..endpoints import GiteaEndpoint, ProxyEndpoint, gitea_endpoint, proxy_endpoint_or_none
 from ..infra import clients
-from ..infra.clients import GiteaInfo, ProxyInfo
+from ..system import AirGappedSystem
+from ..workspace import STATE_UPLOAD
 from .client import GiteaClient
+from .connect import connect
+
+
+def upload(system: AirGappedSystem, sources: list[Path], log=print) -> dict:
+    """Push a box into Gitea and record what is there now in state/upload.json.
+
+    Args:
+        sources: a box folder, or the tar.xz files `outpost pack` made; empty means the workspace's box/.
+
+    Returns:
+        The upload's numbers per kind.
+
+    Raises:
+        RuntimeError: a source is missing, or the box's signature or manifest does not match.
+    """
+    sources = sources or [system.workspace.box_dir]
+    for source in sources:
+        if not source.exists():
+            raise RuntimeError(
+                f"{source} does not exist. Run `outpost fetch` first, or pass the box folder or tar.xz files."
+            )
+    box, unpacked = boxmod.open_box(sources[0] if len(sources) == 1 and sources[0].is_dir() else sources)
+    try:
+        _check_signature(box, system.workspace.box_public_key, log)
+        gitea = gitea_endpoint(system)
+        proxy = proxy_endpoint_or_none(system, gitea, log)
+        with connect(system.workspace, system.servers) as client:
+            stats = upload_box(box, client, gitea, system.ca_pem(), log=log, proxy=proxy)
+    finally:
+        if unpacked:
+            unpacked.cleanup()
+    config_image = stats.get("config_image", {})
+    system.write_state(
+        STATE_UPLOAD,
+        {
+            "distros": config_image.get("distros", []),
+            "apk_branches": config_image.get("apk_branches", []),
+            "rpm_distros": config_image.get("rpm_distros", []),
+            "stats": stats,
+            "source": [str(source) for source in sources],
+        },
+    )
+    return stats
+
+
+def _check_signature(box: Path, box_public_key: Path, log) -> None:
+    """Check manifest.sig against pki/box.pub; say so when there is nothing to check it with."""
+    signature = box / "manifest.sig"
+    if not signature.exists():
+        log("warning: the box is not signed (no manifest.sig), so its signature is not checked")
+        return
+    if not box_public_key.exists():
+        log("warning: cannot check the box's signature: pki/box.pub is missing")
+        return
+    if not pki.verify(box / "manifest.json", signature, box_public_key):
+        raise RuntimeError("manifest.sig does not match pki/box.pub. The box was altered or signed with another key.")
+    log("Signature OK")
 
 
 def upload_box(  # noqa: C901 too complex; split into named steps in the refactor
-    box: Path, client: GiteaClient, gitea: GiteaInfo, ca_pem: str, log=print, proxy: ProxyInfo | None = None
+    box: Path, client: GiteaClient, gitea: GiteaEndpoint, ca_pem: str, log=print, proxy: ProxyEndpoint | None = None
 ) -> dict:
+    """Upload every kind in an open box folder, then build and push the config image."""
     problems = boxmod.verify_manifest(box)
     if problems:
         raise RuntimeError("The box does not match its manifest:\n  " + "\n  ".join(problems[:10]))
@@ -102,13 +164,13 @@ def upload_box(  # noqa: C901 too complex; split into named steps in the refacto
 
 def push_config_image(
     client: GiteaClient,
-    gitea: GiteaInfo,
+    gitea: GiteaEndpoint,
     ca_pem: str,
     distros: list[str],
     apk_branches: list[str] | None = None,
     rpm_distros: list[str] | None = None,
     log=print,
-    proxy: ProxyInfo | None = None,
+    proxy: ProxyEndpoint | None = None,
 ) -> dict:
     """Build the one-layer `config` image from the client files and push it. Also run on its own
     after the CA is rotated, so builds pick up the new certificate without a full upload.

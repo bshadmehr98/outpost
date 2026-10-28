@@ -2,9 +2,10 @@
 
 from .. import versions
 from . import common
+from .context import NodeContext
 
 
-def setup(ctx: common.NodeContext, hosts: list, log=print) -> dict:
+def setup(ctx: NodeContext, hosts: list, log=print) -> dict:
     facts = {}
     for host in hosts:
         facts[host.alias] = common.prepare_node(host, ctx, log)
@@ -32,7 +33,7 @@ def setup(ctx: common.NodeContext, hosts: list, log=print) -> dict:
     return {"nodes": facts, "manager": manager.alias}
 
 
-def extra_checks(ctx: common.NodeContext) -> list[tuple[str, str]]:
+def extra_checks(ctx: NodeContext) -> list[tuple[str, str]]:
     return [
         ("docker running", "docker info --format '{{.ServerVersion}}'"),
         (

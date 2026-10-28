@@ -1,13 +1,13 @@
 import json
 
 from outpost import versions
+from outpost.endpoints import GiteaEndpoint
 from outpost.gitea.client import AlpineKey
 from outpost.infra import clients, common, compose, egress, k3s, swarm, verify
-from outpost.infra.clients import GiteaInfo
-from outpost.infra.common import NodeContext
+from outpost.infra.context import NodeContext
 from tests.conftest import FakeHost
 
-G = GiteaInfo(name="gitea.internal", ip="10.0.0.5", org="pkgs")
+G = GiteaEndpoint(name="gitea.internal", ip="10.0.0.5", org="pkgs")
 CTX = NodeContext(
     gitea=G, ca_pem="-----BEGIN CERTIFICATE-----\nca\n", distros=["bookworm"], allow=["203.0.113.9"], infra_name="dev"
 )

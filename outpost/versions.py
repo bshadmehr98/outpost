@@ -1,4 +1,4 @@
-"""Pinned versions of the platform pieces and where to download them.
+"""Pinned versions of the pieces Outpost installs and where to download them.
 
 These are the only things Outpost needs that are not in your own needs files.
 Bump a version here, run `outpost fetch`, `outpost upload`, and re-run the setup.

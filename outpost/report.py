@@ -1,4 +1,4 @@
-"""The proof report: one standalone HTML page that says what the platform is, what was verified,
+"""The proof report: one standalone HTML page that says what the air-gapped system is, what was verified,
 when, and what the servers are running. Built from the files in state/ only, so it needs no SSH
 and shows exactly what the last commands recorded.
 
@@ -12,13 +12,13 @@ from pathlib import Path
 
 from . import __version__, hosts, versions
 from .config import Servers
-from .paths import Platform
+from .workspace import Workspace
 
 
-def build(platform: Platform, servers: Servers | None) -> dict:
+def build(workspace: Workspace, servers: Servers | None) -> dict:
     state = (
-        {p.stem: platform.read_state(p.stem) for p in sorted(platform.state_dir.glob("*.json"))}
-        if platform.state_dir.exists()
+        {p.stem: workspace.read_state(p.stem) for p in sorted(workspace.state_dir.glob("*.json"))}
+        if workspace.state_dir.exists()
         else {}
     )
     infras = {}
@@ -31,25 +31,25 @@ def build(platform: Platform, servers: Servers | None) -> dict:
                 "nodes": infra.nodes,
                 "verify": verify,
                 "checks": checks,
-                "verified_at": _mtime(platform.state_dir / f"verify-{name}.json"),
-                "checked_at": _mtime(platform.state_dir / f"check-{name}.json"),
+                "verified_at": _mtime(workspace.state_dir / f"verify-{name}.json"),
+                "checked_at": _mtime(workspace.state_dir / f"check-{name}.json"),
                 "set_up": bool(state.get(f"infra-{name}")),
             }
     demo = state.get("demo-status") or {}
     return {
         "generated": time.strftime("%Y-%m-%d %H:%M:%S %Z"),
         "outpost": __version__,
-        "root": str(platform.root),
+        "root": str(workspace.root),
         "gitea": {**(state.get("gitea") or {}), "config": vars(servers.gitea) if servers else {}},
         "upload": state.get("upload") or {},
         "backup": state.get("backup") or {},
         "infras": infras,
-        "hosts": hosts.cached(platform),
+        "hosts": hosts.cached(workspace),
         "roles": hosts.roles(servers) if servers else {},
         "pinned": hosts.expected_versions(),
         "arch": servers.arch if servers else versions.ARCH,
         "serving": demo.get("serving") or {},
-        "demo_at": _mtime(platform.state_dir / "demo-status.json"),
+        "demo_at": _mtime(workspace.state_dir / "demo-status.json"),
         "proxy": {
             "config": vars(servers.egress_proxy) if servers and servers.egress_proxy else None,
             "state": state.get("proxy") or {},
@@ -116,7 +116,7 @@ def render(data: dict) -> str:  # noqa: C901 too complex; split into named steps
         f"<!doctype html><html lang='en'><head><meta charset='utf-8'><title>Outpost proof report</title><style>{CSS}</style></head><body>"
     ]
     out.append(
-        f"<h1>Outpost proof report</h1><p class='sub'>Platform <code>{e(data['root'])}</code>, generated {e(data['generated'])} by outpost {e(data['outpost'])}.</p>"
+        f"<h1>Outpost proof report</h1><p class='sub'>Workspace <code>{e(data['root'])}</code>, generated {e(data['generated'])} by outpost {e(data['outpost'])}.</p>"
     )
     if v["ok"]:
         out.append(
@@ -259,7 +259,7 @@ def _named_exceptions(data: dict, e) -> list[str]:
     if not cfg:
         out.append(
             "<p>None. There is no egress proxy (no <code>egress_proxy</code> in servers.yml), so no workload can reach any "
-            "name outside the platform.</p>"
+            "name outside the workspace.</p>"
         )
         return out
     out.append("<table>")
@@ -304,8 +304,8 @@ def _named_exceptions(data: dict, e) -> list[str]:
     return out
 
 
-def write(platform: Platform, servers: Servers | None, out: Path | None = None) -> Path:
-    out = out or platform.state_dir / "report.html"
+def write(workspace: Workspace, servers: Servers | None, out: Path | None = None) -> Path:
+    out = out or workspace.state_dir / "report.html"
     out.parent.mkdir(parents=True, exist_ok=True)
-    out.write_text(render(build(platform, servers)))
+    out.write_text(render(build(workspace, servers)))
     return out

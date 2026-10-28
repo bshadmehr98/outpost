@@ -93,7 +93,7 @@ def parse_ref(ref: str) -> Ref:
 def gitea_ref(gitea, ref: Ref) -> str:
     """Where `ref` lives once uploaded: python:3.12-slim -> gitea.internal/pkgs/library/python:3.12-slim.
 
-    `gitea` is a GiteaInfo (name and org). This is the name Dockerfiles, compose, stack and k8s files
+    `gitea` is a GiteaEndpoint (name and org). This is the name Dockerfiles, compose, stack and k8s files
     write; nothing on a node rewrites a plain Docker Hub name, and a sealed node rejects Docker Hub."""
     return f"{gitea.name}/{gitea.org}/{ref.mirror_name}:{ref.tag}"
 

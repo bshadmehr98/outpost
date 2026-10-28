@@ -2,9 +2,9 @@
 
   inspect(host)                      run one script: OS, address, uptime, disk, memory, installed versions,
                                      services, seal state, and the workloads running there
-  refresh(platform, servers, ...)    inspect every host in servers.yml (or some) and cache the answers
+  refresh(workspace, servers, ...)    inspect every host in servers.yml (or some) and cache the answers
   roles(servers)                     alias -> ["gitea", "dev: compose", "prod: swarm manager", "egress proxy", ...]
-  cached(platform)                   the cache, for the dashboard and the report; never talks to a server
+  cached(workspace)                   the cache, for the dashboard and the report; never talks to a server
 
 The setup and verify commands refresh the hosts they touched, so the dashboard's Machines page is
 current without asking. `outpost hosts` prints the same table; `--refresh` asks every server again.
@@ -18,8 +18,8 @@ from pathlib import Path
 
 from . import versions
 from .config import Servers
-from .paths import Platform
 from .ssh import Host, SshError
+from .workspace import Workspace
 
 SCRIPT = r"""
 . /etc/os-release 2>/dev/null
@@ -119,12 +119,12 @@ def roles(servers: Servers) -> dict[str, list[str]]:
     return out
 
 
-def hosts_dir(platform: Platform) -> Path:
-    return platform.state_dir / "hosts"
+def hosts_dir(workspace: Workspace) -> Path:
+    return workspace.state_dir / "hosts"
 
 
-def record(platform: Platform, alias: str, data: dict) -> dict:
-    folder = hosts_dir(platform)
+def record(workspace: Workspace, alias: str, data: dict) -> dict:
+    folder = hosts_dir(workspace)
     folder.mkdir(parents=True, exist_ok=True)
     data = {**data, "alias": alias, "seen": time.strftime("%Y-%m-%dT%H:%M:%S")}
     (folder / f"{alias}.json").write_text(json.dumps(data, indent=2, sort_keys=True) + "\n")
@@ -132,7 +132,7 @@ def record(platform: Platform, alias: str, data: dict) -> dict:
 
 
 def refresh(
-    platform: Platform,
+    workspace: Workspace,
     servers: Servers,
     aliases: list[str] | None = None,
     log=print,
@@ -141,7 +141,7 @@ def refresh(
     wanted = aliases or list(roles(servers))
     out = {}
     for alias in wanted:
-        data = record(platform, alias, inspect(make_host(alias)))
+        data = record(workspace, alias, inspect(make_host(alias)))
         out[alias] = data
         if data["reachable"]:
             inst = ", ".join(f"{k} {v}" for k, v in data["installed"].items() if v) or "nothing installed yet"
@@ -151,8 +151,8 @@ def refresh(
     return out
 
 
-def cached(platform: Platform) -> dict[str, dict]:
-    folder = hosts_dir(platform)
+def cached(workspace: Workspace) -> dict[str, dict]:
+    folder = hosts_dir(workspace)
     if not folder.exists():
         return {}
     out = {}

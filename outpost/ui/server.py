@@ -46,8 +46,8 @@ from ..checks import load_checks
 from ..config import ConfigError, load_mirrors, load_servers
 from ..http import HttpError
 from ..needs import Needs, add_platform_files, load_needs
-from ..paths import Platform
 from ..ssh import SshError
+from ..workspace import Workspace
 from . import explain, projects, status
 
 ALLOWED_COMMANDS = {
@@ -100,10 +100,10 @@ def lab_status() -> dict:
     return {"docker": True, "running": sorted(n for n in out if n in lab.SERVERS)}
 
 
-def needs_files(platform: Platform) -> list[dict]:
+def needs_files(workspace: Workspace) -> list[dict]:
     """One entry per needs/*.yml: what it declares and whether it reads cleanly."""
     out = []
-    for path in sorted(platform.needs_dir.glob("*.yml")) + sorted(platform.needs_dir.glob("*.yaml")):
+    for path in sorted(workspace.needs_dir.glob("*.yml")) + sorted(workspace.needs_dir.glob("*.yaml")):
         entry = {"file": f"needs/{path.name}", "name": path.stem, "summary": None, "error": None, "raw": None}
         try:
             raw = yaml.safe_load(path.read_text()) or {}
@@ -120,16 +120,16 @@ def needs_files(platform: Platform) -> list[dict]:
     return out
 
 
-def needs_detail(platform: Platform, infra_types: set[str], servers=None) -> dict:
+def needs_detail(workspace: Workspace, infra_types: set[str], servers=None) -> dict:
     """The merged list `outpost fetch` will work from, including Gitea, Docker and k3s themselves, and
     tinyproxy when servers.yml has an egress proxy (left out while its distro is unknown)."""
-    needs = load_needs(platform.needs_dir)
-    add_platform_files(needs, versions.platform_files(load_mirrors(platform.mirrors_file), infra_types))
+    needs = load_needs(workspace.needs_dir)
+    add_platform_files(needs, versions.platform_files(load_mirrors(workspace.mirrors_file), infra_types))
     if servers and servers.egress_proxy:
         from ..infra import proxy as proxymod
 
         with contextlib.suppress(ConfigError):
-            proxymod.add_package(needs, servers.egress_proxy, hostsmod.cached(platform).get(servers.egress_proxy.host))
+            proxymod.add_package(needs, servers.egress_proxy, hostsmod.cached(workspace).get(servers.egress_proxy.host))
     return {
         "images": needs.images,
         "pypi": {py: specs for py, specs in needs.pypi.items()},
@@ -142,12 +142,12 @@ def needs_detail(platform: Platform, infra_types: set[str], servers=None) -> dic
     }
 
 
-def overview(platform: Platform) -> dict:
-    data: dict = {"root": str(platform.root), "servers": None, "error": None}
+def overview(workspace: Workspace) -> dict:
+    data: dict = {"root": str(workspace.root), "servers": None, "error": None}
     infra_types: set[str] = set()
     servers = None
     try:
-        servers = load_servers(platform.servers_file)
+        servers = load_servers(workspace.servers_file)
         versions.use_arch(servers.arch)
         infra_types = servers.infra_types
         data["servers"] = {
@@ -162,63 +162,63 @@ def overview(platform: Platform) -> dict:
         data["error"] = str(e)
     needs = None
     try:
-        needs = load_needs(platform.needs_dir)
+        needs = load_needs(workspace.needs_dir)
         data["needs"] = needs.summary()
-        data["needs_detail"] = needs_detail(platform, infra_types, servers)
+        data["needs_detail"] = needs_detail(workspace, infra_types, servers)
     except ConfigError as e:
         data["needs"] = {"error": str(e)}
         data["needs_detail"] = None
-    full = load_needs(platform.needs_dir) if needs else Needs()
+    full = load_needs(workspace.needs_dir) if needs else Needs()
     if needs:
-        add_platform_files(full, versions.platform_files(load_mirrors(platform.mirrors_file), infra_types))
-    data["box_status"] = status.box_status(platform, full)
-    data["box_changes"] = status.box_changes(platform, full)
-    data["sync"] = status.sync(platform, data["box_status"], list((data["servers"] or {}).get("infrastructures", {})))
-    data["preflight"] = status.preflight(platform)
-    data["runs"] = status.runs(platform, limit=8, live=_live())
-    data["needs_files"] = needs_files(platform)
-    manifest = platform.box_dir / "manifest.json"
+        add_platform_files(full, versions.platform_files(load_mirrors(workspace.mirrors_file), infra_types))
+    data["box_status"] = status.box_status(workspace, full)
+    data["box_changes"] = status.box_changes(workspace, full)
+    data["sync"] = status.sync(workspace, data["box_status"], list((data["servers"] or {}).get("infrastructures", {})))
+    data["preflight"] = status.preflight(workspace)
+    data["runs"] = status.runs(workspace, limit=8, live=_live())
+    data["needs_files"] = needs_files(workspace)
+    manifest = workspace.box_dir / "manifest.json"
     data["box"] = json.loads(manifest.read_text()) if manifest.exists() else None
     if data["box"]:
         data["box"].pop("items", None)
     data["state"] = (
-        {p.stem: json.loads(p.read_text()) for p in sorted(platform.state_dir.glob("*.json"))}
-        if platform.state_dir.exists()
+        {p.stem: json.loads(p.read_text()) for p in sorted(workspace.state_dir.glob("*.json"))}
+        if workspace.state_dir.exists()
         else {}
     )
     data["files"] = (
         ["servers.yml", "mirrors.yml"]
-        + [f"needs/{p.name}" for p in sorted(platform.needs_dir.glob("*.yml"))]
-        + [f"checks/{p.name}" for p in sorted(platform.checks_dir.glob("*.yml"))]
+        + [f"needs/{p.name}" for p in sorted(workspace.needs_dir.glob("*.yml"))]
+        + [f"checks/{p.name}" for p in sorted(workspace.checks_dir.glob("*.yml"))]
     )
     try:
         data["checks"] = [
             {"name": c.name, "description": c.description, "infra": c.infra, "requires": c.requires}
-            for c in load_checks(platform.checks_dir)
+            for c in load_checks(workspace.checks_dir)
         ]
     except ConfigError as e:
         data["checks"] = [{"name": "error", "description": str(e), "infra": []}]
-    data["secrets"] = {"gitea-token": (platform.secrets_dir / "gitea-token").exists()}
+    data["secrets"] = {"gitea-token": (workspace.secrets_dir / "gitea-token").exists()}
     data["ssh_aliases"] = ssh_aliases()
     data["lab"] = lab_status()
     data["versions"] = hostsmod.expected_versions()
     data["running"] = [{"id": rid, "args": r["args"]} for rid, r in RUNS.items() if r["proc"].poll() is None]
     data["demo"] = {
-        "local": (platform.root / "demo").exists(),
-        "urls": demo.urls(platform, servers) if data["servers"] else {},  # pyright: ignore[reportArgumentType]  servers is set when data["servers"] is
-        "files": sorted(demo.project_files(platform.root / "demo")) if (platform.root / "demo").exists() else [],
-        "status": platform.read_state("demo-status"),
+        "local": (workspace.root / "demo").exists(),
+        "urls": demo.urls(workspace, servers) if data["servers"] else {},  # pyright: ignore[reportArgumentType]  servers is set when data["servers"] is
+        "files": sorted(demo.project_files(workspace.root / "demo")) if (workspace.root / "demo").exists() else [],
+        "status": workspace.read_state("demo-status"),
     }
-    data["hosts"] = hostsmod.cached(platform)
+    data["hosts"] = hostsmod.cached(workspace)
     data["roles"] = hostsmod.roles(servers) if servers else {}
     data["drift"] = {a: hostsmod.drift(h) for a, h in data["hosts"].items() if hostsmod.drift(h)}
-    data["backups"] = list_backups(platform)
-    data["report"] = reportmod.verdict(reportmod.build(platform, servers))
+    data["backups"] = list_backups(workspace)
+    data["report"] = reportmod.verdict(reportmod.build(workspace, servers))
     return data
 
 
-def list_backups(platform: Platform) -> list[dict]:
-    folder = platform.root / "backups"
+def list_backups(workspace: Workspace) -> list[dict]:
+    folder = workspace.root / "backups"
     if not folder.exists():
         return []
     out = []
@@ -226,7 +226,7 @@ def list_backups(platform: Platform) -> list[dict]:
         st = p.stat()
         out.append(
             {
-                "file": str(p.relative_to(platform.root)),
+                "file": str(p.relative_to(workspace.root)),
                 "bytes": st.st_size,
                 "when": time.strftime("%Y-%m-%dT%H:%M:%S", time.localtime(st.st_mtime)),
             }
@@ -234,32 +234,32 @@ def list_backups(platform: Platform) -> list[dict]:
     return out
 
 
-def refresh_hosts(platform: Platform, aliases: list[str] | None) -> dict:
+def refresh_hosts(workspace: Workspace, aliases: list[str] | None) -> dict:
     """Ask the servers again (one SSH round trip each) and cache the answers."""
-    servers = load_servers(platform.servers_file)
+    servers = load_servers(workspace.servers_file)
     ssh.use_config(servers.ssh_config)
     wanted = [a for a in (aliases or []) if re.fullmatch(r"[A-Za-z0-9._-]+", a)] or None
     return hostsmod.refresh(
-        platform, servers, wanted, log=lambda *_: None, make_host=lambda a: ssh.Host(a, connect_timeout=8)
+        workspace, servers, wanted, log=lambda *_: None, make_host=lambda a: ssh.Host(a, connect_timeout=8)
     )
 
 
 # -- writing files -------------------------------------------------------------
 
 
-def safe_file(platform: Platform, name: str) -> Path:
-    path = (platform.root / name).resolve()
+def safe_file(workspace: Workspace, name: str) -> Path:
+    path = (workspace.root / name).resolve()
     allowed = (
-        path == platform.servers_file
-        or path == platform.mirrors_file
-        or (path.parent in (platform.needs_dir, platform.checks_dir) and path.suffix in (".yml", ".yaml"))
+        path == workspace.servers_file
+        or path == workspace.mirrors_file
+        or (path.parent in (workspace.needs_dir, workspace.checks_dir) and path.suffix in (".yml", ".yaml"))
     )
     if not allowed or ".." in name:
         raise PermissionError(f"not an editable file: {name}")
     return path
 
 
-def write_servers(platform: Platform, form: dict) -> None:
+def write_servers(workspace: Workspace, form: dict) -> None:
     """servers.yml from the form on the page. Validated by reading it back."""
     g = form.get("gitea") or {}
     data: dict = {}
@@ -287,7 +287,7 @@ def write_servers(platform: Platform, form: dict) -> None:
         proxy = _proxy_form(form.get("egress_proxy"))
     else:  # a form without the card keeps what servers.yml has
         try:
-            current = yaml.safe_load(platform.servers_file.read_text()) if platform.servers_file.exists() else None
+            current = yaml.safe_load(workspace.servers_file.read_text()) if workspace.servers_file.exists() else None
         except yaml.YAMLError:
             current = None
         proxy = current.get("egress_proxy") if isinstance(current, dict) else None
@@ -298,14 +298,14 @@ def write_servers(platform: Platform, form: dict) -> None:
         "# The SSH user must be root or have passwordless sudo. Written by the Outpost dashboard.\n"
         + yaml.safe_dump(data, sort_keys=False, default_flow_style=None)
     )
-    tmp = platform.servers_file.with_suffix(".yml.tmp")
+    tmp = workspace.servers_file.with_suffix(".yml.tmp")
     tmp.write_text(text)
     try:
         load_servers(tmp)
     except ConfigError:
         tmp.unlink()
         raise
-    tmp.replace(platform.servers_file)
+    tmp.replace(workspace.servers_file)
 
 
 def _proxy_form(p) -> dict | None:
@@ -330,11 +330,11 @@ def _proxy_form(p) -> dict | None:
     return out
 
 
-def _choose_ssh_config(platform: Platform) -> str | None:
+def _choose_ssh_config(workspace: Workspace) -> str | None:
     """Pick the ssh config file the way the CLI does, and say what is wrong instead of raising.
     A servers.yml that does not load yet still lets OUTPOST_SSH_CONFIG count."""
     try:
-        path = load_servers(platform.servers_file).ssh_config
+        path = load_servers(workspace.servers_file).ssh_config
     except ConfigError:
         path = None
     try:
@@ -344,14 +344,14 @@ def _choose_ssh_config(platform: Platform) -> str | None:
     return None
 
 
-def ssh_check(platform: Platform, alias: str) -> dict:
+def ssh_check(workspace: Workspace, alias: str) -> dict:
     """Reach a host the way Outpost will: ssh, then become root. Says what is missing in plain words."""
     from ..ssh import Host, SshError
     from ..ssh.options import ssh_options
 
     if not re.fullmatch(r"[A-Za-z0-9._-]+", alias or ""):
         return {"ok": False, "message": "that is not an SSH alias"}
-    problem = _choose_ssh_config(platform)
+    problem = _choose_ssh_config(workspace)
     if problem:
         return {"ok": False, "message": problem}
     plain = subprocess.run(["ssh", *ssh_options(8), alias, "id -un"], capture_output=True, text=True)
@@ -374,14 +374,14 @@ def ssh_check(platform: Platform, alias: str) -> dict:
     }
 
 
-def server_status(platform: Platform, alias: str) -> dict:
+def server_status(workspace: Workspace, alias: str) -> dict:
     """Egress state and the egress log of one server, read over SSH."""
     from ..infra import egress
     from ..ssh import Host, SshError
 
     if not re.fullmatch(r"[A-Za-z0-9._-]+", alias or ""):
         return {"ok": False, "message": "that is not an SSH alias"}
-    problem = _choose_ssh_config(platform)
+    problem = _choose_ssh_config(workspace)
     if problem:
         return {"ok": False, "message": problem}
     host = Host(alias, connect_timeout=8)
@@ -404,12 +404,12 @@ def server_status(platform: Platform, alias: str) -> dict:
     }
 
 
-def save_lockfile(platform: Platform, project: str, filename: str, body: bytes) -> dict:
+def save_lockfile(workspace: Workspace, project: str, filename: str, body: bytes) -> dict:
     project = re.sub(r"[^a-z0-9._-]+", "-", project.lower()).strip("-.")
     filename = Path(filename).name
     if not project or not filename or filename.startswith("."):
         raise PermissionError("the upload needs a project name and a file name")
-    folder = platform.needs_dir / project
+    folder = workspace.needs_dir / project
     folder.mkdir(parents=True, exist_ok=True)
     path = folder / filename
     path.write_bytes(body)
@@ -419,21 +419,21 @@ def save_lockfile(platform: Platform, project: str, filename: str, body: bytes) 
 # -- running commands ----------------------------------------------------------
 
 
-def start_run(platform: Platform, args: list[str]) -> str:
+def start_run(workspace: Workspace, args: list[str]) -> str:
     if not args or args[0] not in ALLOWED_COMMANDS:
         raise PermissionError(f"command not allowed: {' '.join(args)}")
     if any(r["proc"].poll() is None for r in RUNS.values()):
         raise PermissionError("another command is still running; wait for it to finish")
     run_id = time.strftime("%Y%m%d-%H%M%S") + "-" + args[0]
-    logs = platform.state_dir / "runs"
+    logs = workspace.state_dir / "runs"
     logs.mkdir(parents=True, exist_ok=True)
     log_file = logs / f"{run_id}.log"
-    cmd = [sys.executable, "-m", "outpost", "--dir", str(platform.root), *args]
+    cmd = [sys.executable, "-m", "outpost", "--dir", str(workspace.root), *args]
     env = dict(os.environ)  # make the package importable even when running from a source checkout
     env["PYTHONPATH"] = str(Path(__file__).resolve().parents[2]) + os.pathsep + env.get("PYTHONPATH", "")
     with open(log_file, "w") as out:
         out.write("$ outpost " + " ".join(args) + "\n")
-        proc = subprocess.Popen(cmd, stdout=out, stderr=subprocess.STDOUT, cwd=platform.root, env=env)
+        proc = subprocess.Popen(cmd, stdout=out, stderr=subprocess.STDOUT, cwd=workspace.root, env=env)
     RUNS[run_id] = {"proc": proc, "log": log_file, "args": args, "started": time.time()}
 
     def trailer():  # so the history knows how it ended
@@ -471,7 +471,7 @@ def run_status(run_id: str) -> dict:
 
 
 class Handler(BaseHTTPRequestHandler):
-    platform: Platform = None  # pyright: ignore[reportAssignmentType]  set by serve()
+    workspace: Workspace = None  # pyright: ignore[reportAssignmentType]  set by serve()
 
     def log_message(self, *_):  # keep the terminal quiet
         pass
@@ -504,17 +504,17 @@ class Handler(BaseHTTPRequestHandler):
                 self.end_headers()
                 self.wfile.write(body)
             elif path == "/api/overview":
-                self._json(overview(self.platform))
+                self._json(overview(self.workspace))
             elif path == "/api/hosts":
-                self._json(hostsmod.cached(self.platform))
+                self._json(hostsmod.cached(self.workspace))
             elif path == "/api/backups":
-                self._json(list_backups(self.platform))
+                self._json(list_backups(self.workspace))
             elif path == "/report.html":
                 try:
-                    servers = load_servers(self.platform.servers_file)
+                    servers = load_servers(self.workspace.servers_file)
                 except ConfigError:
                     servers = None
-                body = reportmod.render(reportmod.build(self.platform, servers)).encode()
+                body = reportmod.render(reportmod.build(self.workspace, servers)).encode()
                 self.send_response(200)
                 self.send_header("Content-Type", "text/html; charset=utf-8")
                 self.send_header("Content-Length", str(len(body)))
@@ -522,20 +522,20 @@ class Handler(BaseHTTPRequestHandler):
                 self.wfile.write(body)
             elif path == "/api/file":
                 name = self._query("name")
-                file = safe_file(self.platform, name)
+                file = safe_file(self.workspace, name)
                 self._json({"name": name, "content": file.read_text() if file.exists() else ""})
             elif path.startswith("/api/run/"):
                 self._json(run_status(path.rsplit("/", 1)[1]))
             elif path == "/api/search":
-                needs = load_needs(self.platform.needs_dir)
-                self._json(status.search(self.platform, needs, self._query("q")))
+                needs = load_needs(self.workspace.needs_dir)
+                self._json(status.search(self.workspace, needs, self._query("q")))
             elif path == "/api/runs":
-                self._json(status.runs(self.platform, live=_live()))
+                self._json(status.runs(self.workspace, live=_live()))
             elif path.startswith("/api/runs/"):
                 run_id = path.rsplit("/", 1)[1]
                 if not re.fullmatch(r"[0-9-]+-[a-z]+", run_id):
                     raise PermissionError("not a run id")
-                log = self.platform.state_dir / "runs" / f"{run_id}.log"
+                log = self.workspace.state_dir / "runs" / f"{run_id}.log"
                 text = log.read_text(errors="replace") if log.exists() else ""
                 code = re.search(r"\[outpost exit (\d+)", text[-200:])
                 self._json(
@@ -556,7 +556,7 @@ class Handler(BaseHTTPRequestHandler):
         try:
             if path == "/api/file":
                 name = self._query("name")
-                file = safe_file(self.platform, name)
+                file = safe_file(self.workspace, name)
                 content = self._body().get("content", "")
                 yaml.safe_load(content)  # must at least be YAML
                 file.parent.mkdir(parents=True, exist_ok=True)
@@ -564,7 +564,7 @@ class Handler(BaseHTTPRequestHandler):
                 self._json({"saved": name})
             elif path == "/api/lockfile":
                 self._json(
-                    save_lockfile(self.platform, self._query("project"), self._query("filename"), self._body_bytes())
+                    save_lockfile(self.workspace, self._query("project"), self._query("filename"), self._body_bytes())
                 )
             else:
                 self._json({"error": "not found"}, 404)
@@ -574,8 +574,8 @@ class Handler(BaseHTTPRequestHandler):
     def do_DELETE(self):
         try:
             name = self._query("name")
-            file = safe_file(self.platform, name)
-            if file.parent != self.platform.needs_dir:
+            file = safe_file(self.workspace, name)
+            if file.parent != self.workspace.needs_dir:
                 raise PermissionError("only needs files can be deleted here")
             file.unlink(missing_ok=True)
             self._json({"deleted": name})
@@ -586,29 +586,29 @@ class Handler(BaseHTTPRequestHandler):
         path = urlparse(self.path).path
         try:
             if path == "/api/run":
-                self._json({"id": start_run(self.platform, self._body().get("args", []))})
+                self._json({"id": start_run(self.workspace, self._body().get("args", []))})
             elif path == "/api/servers":
-                write_servers(self.platform, self._body())
+                write_servers(self.workspace, self._body())
                 self._json({"saved": "servers.yml"})
             elif path == "/api/ssh-check":
-                self._json(ssh_check(self.platform, self._body().get("alias", "")))
+                self._json(ssh_check(self.workspace, self._body().get("alias", "")))
             elif path == "/api/server-status":
-                self._json(server_status(self.platform, self._body().get("alias", "")))
+                self._json(server_status(self.workspace, self._body().get("alias", "")))
             elif path == "/api/hosts":
-                self._json(refresh_hosts(self.platform, self._body().get("aliases")))
+                self._json(refresh_hosts(self.workspace, self._body().get("aliases")))
             elif path == "/api/demo":
-                servers = load_servers(self.platform.servers_file)
+                servers = load_servers(self.workspace.servers_file)
                 ssh.use_config(servers.ssh_config)
-                self._json(demo.status(self.platform, servers))
+                self._json(demo.status(self.workspace, servers))
             elif path == "/api/project/scan":
                 try:  # the Gitea name and org let a literal gitea.internal/pkgs/... FROM be read back into its need
-                    g = load_servers(self.platform.servers_file).gitea
+                    g = load_servers(self.workspace.servers_file).gitea
                     gitea = f"{g.name}/{g.org}"
                 except (ConfigError, yaml.YAMLError):
                     gitea = None
                 self._json(projects.scan(self._body().get("folder", ""), gitea))
             elif path == "/api/project/save":
-                saved = projects.write_needs(self.platform, self._body())
+                saved = projects.write_needs(self.workspace, self._body())
                 self._json({"saved": f"needs/{saved.name}"})
             else:
                 self._json({"error": "not found"}, 404)
@@ -616,11 +616,11 @@ class Handler(BaseHTTPRequestHandler):
             self._json({"error": str(e)}, 400)
 
 
-def serve(platform: Platform, port: int = 8484, open_browser: bool = True) -> int:
-    Handler.platform = platform
+def serve(workspace: Workspace, port: int = 8484, open_browser: bool = True) -> int:
+    Handler.workspace = workspace
     server = ThreadingHTTPServer(("127.0.0.1", port), Handler)
     url = f"http://127.0.0.1:{port}/"
-    print(f"Outpost dashboard for {platform.root}\n  {url}\nCtrl-C to stop.", flush=True)
+    print(f"Outpost dashboard for {workspace.root}\n  {url}\nCtrl-C to stop.", flush=True)
     if open_browser:
         threading.Timer(0.5, lambda: webbrowser.open(url)).start()
     try:

@@ -18,14 +18,12 @@ name in /etc/hosts when it is not on the Gitea host, /etc/outpost/proxy.env, the
 """
 
 import shlex
-from dataclasses import dataclass, field
 
 from .. import versions
 from ..fetch import rpm as rpmmod
 from . import clients, egress, hostsfile
-from .clients import GiteaInfo, ProxyInfo
+from .context import NodeContext
 
-PROXY_USER = "outpost-proxy"  # the system user the egress proxy runs as; the only owner the seal ever exempts
 RUNNER_HOME = "/var/lib/outpost-runner"  # runner.HOME; Actions jobs read $HOME/.docker/config.json there
 
 DNS_UNIT = """[Unit]
@@ -64,28 +62,6 @@ RestartSec=2
 [Install]
 WantedBy=multi-user.target
 """
-
-
-@dataclass
-class NodeContext:
-    gitea: GiteaInfo
-    ca_pem: str
-    distros: list[str] = field(default_factory=list)  # apt distros that exist in Gitea
-    apk_branches: list[str] = field(default_factory=list)  # Alpine branches that exist in Gitea
-    rpm_distros: list[str] = field(default_factory=list)  # rpm distros (Gitea groups) that exist in Gitea
-    allow: list[str] = field(default_factory=list)  # extra reachable addresses (other nodes, user list)
-    infra_name: str = ""
-    args: str = ""  # extra flags for the runtime (k3s server, swarm init)
-    proxy: ProxyInfo | None = None  # the egress proxy, when servers.yml has one
-
-    def proxy_user_for(self, alias: str) -> str | None:
-        """The owner exception goes only into the seal of the host that runs the proxy."""
-        return PROXY_USER if self.proxy and self.proxy.host == alias else None
-
-    def hosts_entries(self) -> list[tuple[str, str]]:
-        g = self.gitea
-        extra = [(self.proxy.ip, self.proxy.name)] if self.proxy and not self.proxy.on_gitea else []
-        return [(g.ip, g.name), *extra]
 
 
 def curl(ctx: NodeContext, url: str, out: str) -> str:

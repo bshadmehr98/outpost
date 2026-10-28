@@ -24,9 +24,9 @@ import time
 from .. import hosts, pki, versions
 from ..config import Servers
 from ..infra import egress, hostsfile
-from ..infra.common import PROXY_USER
-from ..paths import Platform
+from ..infra.egress import PROXY_USER
 from ..ssh import Host
+from ..workspace import Workspace
 from .connect import connect
 from .service import GITEA_CLI, installed_version, wait_for_gitea
 
@@ -118,10 +118,10 @@ WantedBy=multi-user.target
 GITEA = GITEA_CLI
 
 
-def setup(platform: Platform, servers: Servers, log=print) -> dict:  # noqa: C901 too complex; split into named steps in the refactor
+def setup(workspace: Workspace, servers: Servers, log=print) -> dict:  # noqa: C901 too complex; split into named steps in the refactor
     cfg = servers.gitea
     host = Host(cfg.host)
-    binary = platform.box_dir / "files" / "gitea" / versions.GITEA / "gitea"
+    binary = workspace.box_dir / "files" / "gitea" / versions.GITEA / "gitea"
     if not binary.exists():
         raise RuntimeError(f"{binary} is missing. Run `outpost fetch --only files` first.")
 
@@ -138,8 +138,8 @@ def setup(platform: Platform, servers: Servers, log=print) -> dict:  # noqa: C90
     log(f"[{cfg.host}] {facts.get('id', '?')} {facts.get('codename', '')}, Gitea will be https://{cfg.name} ({ip})")
 
     log("==> [2/7] certificates")
-    pki.ensure_ca(platform.pki_dir, platform.secrets_dir)
-    cert, key = pki.ensure_server_cert(platform.pki_dir, platform.secrets_dir, cfg.name, ip)
+    pki.ensure_ca(workspace.pki_dir, workspace.secrets_dir)
+    cert, key = pki.ensure_server_cert(workspace.pki_dir, workspace.secrets_dir, cfg.name, ip)
 
     log(f"==> [3/7] gitea {versions.GITEA} binary")
     installed = installed_version(host)
@@ -148,7 +148,7 @@ def setup(platform: Platform, servers: Servers, log=print) -> dict:  # noqa: C90
             from .backup import backup
 
             log(f"[{cfg.host}] gitea {installed} is installed; backing it up before upgrading to {versions.GITEA}")
-            backup(platform, servers, platform.root / "backups", log=log, host=host)
+            backup(workspace, servers, workspace.root / "backups", log=log, host=host)
         log(f"[{cfg.host}] uploading gitea {versions.GITEA} binary ({binary.stat().st_size // 1_000_000} MB)")
         host.run("systemctl stop gitea 2>/dev/null || true", raise_on_failure=True)
         host.put(binary, "/usr/local/bin/gitea", mode="0755")
@@ -198,7 +198,7 @@ def setup(platform: Platform, servers: Servers, log=print) -> dict:  # noqa: C90
     log(f"[{cfg.host}] gitea is answering on https://{cfg.name}")
 
     log("==> [5/7] admin user and token")
-    password = platform.read_secret("gitea-admin-password")
+    password = workspace.read_secret("gitea-admin-password")
     users = host.run(f"{GITEA} admin user list --admin 2>/dev/null || true", raise_on_failure=True).stdout
     if cfg.user not in users.split():
         password = password or pysecrets.token_urlsafe(18)
@@ -207,9 +207,9 @@ def setup(platform: Platform, servers: Servers, log=print) -> dict:  # noqa: C90
             f"--email {shlex.quote(cfg.user + '@' + cfg.name)} --must-change-password=false",
             raise_on_failure=True,
         )
-        platform.write_secret("gitea-admin-password", password)
+        workspace.write_secret("gitea-admin-password", password)
         log(f"[{cfg.host}] created admin user {cfg.user} (password in secrets/gitea-admin-password)")
-    token = platform.read_secret("gitea-token")
+    token = workspace.read_secret("gitea-token")
     if (
         token
         and host.run(
@@ -230,16 +230,16 @@ def setup(platform: Platform, servers: Servers, log=print) -> dict:  # noqa: C90
             .stdout.strip()
             .splitlines()[-1]
         )
-        platform.write_secret("gitea-token", token)
+        workspace.write_secret("gitea-token", token)
         log(f"[{cfg.host}] created API token (secrets/gitea-token; scopes {TOKEN_SCOPES})")
 
-    platform.write_state(
+    workspace.write_state(
         "gitea",
         {"name": cfg.name, "ip": ip, "org": cfg.org, "user": cfg.user, "version": versions.GITEA, "host": cfg.host},
     )
 
     log(f"==> [6/7] organisation {cfg.org}")
-    with connect(platform, servers) as client:
+    with connect(workspace, servers) as client:
         if client.ensure_org(cfg.org):
             log(f"[{cfg.host}] created organisation {cfg.org}")
         remote_version = client.version()
@@ -247,7 +247,7 @@ def setup(platform: Platform, servers: Servers, log=print) -> dict:  # noqa: C90
 
     log("==> [7/7] sealing the server")
     # when the egress proxy runs here (`outpost proxy setup`), its user keeps its one exception
-    proxy_state = platform.read_state("proxy") or {}
+    proxy_state = workspace.read_state("proxy") or {}
     proxy_here = bool(
         servers.egress_proxy and servers.egress_proxy.host == cfg.host and proxy_state.get("host") == cfg.host
     )
@@ -255,5 +255,5 @@ def setup(platform: Platform, servers: Servers, log=print) -> dict:  # noqa: C90
     if proxy_here:
         log(f"[{cfg.host}] the egress proxy runs here: its user {PROXY_USER} keeps its exception (TCP 443 and 80)")
     log(f"[{cfg.host}] egress: {egress.seal(host, 'gitea setup')}")
-    hosts.record(platform, cfg.host, hosts.inspect(host))
+    hosts.record(workspace, cfg.host, hosts.inspect(host))
     return {"name": cfg.name, "ip": ip, "version": remote_version}

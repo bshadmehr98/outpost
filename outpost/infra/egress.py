@@ -18,10 +18,13 @@ DOCKER-USER jump to, as OUTPOST is. Forwarded packets (containers, pods) have no
 Every other host gets exactly the script it always had: no OUTPOST-OUT, no owner rule.
 """
 
+from ..system import AirGappedSystem
+
 SCRIPT_PATH = "/usr/local/sbin/outpost-egress"
 UNIT_PATH = "/etc/systemd/system/outpost-egress.service"
 PRIVATE = ["10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16"]
 OUT_CHAIN = "OUTPOST-OUT"
+PROXY_USER = "outpost-proxy"  # the system user the egress proxy runs as; the only owner the seal ever exempts
 
 
 def _owner_parts(proxy_user: str) -> dict[str, str]:
@@ -203,3 +206,12 @@ def open_(host, reason: str = "") -> str:
 def status(host) -> str:
     result = host.run(f"test -x {SCRIPT_PATH} && {SCRIPT_PATH} status || echo 'not installed'")
     return (result.stdout or result.stderr).strip()
+
+
+def target_hosts(system: AirGappedSystem, target: str) -> list:
+    """The servers `outpost egress <target>` acts on: `gitea`, the nodes of an infrastructure, or one ssh alias."""
+    if target == "gitea":
+        return [system.gitea_host]
+    if target in system.servers.infrastructures:
+        return system.nodes(target)
+    return [system.host(target)]

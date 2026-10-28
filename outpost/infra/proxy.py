@@ -54,15 +54,20 @@ the port. A refused name gets "HTTP/1.0 403 Filtered"; tinyproxy answers CONNECT
 
 import re
 import shlex
+import time
 
-from .. import versions
+from .. import hosts, versions
 from ..config import ConfigError, ProxyConfig
+from ..endpoints import PRIVATE_NETS, GiteaEndpoint, ProxyEndpoint
 from ..fetch import apt as aptmod
 from ..fetch import rpm as rpmmod
-from . import clients, common, egress
-from .clients import GiteaInfo, ProxyInfo
+from ..system import AirGappedSystem
+from ..workspace import STATE_PROXY
+from . import clients, common, egress, k3s
+from .context import NodeContext, egress_proxy_config, node_context, proxy_host_context
+from .verify import log_verifications
 
-USER = common.PROXY_USER
+USER = egress.PROXY_USER
 CONF_PATH = "/etc/tinyproxy/tinyproxy.conf"  # the only configuration the AppArmor profile lets it read
 ALLOW_PATH = "/usr/share/tinyproxy/outpost.allow"  # /usr/share/tinyproxy/* is readable; /etc/tinyproxy/* is not
 LOG_DIR = "/var/log/tinyproxy"
@@ -148,7 +153,7 @@ def filter_type_line(version: str) -> str:
 
 
 def conf(listen_ip: str, port: int, client_allow: list[str], tinyproxy_version: str = "1.11.1") -> str:
-    clients_ok = ["127.0.0.1", *clients.PRIVATE_NETS] + [a for a in client_allow if _IP_OR_NET.fullmatch(a)]
+    clients_ok = ["127.0.0.1", *PRIVATE_NETS] + [a for a in client_allow if _IP_OR_NET.fullmatch(a)]
     allow_lines = "\n".join(f"Allow {a}" for a in dict.fromkeys(clients_ok))
     return f"""# Written by `outpost proxy setup`. Edit servers.yml (egress_proxy) and run it again instead.
 # Directives: tinyproxy.conf(5), https://tinyproxy.github.io/
@@ -201,34 +206,6 @@ ProtectHome=yes
 [Install]
 WantedBy=multi-user.target
 """
-
-
-def info(cfg: ProxyConfig, gitea: GiteaInfo, gitea_host: str, ip: str | None = None) -> ProxyInfo:
-    """How nodes reach the proxy. On the Gitea host it is http://<gitea address>:<port>, an address every
-    node already allows; elsewhere http://<egress_proxy.name>:<port>.
-
-    Not the Gitea *name* on the Gitea host: apt's https method (methods/http.cc) clears a proxy that
-    no_proxy matches with `Proxy = ""`, which leaves the proxy URI's host in place, and then sends a
-    CONNECT to the destination itself when that host equals the destination's. With the proxy at
-    http://gitea.internal:3128, every apt fetch from https://gitea.internal went that way and Gitea's
-    TLS port hung up ("Reading from proxy failed"). Gitea is reached by name, so an address cannot collide."""
-    on_gitea = cfg.host == gitea_host
-    name = gitea.name if on_gitea else cfg.name
-    address = gitea.ip if on_gitea else ip
-    if not address:
-        raise RuntimeError(f"the egress proxy host {cfg.host} has no known address; run `outpost proxy setup`")
-    no_proxy = [gitea.name, gitea.ip, "localhost", "127.0.0.1", *clients.PRIVATE_NETS] + (
-        [] if on_gitea else [name, address]
-    )
-    return ProxyInfo(
-        url=f"http://{address if on_gitea else name}:{cfg.port}",
-        no_proxy=",".join(dict.fromkeys(no_proxy)),
-        ip=address,
-        name=name,
-        allowed=tuple(cfg.allow),
-        host=cfg.host,
-        on_gitea=on_gitea,
-    )
 
 
 # -- getting tinyproxy into the box ---------------------------------------------------
@@ -301,7 +278,7 @@ INSTALL = {
 REGISTRY = {"apt": ("Debian", "apt"), "rpm": ("RPM", "rpm")}
 
 
-def diagnose_script(family: str, gitea: GiteaInfo, distro: str) -> str:
+def diagnose_script(family: str, gitea: GiteaEndpoint, distro: str) -> str:
     """What the package manager saw when it found no tinyproxy: the refresh in full, the package source
     Outpost wrote, what the index says about tinyproxy, and whether Gitea answers for the distro at all."""
     keep_going = (
@@ -328,7 +305,7 @@ def diagnose_script(family: str, gitea: GiteaInfo, distro: str) -> str:
 
 
 def setup(
-    host, ctx: common.NodeContext, cfg: ProxyConfig, *, egress_allow: list[str], client_allow: list[str], log=print
+    host, ctx: NodeContext, cfg: ProxyConfig, *, egress_allow: list[str], client_allow: list[str], log=print
 ) -> dict:
     """Install and seal the proxy on `host`. ctx.proxy says where it is; on the Gitea host nothing of a
     node is prepared (it already resolves its own name, and reaches Gitea on itself), elsewhere the host
@@ -481,7 +458,7 @@ def _access_report(host, binary: str | None = None) -> str:
 # -- verify -------------------------------------------------------------------------
 
 
-def host_checks(ctx: common.NodeContext, cfg: ProxyConfig) -> list[tuple[str, str]]:
+def host_checks(ctx: NodeContext, cfg: ProxyConfig) -> list[tuple[str, str]]:
     """Checks on the proxy host itself; each is one shell command that must succeed (verify.script)."""
     from .verify import by_family
 
@@ -521,7 +498,7 @@ def host_checks(ctx: common.NodeContext, cfg: ProxyConfig) -> list[tuple[str, st
     ]
 
 
-def verify(host, ctx: common.NodeContext, cfg: ProxyConfig) -> list[dict]:
+def verify(host, ctx: NodeContext, cfg: ProxyConfig) -> list[dict]:
     from . import verify as verifymod
 
     checks = host_checks(ctx, cfg) + verifymod.proxy_checks(
@@ -531,3 +508,81 @@ def verify(host, ctx: common.NodeContext, cfg: ProxyConfig) -> list[dict]:
     result = host.run(verifymod.script(checks), timeout=300)
     parsed = verifymod.parse(result.stdout)
     return parsed or [{"name": "connect", "ok": False, "detail": result.stderr.strip()[-300:] or "no output"}]
+
+
+# -- the recipes behind `outpost proxy setup` and `outpost proxy verify` ------------------------
+# (package D moves them to infra/proxy/recipe.py)
+
+
+def set_up_egress_proxy(system: AirGappedSystem, log=print) -> ProxyEndpoint:
+    """Install and seal the egress proxy on its server, then give the nodes of every infrastructure that
+    is already set up the proxy settings.
+
+    Returns:
+        Where the proxy is, as the nodes see it.
+
+    Raises:
+        ConfigError: servers.yml has no egress_proxy section.
+    """
+    proxy = egress_proxy_config(system)
+    ctx = proxy_host_context(system)
+    endpoint = ctx.proxy
+    assert endpoint is not None  # proxy_host_context always sets it
+    log(f"Setting up the egress proxy on {proxy.host}: {endpoint.url}, allowing {', '.join(proxy.allow)}")
+    result = setup(
+        system.host(proxy.host),
+        ctx,
+        proxy,
+        egress_allow=ctx.allow,
+        client_allow=_addresses_that_may_use_the_proxy(system),
+        log=log,
+    )
+    system.write_state(STATE_PROXY, {**result, "when": _now()})
+    _update_set_up_nodes(system, log)
+    log()
+    return endpoint
+
+
+def verify_egress_proxy(system: AirGappedSystem, log=print) -> bool:
+    """Run the proxy's verifications on its server, record them in state/proxy.json, and record what
+    the server runs. True when every verification passed.
+
+    Raises:
+        ConfigError: servers.yml has no egress_proxy section.
+    """
+    proxy = egress_proxy_config(system)
+    ctx = proxy_host_context(system)
+    host = system.host(proxy.host)
+    log(f"==> verifying the egress proxy on {proxy.host}")
+    results = verify(host, ctx, proxy)
+    all_passed = log_verifications(proxy.host, results, log)
+    verification = {"result": "ok" if all_passed else "problems", "checks": results, "when": _now()}
+    system.write_state(STATE_PROXY, {**(system.state(STATE_PROXY) or {}), "verify": verification})
+    hosts.record(system.workspace, proxy.host, hosts.inspect(host))
+    return all_passed
+
+
+def _update_set_up_nodes(system: AirGappedSystem, log) -> None:
+    """proxy.env, the profile and the Docker client config on every node already set up; k3s gets its ConfigMap."""
+    infras = system.set_up_infras()
+    if infras:
+        log(
+            f"==> nodes of {', '.join(infra.name for infra in infras)}: proxy settings (proxy.env, profile, Docker client config)"
+        )
+    for infra in infras:
+        ctx = node_context(system, infra)
+        nodes = system.nodes(infra.name)
+        for node in nodes:
+            common.apply_proxy(node, ctx, log=log)
+        if infra.type == "k3s":
+            k3s.apply_configmap(nodes[0], ctx.proxy, log=log)
+
+
+def _addresses_that_may_use_the_proxy(system: AirGappedSystem) -> list[str]:
+    """Gitea's `allow:` list and every infrastructure's: the proxy accepts clients from those (and private networks)."""
+    servers = system.servers
+    return list(dict.fromkeys(servers.gitea.allow + [a for i in servers.infrastructures.values() for a in i.allow]))
+
+
+def _now() -> str:
+    return time.strftime("%Y-%m-%dT%H:%M:%S")

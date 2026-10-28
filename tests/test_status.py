@@ -3,8 +3,8 @@ import os
 import time
 
 from outpost.needs import FileNeed, Needs, NpmNeed
-from outpost.paths import Platform
 from outpost.ui import status
+from outpost.workspace import Workspace
 
 
 def needs():
@@ -19,7 +19,7 @@ def needs():
 
 
 def test_box_status_finds_what_is_there(tmp_path):
-    p = Platform(tmp_path)
+    p = Workspace(tmp_path)
     box = p.box_dir
     (box / "images" / "alpine_3.20").mkdir(parents=True)
     (box / "images" / "alpine_3.20" / "index.json").write_text("{}")
@@ -44,7 +44,7 @@ def test_box_status_finds_what_is_there(tmp_path):
 
 
 def test_box_status_apk_and_rpm_files_are_matched_by_name(tmp_path):
-    p = Platform(tmp_path)
+    p = Workspace(tmp_path)
     (p.box_dir / "apk" / "v3.20").mkdir(parents=True)
     (p.box_dir / "apk" / "v3.20" / "curl-8.9.1-r1.apk").write_bytes(b"x")
     (p.box_dir / "rpm" / "rocky9").mkdir(parents=True)
@@ -60,7 +60,7 @@ def test_box_status_apk_and_rpm_files_are_matched_by_name(tmp_path):
 
 
 def test_sync_arrows_follow_file_times(tmp_path):
-    p = Platform(tmp_path)
+    p = Workspace(tmp_path)
     p.needs_dir.mkdir()
     (p.needs_dir / "a.yml").write_text("images: [x]\n")
     empty = {"missing_total": 0}
@@ -86,7 +86,7 @@ def test_sync_arrows_follow_file_times(tmp_path):
 
 
 def test_runs_and_search(tmp_path):
-    p = Platform(tmp_path)
+    p = Workspace(tmp_path)
     runs = p.state_dir / "runs"
     runs.mkdir(parents=True)
     (runs / "20260101-120000-fetch.log").write_text("$ outpost fetch\nhello\n[outpost exit 1 after 3s]\n")
@@ -118,5 +118,5 @@ def test_runs_and_search(tmp_path):
 
 
 def test_preflight_lists_tools(tmp_path):
-    names = [c["name"] for c in status.preflight(Platform(tmp_path))]
+    names = [c["name"] for c in status.preflight(Workspace(tmp_path))]
     assert names[:3] == ["ssh", "openssl", "docker"] and "pip" in names

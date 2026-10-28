@@ -22,6 +22,9 @@ files:
   - url: https://github.com/x/y/releases/download/v1.0/tool
     name: tool
     version: "1.0"
+
+all_needs(system) is the whole list a command works with: the needs files, the pinned downloads
+(gitea, docker, k3s...) and, with an egress proxy, tinyproxy.
 """
 
 from dataclasses import dataclass, field
@@ -29,7 +32,9 @@ from pathlib import Path
 
 import yaml
 
+from .. import hosts, versions
 from ..config import ConfigError
+from ..system import AirGappedSystem
 from . import parsers
 
 
@@ -153,4 +158,24 @@ def load_needs(needs_dir: Path) -> Needs:
 def add_platform_files(needs: Needs, platform_files: list[dict]) -> Needs:
     """Append the pinned platform downloads (gitea, docker, k3s...) to the files list."""
     _add_unique(needs.files, [FileNeed(**f) for f in platform_files])
+    return needs
+
+
+def all_needs(system: AirGappedSystem) -> Needs:
+    """Everything to fetch: the needs files, the pinned downloads for the infrastructure types in
+    servers.yml, and tinyproxy for the egress proxy host's distro when servers.yml has an egress proxy.
+
+    Raises:
+        ConfigError: a needs file is wrong, or the proxy host's distro is unknown.
+    """
+    # B moves the proxy package rules into needs/ and the distro tables into distros.py; until then
+    # infra.proxy is imported here, because it imports fetch, which imports this package.
+    from ..infra import proxy as proxymod
+
+    needs = load_needs(system.workspace.needs_dir)
+    add_platform_files(needs, versions.platform_files(system.mirrors, system.servers.infra_types))
+    proxy = system.servers.egress_proxy
+    if proxy:
+        facts = None if proxy.distro else hosts.cached(system.workspace).get(proxy.host)
+        proxymod.add_package(needs, proxy, facts)
     return needs
