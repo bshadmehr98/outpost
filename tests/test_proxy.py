@@ -338,6 +338,7 @@ def test_missing_package_error_shows_what_the_package_manager_saw():
         proxy.setup(host, NodeContext(gitea=G, ca_pem="CA", proxy=ON_GITEA), CFG, egress_allow=[], client_allow=[], log=lambda *_: None)
     assert "Err:1 https://gitea.internal noble InRelease" in str(err.value) and "Unable to locate package" in str(err.value)
     script = host.scripts[-1]
+    assert script.startswith("set +e +o pipefail\n")          # a failing probe (ls of a missing file) must not cut the report short
     assert "apt-get update 2>&1" in script and "cat /etc/apt/sources.list.d/outpost.list" in script
     assert "apt-cache policy tinyproxy" in script and f"{G.apt_repo}/dists/noble/Release" in script
     rpm = proxy.diagnose_script("rpm", G, "rocky9")

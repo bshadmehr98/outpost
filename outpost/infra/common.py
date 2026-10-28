@@ -207,10 +207,13 @@ def apply_proxy(host, ctx: NodeContext, log=print) -> None:
 
 
 def _configure_apt(host, ctx: NodeContext, facts: dict) -> None:
+    """Debian and Ubuntu: one line in outpost.list per suite Gitea serves. The probe is a GET: Gitea routes
+    the Debian registry's dists/ files for GET only, so a HEAD (curl -I) gets 405 and every suite looked
+    missing (Gitea's Alpine and RPM registries do answer HEAD)."""
     g = ctx.gitea
     distros = list(dict.fromkeys(ctx.distros + ([facts["codename"]] if facts.get("codename") else [])))
     lines = "\n".join(
-        f"if curl --cacert {clients.PATH_CA} -fsI --max-time 10 {g.apt_repo}/dists/{d}/Release >/dev/null 2>&1; then echo {shlex.quote(clients.apt_source_line(g, d))}; fi"
+        f"if curl --cacert {clients.PATH_CA} -fsS -o /dev/null --max-time 10 {g.apt_repo}/dists/{d}/Release >/dev/null 2>&1; then echo {shlex.quote(clients.apt_source_line(g, d))}; fi"
         for d in distros
     )
     host.run(

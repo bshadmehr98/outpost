@@ -159,6 +159,8 @@ def test_compose_setup_configures_node_then_installs_docker_from_gitea():
     assert "update-ca-certificates" in joined                       # system trust
     assert "mv \"$f\" /etc/apt/sources.disabled/" in joined           # stock apt sources parked
     assert "dists/bookworm/Release" in joined and "dists/noble/Release" in joined  # host codename added
+    probe = next(line for line in joined.splitlines() if "dists/noble/Release" in line)
+    assert "curl " in probe and " -fsI " not in probe and "-o /dev/null" in probe   # GET: Gitea's Debian dists/ answers HEAD with 405
     assert f"generic/docker/{versions.DOCKER}/docker-{versions.DOCKER}.tgz" in joined
     assert "--cacert /etc/outpost/ca.crt" in joined
     seal_index = next(i for i, s in enumerate(host.scripts) if "outpost-egress seal" in s)
