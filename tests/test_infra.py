@@ -216,7 +216,7 @@ def test_verify_checks_pick_the_command_by_family_on_the_node():
     sources, index = checks["package sources are gitea only"], checks["package index updates offline"]
     for cmd in (sources, index):
         assert (
-            cmd.startswith('. /etc/os-release 2>/dev/null; case " $ID $ID_LIKE " in *alpine*)')
+            cmd.startswith('. /etc/os-release 2>/dev/null; case " ${ID:-} ${ID_LIKE:-} " in *alpine*)')
             and "*rhel*|*fedora*|*centos*" in cmd
             and cmd.endswith("esac")
         )
@@ -447,6 +447,69 @@ def test_index_update_check_takes_the_tools_exit_status(tmp_path):
         ["bash", "-c", f"( {apt} )"], capture_output=True, text=True, env={"PATH": f"{tmp_path}:/usr/bin:/bin"}
     )
     assert out.returncode != 0 and "E: Failed to fetch" in out.stdout
+
+
+# -- bugs: what runs under Host.run's `set -euo pipefail` ------------------------------------
+
+OS_RELEASES = {  # trimmed from the real files: Debian and Alpine have no ID_LIKE
+    "debian": 'ID=debian\nVERSION_ID="12"\nVERSION_CODENAME=bookworm\n',
+    "alpine": "ID=alpine\nVERSION_ID=3.20.3\n",
+    "rocky": 'ID="rocky"\nID_LIKE="rhel centos fedora"\nVERSION_ID="9.4"\n',
+}
+
+
+def run_like_host_run(script: str, os_release, path: str = "/usr/bin:/bin"):
+    """Run a script the way Host.run does (`set -euo pipefail` on top), reading os_release instead of
+    /etc/os-release."""
+    import subprocess
+
+    body = script.replace("/etc/os-release", str(os_release))
+    return subprocess.run(
+        ["bash", "-c", "set -euo pipefail\n" + body], capture_output=True, text=True, env={"PATH": path}
+    )
+
+
+def test_by_family_works_without_id_like_under_set_u(tmp_path):
+    """`case " $ID $ID_LIKE "` stopped with "ID_LIKE: unbound variable" on Debian and Alpine, so their
+    "package sources are gitea only" and "package index updates offline" verifications always failed."""
+    snippet = verify.by_family(apt="echo apt", apk="echo apk", rpm="echo rpm")
+    for distro, family in (("debian", "apt"), ("alpine", "apk"), ("rocky", "rpm")):
+        os_release = tmp_path / f"{distro}-os-release"
+        os_release.write_text(OS_RELEASES[distro])
+        out = run_like_host_run(snippet, os_release)
+        assert (out.returncode, out.stdout.strip()) == (0, family), out.stderr
+
+
+def test_upgrade_script_works_without_id_like_under_set_u(tmp_path):
+    """The same bug stopped `outpost infra upgrade` on Debian and Alpine before it ran anything."""
+    from outpost.infra import UPGRADE_SCRIPT
+
+    tools = tmp_path / "bin"
+    tools.mkdir()
+    for tool, says in (("apk", "apk $1"), ("apt-get", "apt-get $1; echo '0 upgraded, 0 newly installed'")):
+        (tools / tool).write_text(f"#!/bin/sh\necho {says}\n")
+        (tools / tool).chmod(0o755)
+    for distro, ran in (("debian", "apt-get update"), ("alpine", "apk upgrade")):
+        os_release = tmp_path / f"{distro}-os-release"
+        os_release.write_text(OS_RELEASES[distro])
+        out = run_like_host_run(UPGRADE_SCRIPT, os_release, path=f"{tools}:/usr/bin:/bin")
+        assert out.returncode == 0 and ran in out.stdout, out.stderr
+
+
+def test_k3s_args_reach_the_installer_exactly(tmp_path):
+    """INSTALL_K3S_EXEC was quoted with Python's repr(): an `args:` with a ' got double quotes, in which
+    the shell expands $ and backticks."""
+    import subprocess
+
+    args = "--node-label note='a b' --kubelet-arg=x=$(touch " + str(tmp_path / "ran") + ")"
+    host = FakeHost("k1", facts={"ip": "10.0.0.11", "arch": "x86_64"}, responses=[(r"api/v1/version", "ok")])
+    k3s.setup(NodeContext(gitea=G, ca_pem="CA", args=args), [host], log=lambda *_: None)
+    install = next(s for s in host.scripts if "sh /tmp/k3s-install.sh" in s)
+    line = next(line for line in install.splitlines() if "INSTALL_K3S_EXEC=" in line)
+    print_exec = line.replace("sh /tmp/k3s-install.sh", "sh -c 'printf %s \"$INSTALL_K3S_EXEC\"'")
+    out = subprocess.run(["bash", "-c", print_exec], capture_output=True, text=True)
+    assert out.stdout == f"server --node-ip 10.0.0.11 --resolv-conf /etc/outpost/resolv.conf {args}"
+    assert not (tmp_path / "ran").exists()  # nothing in args ran on the node
 
 
 def test_gitea_and_the_layer_below_do_not_load_infra():

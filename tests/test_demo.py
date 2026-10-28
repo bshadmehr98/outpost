@@ -197,8 +197,10 @@ def test_runner_labels_and_install(tmp_path):
     out = runner.install(host, ctx, ["dev:host", "docker:host"], "REGTOKEN", registered=set())
     assert out == {"node": "n1", "labels": ["dev:host", "docker:host"]}
     assert host.ran("generic/gitea-runner/5.2.2/gitea-runner") and host.ran(
-        "register --config /etc/outpost/runner.yaml --no-interactive --instance https://gitea.internal --token REGTOKEN --name n1 --labels dev:host,docker:host"
+        "GITEA_RUNNER_REGISTRATION_TOKEN=REGTOKEN /usr/local/bin/gitea-runner register --config /etc/outpost/runner.yaml "
+        "--no-interactive --instance https://gitea.internal --name n1 --labels dev:host,docker:host"
     )
+    assert not host.ran("--token")  # a command line is visible to every user on the node
     unit = host.files["/etc/systemd/system/outpost-runner.service"]
     assert (
         "daemon --config /etc/outpost/runner.yaml --labels dev:host,docker:host" in unit

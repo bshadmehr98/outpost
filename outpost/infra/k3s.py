@@ -13,6 +13,7 @@ through the proxy. Pods opt in instead, from a ConfigMap `outpost-proxy` in the 
 """
 
 import json
+import shlex
 
 from outpost import versions
 from outpost.client_config import PATH_CA, PATH_NODE_RESOLV_CONF
@@ -125,7 +126,10 @@ def _install(host: Host, ctx: NodeContext, exec_args: str, env: dict[str, str], 
 
 
 def _install_script(ctx: NodeContext, exec_args: str, env: dict[str, str]) -> str:
-    """Shell: download k3s, its airgap images and its installer from Gitea, and run the installer offline."""
+    """Shell: download k3s, its airgap images and its installer from Gitea, and run the installer offline.
+
+    Each value is quoted with shlex.quote: `args:` in servers.yml may hold quotes, `$` or backticks.
+    """
     g = ctx.gitea
     binary = g.generic("k3s", versions.K3S, versions.arch_names()["k3s"])
     images = g.generic("k3s-airgap-images", versions.K3S, f"k3s-airgap-images-{versions.ARCH}.tar.gz")
@@ -133,8 +137,8 @@ def _install_script(ctx: NodeContext, exec_args: str, env: dict[str, str]) -> st
     installer_env = " ".join(
         [
             "INSTALL_K3S_SKIP_DOWNLOAD=true",  # use the binary we put in /usr/local/bin
-            f"INSTALL_K3S_EXEC={exec_args!r}",
-            *[f"{name}={value}" for name, value in env.items()],
+            f"INSTALL_K3S_EXEC={shlex.quote(exec_args)}",
+            *[f"{name}={shlex.quote(value)}" for name, value in env.items()],
         ]
     )
     return (

@@ -9,8 +9,9 @@ from outpost import hosts
 from outpost.ssh import Host
 from outpost.system import AirGappedSystem
 
+# ${ID_LIKE:-}: Debian and Alpine have no ID_LIKE, and Host.run turns on `set -u`, which stops on an unset variable.
 UPGRADE_SCRIPT = """. /etc/os-release 2>/dev/null
-case " $ID $ID_LIKE " in
+case " ${ID:-} ${ID_LIKE:-} " in
   *alpine*)
     apk update 2>&1 | tail -3
     apk upgrade 2>&1 | tail -25

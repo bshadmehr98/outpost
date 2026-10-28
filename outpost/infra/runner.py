@@ -116,11 +116,17 @@ def install(
 
 
 def register_script(gitea_url: str, registration_token: str, name: str, labels: list[str]) -> str:
-    """Shell that registers the runner with Gitea, from scratch."""
+    """Shell that registers the runner with Gitea, from scratch.
+
+    The token goes in the GITEA_RUNNER_REGISTRATION_TOKEN variable, which `gitea-runner register` reads
+    when --token is not given: a command line is visible to every user on the node (`ps`), a process's
+    variables only to root. Host.run sends this script on stdin, so the token is on no command line.
+    """
     return (
         f"systemctl stop outpost-runner 2>/dev/null || true\nrm -f {REGISTRATION}\ncd {RUNNER_HOME}\n"
-        f"HOME={RUNNER_HOME} {BIN} register --config {CONFIG} --no-interactive --instance {gitea_url} "
-        f"--token {shlex.quote(registration_token)} --name {shlex.quote(name)} --labels {shlex.quote(','.join(labels))}"
+        f"HOME={RUNNER_HOME} GITEA_RUNNER_REGISTRATION_TOKEN={shlex.quote(registration_token)} "
+        f"{BIN} register --config {CONFIG} --no-interactive --instance {gitea_url} "
+        f"--name {shlex.quote(name)} --labels {shlex.quote(','.join(labels))}"
     )
 
 

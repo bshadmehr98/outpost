@@ -103,10 +103,11 @@ def by_family(apt: str, apk: str, rpm: str) -> str:
     """One shell snippet that runs the right command for the node's family, read from /etc/os-release,
     so the same script (and the same verification names) works on Debian, Ubuntu, Alpine and the RHEL family.
 
-    The case's exit status is that of the branch taken.
+    The case's exit status is that of the branch taken. ${ID_LIKE:-}: Debian and Alpine have no ID_LIKE,
+    and Host.run turns on `set -u`, which stops on an unset variable.
     """
     return (
-        '. /etc/os-release 2>/dev/null; case " $ID $ID_LIKE " in '
+        '. /etc/os-release 2>/dev/null; case " ${ID:-} ${ID_LIKE:-} " in '
         f"*alpine*) {apk} ;; *rhel*|*fedora*|*centos*|*rocky*|*almalinux*) {rpm} ;; *) {apt} ;; esac"
     )
 
