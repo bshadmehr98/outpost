@@ -138,8 +138,8 @@ def setup(workspace: Workspace, servers: Servers, log=print) -> dict:  # noqa: C
     log(f"[{cfg.host}] {facts.get('id', '?')} {facts.get('codename', '')}, Gitea will be https://{cfg.name} ({ip})")
 
     log("==> [2/7] certificates")
-    pki.ensure_ca(workspace.pki_dir, workspace.secrets_dir)
-    cert, key = pki.ensure_server_cert(workspace.pki_dir, workspace.secrets_dir, cfg.name, ip)
+    pki.ensure_ca(workspace)
+    cert, key = pki.ensure_gitea_cert(workspace, cfg.name, ip)
 
     log(f"==> [3/7] gitea {versions.GITEA} binary")
     installed = installed_version(host)

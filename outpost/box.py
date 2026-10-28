@@ -1,4 +1,4 @@
-"""The box: a folder of downloaded artifacts with a manifest listing every file and its sha256.
+"""The box: the folder of everything fetch downloaded, with a manifest listing every file and its sha256.
 
     box/
       manifest.json
@@ -11,23 +11,42 @@
       rpm/<distro>/      .rpm files (rocky9, alma9, fedora40, stream9)
       files/<name>/<version>/<filename>
 
-`outpost pack` turns the folder into one tar.xz per kind so each file stays under
-GitHub's 2 GB release limit. `outpost upload` accepts the folder or the tar files.
+`outpost pack` turns the folder into one tar.xz per kind so each file stays under GitHub's 2 GB
+release limit. `outpost upload` accepts the folder or the tar files.
+
+    write_manifest(box)                        # after fetch
+    pack(box, Path("dist"), signer=...)        # one tar.xz per kind, plus the signed manifest
+    box, tmp = open_box([Path("dist/box-images-2026-01-01.tar.xz"), ...])
+    check_signature(box, workspace.box_public_key)   # SIGNATURE_VALID, UNSIGNED, ...
+    verify_manifest(box)                       # [] when every file is there and intact
 """
 
 import json
 import tarfile
 import tempfile
+from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
 
-from . import __version__
+from . import __version__, pki
 from .http import sha256_file
 
 KINDS = ("images", "pypi", "npm", "apt", "apk", "rpm", "files")
+MANIFEST = "manifest.json"
+SIGNATURE = "manifest.sig"
+
+# what check_signature() found
+SIGNATURE_VALID = "valid"
+SIGNATURE_INVALID = "invalid"
+UNSIGNED = "unsigned"  # the box has no manifest.sig
+NO_PUBLIC_KEY = "no public key"  # the box is signed, but there is no pki/box.pub to check it with
 
 
 def write_manifest(box: Path) -> dict:
+    """List every file of every kind with its size and sha256 in manifest.json, and return the manifest.
+
+    A manifest.sig left from an earlier `outpost pack` signed the old manifest, so it is removed.
+    """
     items = []
     for kind in KINDS:
         root = box / kind
@@ -42,13 +61,14 @@ def write_manifest(box: Path) -> dict:
         "bytes": sum(i["size"] for i in items),
         "items": items,
     }
-    (box / "manifest.json").write_text(json.dumps(manifest, indent=1) + "\n")
+    (box / MANIFEST).write_text(json.dumps(manifest, indent=1) + "\n")
+    (box / SIGNATURE).unlink(missing_ok=True)
     return manifest
 
 
 def verify_manifest(box: Path) -> list[str]:
-    """Return a list of problems. Empty list means every listed file is present and intact."""
-    manifest_file = box / "manifest.json"
+    """The problems with the box, one line each. Empty when every listed file is present and intact."""
+    manifest_file = box / MANIFEST
     if not manifest_file.exists():
         return ["manifest.json is missing (run `outpost fetch` or `outpost pack`)"]
     problems = []
@@ -61,8 +81,32 @@ def verify_manifest(box: Path) -> list[str]:
     return problems
 
 
-def pack(box: Path, out_dir: Path, signer=None) -> list[Path]:
-    """One tar.xz per kind plus the manifest. `signer(manifest_path) -> sig_path` is optional."""
+def check_signature(box: Path, box_public_key: Path) -> str:
+    """Check manifest.sig against the box's public key (pki/box.pub).
+
+    Returns:
+        SIGNATURE_VALID or SIGNATURE_INVALID; UNSIGNED when the box has no manifest.sig, and
+        NO_PUBLIC_KEY when there is no public key to check it with.
+    """
+    signature = box / SIGNATURE
+    if not signature.exists():
+        return UNSIGNED
+    if not box_public_key.exists():
+        return NO_PUBLIC_KEY
+    if pki.signature_is_valid(box / MANIFEST, signature, box_public_key):
+        return SIGNATURE_VALID
+    return SIGNATURE_INVALID
+
+
+def pack(box: Path, out_dir: Path, signer: Callable[[Path], Path] | None = None) -> list[Path]:
+    """Write the manifest, then one tar.xz per kind and one with the manifest (and its signature).
+
+    Args:
+        signer: signs the manifest file and returns the signature's path (pki.sign_file with the box key).
+
+    Returns:
+        The tar.xz files, named box-<kind>-<date>.tar.xz and box-manifest-<date>.tar.xz.
+    """
     manifest = write_manifest(box)
     out_dir.mkdir(parents=True, exist_ok=True)
     stamp = manifest["created"][:10]
@@ -76,29 +120,32 @@ def pack(box: Path, out_dir: Path, signer=None) -> list[Path]:
         made.append(target)
     meta = out_dir / f"box-manifest-{stamp}.tar.xz"
     with tarfile.open(meta, "w:xz") as tar:
-        tar.add(box / "manifest.json", arcname="manifest.json")
+        tar.add(box / MANIFEST, arcname=MANIFEST)
         if signer:
-            sig = signer(box / "manifest.json")
-            tar.add(sig, arcname="manifest.sig")
+            tar.add(signer(box / MANIFEST), arcname=SIGNATURE)
     made.append(meta)
     return made
 
 
 def unpack(archives: list[Path], dest: Path) -> Path:
-    """Extract pack() output into one box folder. Safe against paths that escape dest."""
+    """Extract pack()'s tar files into one box folder.
+
+    Raises:
+        ValueError: an archive has a path that would land outside dest.
+    """
     dest.mkdir(parents=True, exist_ok=True)
+    root = dest.resolve()
     for archive in archives:
         with tarfile.open(archive, "r:*") as tar:
             for member in tar.getmembers():
-                target = (dest / member.name).resolve()
-                if not str(target).startswith(str(dest.resolve())):
+                if not (dest / member.name).resolve().is_relative_to(root):
                     raise ValueError(f"{archive.name}: refusing path {member.name}")
             tar.extractall(dest, filter="data")
     return dest
 
 
 def open_box(source: Path | list[Path]) -> tuple[Path, tempfile.TemporaryDirectory | None]:
-    """A box folder as given, or tar files unpacked into a temp dir the caller must keep alive."""
+    """A box folder as given, or tar files unpacked into a temporary folder the caller must keep (and clean up)."""
     if isinstance(source, Path) and source.is_dir():
         return source, None
     archives = [source] if isinstance(source, Path) else list(source)
@@ -107,6 +154,6 @@ def open_box(source: Path | list[Path]) -> tuple[Path, tempfile.TemporaryDirecto
 
 
 def distros_in(box: Path, kind: str = "apt") -> list[str]:
-    """The distro (apt, rpm) or branch (apk) folders present for one OS package kind."""
+    """The distro (apt, rpm) or branch (apk) folders in the box for one OS package kind."""
     root = box / kind
     return sorted(p.name for p in root.iterdir() if p.is_dir()) if root.exists() else []

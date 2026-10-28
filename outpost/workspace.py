@@ -184,8 +184,24 @@ class Workspace:
         return self.pki_dir / CA_CERT
 
     @property
+    def ca_key(self) -> Path:
+        return self.secrets_dir / CA_KEY
+
+    @property
+    def gitea_cert(self) -> Path:
+        return self.pki_dir / GITEA_CERT
+
+    @property
+    def gitea_key(self) -> Path:
+        return self.secrets_dir / GITEA_KEY
+
+    @property
     def box_public_key(self) -> Path:
         return self.pki_dir / BOX_PUBLIC_KEY
+
+    @property
+    def box_signing_key(self) -> Path:
+        return self.secrets_dir / BOX_SIGNING_KEY
 
     # -- state: small JSON files about what happened last ----------------------------
     def read_state(self, name: str, default=None):

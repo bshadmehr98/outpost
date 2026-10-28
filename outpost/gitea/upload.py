@@ -69,16 +69,15 @@ def upload(system: AirGappedSystem, sources: list[Path], log=print) -> dict:
 
 def _check_signature(box: Path, box_public_key: Path, log) -> None:
     """Check manifest.sig against pki/box.pub; say so when there is nothing to check it with."""
-    signature = box / "manifest.sig"
-    if not signature.exists():
+    found = boxmod.check_signature(box, box_public_key)
+    if found == boxmod.UNSIGNED:
         log("warning: the box is not signed (no manifest.sig), so its signature is not checked")
-        return
-    if not box_public_key.exists():
+    elif found == boxmod.NO_PUBLIC_KEY:
         log("warning: cannot check the box's signature: pki/box.pub is missing")
-        return
-    if not pki.verify(box / "manifest.json", signature, box_public_key):
+    elif found == boxmod.SIGNATURE_INVALID:
         raise RuntimeError("manifest.sig does not match pki/box.pub. The box was altered or signed with another key.")
-    log("Signature OK")
+    else:
+        log("Signature OK")
 
 
 def upload_box(  # noqa: C901 too complex; split into named steps in the refactor

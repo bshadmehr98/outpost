@@ -343,6 +343,7 @@ def workspace_dir(tmp_path):
 def ca_pem(tmp_path_factory):
     """A real CA certificate (openssl is required anyway), for code that hashes or parses the CA."""
     from outpost import pki
+    from outpost.workspace import Workspace
 
     d = tmp_path_factory.mktemp("pki")
-    return pki.ensure_ca(d / "pki", d / "secrets").read_text()
+    return pki.ensure_ca(Workspace(d)).read_text()
