@@ -26,8 +26,8 @@ What the unit suite covers, by file:
 
 | file | proves |
 |---|---|
-| `test_needs.py`, `test_parsers.py`, `test_projects.py` | needs files merge; every lockfile format parses; the folder scanner finds lockfiles, `FROM` lines and apt packages |
-| `test_fetch.py`, `test_oci.py`, `test_box.py` | each fetch kind with a stub registry; OCI pull/push/layout; manifest, pack, unpack, signature |
+| `test_needs.py`, `test_lockfiles.py`, `test_distros.py`, `test_projects.py` | needs files merge, and what Outpost adds to them; every lockfile format parses; distro names and families; the folder scanner finds lockfiles, `FROM` lines and apt packages |
+| `test_fetch.py`, `test_oci.py`, `test_box.py`, `test_http.py` | each fetch kind with a stub registry; OCI pull/push/layout; manifest, pack, unpack, signature, Gitea's certificate; HTTP retries only for reads, file bodies streamed |
 | `test_gitea_client.py`, `test_gitea_setup.py` | registry uploads against FakeGitea; the install flow's files, order and idempotence; token replacement |
 | `test_infra.py` | the egress script's content; node preparation order; compose, swarm, k3s setup scripts; verify parsing |
 | `test_demo.py` | workflow generation from `servers.yml`; push commits only changed files; one package token; runner labels and install |

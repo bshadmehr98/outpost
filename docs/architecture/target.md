@@ -41,30 +41,36 @@ outpost/
   endpoints.py     (new) GiteaEndpoint, ProxyEndpoint, and how to work them out
                          <- infra/clients.GiteaInfo, ProxyInfo; gitea/connect.gitea_info;
                             infra/proxy.info; cli._proxy_info, _proxy_info_or_warn, _cached_facts
-  distros.py       (new) distro names and families, in one place
+  distros.py             distro names and families, in one place: DEBIAN, UBUNTU, RPM_IMAGES, RPM_OS_IDS,
+                         os_family, apk_branch_of, rpm_distro_of_host, distro_of_host, kind_for_distro,
+                         split_rpm_distro, is_apt_distro, is_apk_branch, apk_branch_version
                          <- fetch/apt DEBIAN/UBUNTU, fetch/rpm split/distro_for_host/OS_IDS,
                             infra/common os_family/apk_branch_of, ui/projects kind_for_distro
-  versions.py            pinned versions and the CPU type                 <- same
-  http.py                Http, Response, HttpError, sha256_file           <- same
+  versions.py            pinned versions, pinned_files() in named steps, arch_names(), use_arch()  <- same
+  http.py                Http, Response, HttpError, sha256_file; retries only GET and HEAD;
+                         a Path body is streamed from disk                <- same
   needs/                 what projects need, merged into one Needs
-    __init__.py            overview, re-exports
-    model.py         (new) FileNeed, NpmNeed, Needs                       <- needs/__init__
-    needs_file.py    (new) load_needs(), read_needs_file()                <- needs/__init__._parse_one, load_needs
-    pinned.py        (new) add_pinned_files(), add_proxy_package(), all_needs(system)
-                           <- needs.add_platform_files, infra/proxy.add_package/package_need, cli._add_proxy_package
-    python_lockfiles.py    requirements, poetry, uv, Pipfile               <- needs/parsers.py (Python half)
-    js_lockfiles.py        package-lock, pnpm, yarn                       <- needs/parsers.py (JS half)
-  box.py                 the box folder, its manifest, pack/unpack, signature check   <- same
-  pki.py                 CA, Gitea certificate, box signing key (openssl)  <- same
+    __init__.py            overview, needs file format, file map, re-exports
+    model.py               FileNeed, NpmNeed, Needs, add_unique          <- needs/__init__
+    needs_file.py          load_needs(), read_needs_file(): _read_images, _read_pypi, _read_npm,
+                           _read_os_packages, _read_files                 <- needs/__init__._parse_one, load_needs
+    pinned.py              all_needs(system), add_pinned_files(), add_proxy_package(), proxy_package_need(),
+                           PROXY_PACKAGE
+                           <- needs.add_platform_files, infra/proxy.add_package/package_need/PACKAGE, cli._add_proxy_package
+    python_lockfiles.py    read_python_lockfile(); parse_requirements, poetry, uv, Pipfile  <- needs/parsers.py (Python half)
+    js_lockfiles.py        read_js_lockfile(); parse_package_lock, pnpm, yarn               <- needs/parsers.py (JS half)
+  box.py                 the box folder, its manifest, pack/unpack, check_signature()   <- same
+  pki.py                 CA, Gitea certificate, box signing key (openssl); takes a Workspace  <- same
   oci/                   container images over plain HTTP                  <- oci.py
-    __init__.py            overview, re-exports
+    __init__.py            overview, file map, re-exports
     refs.py                Ref, parse_ref, gitea_ref, original_ref, GITEA_IMAGE_NAME
-    registry.py            Registry (pull, push, token handling), media types
-    layout.py              build_layout, layout_ref, digest_of, write_index()
+    registry.py            Registry: pull (_get_manifest, _pick_arch, _fetch_blobs), push (blobs from disk), tokens
+    layout.py              build_layout, layout_ref, digest_of, write_index(), blob_path
+    media_types.py         MANIFEST_TYPES, INDEX_TYPES, ACCEPT, REF_ANNOTATION
   fetch/                 download the needs into the box                  <- same package
     __init__.py            fetch_all(), fetch_into_box(system, ...), failures()
-    in_container.py  (new) run_in_container(): the shared `docker run` of apt/apk/rpm
-    apt.py apk.py rpm.py   one kind each (distro tables move to distros.py)
+    in_container.py  (new) fetch_os_packages(), run_in_container(): the shared `docker run` of apt/apk/rpm
+    apt.py apk.py rpm.py   one kind each (distro tables in distros.py; rpm.REPOSITORIES stays: mirror keys)
     pypi.py npm.py images.py files.py
   hosts/                 what each server runs: inspect, cache, roles, drift   <- hosts.py
     __init__.py            overview, re-exports
@@ -330,10 +336,12 @@ from state.
 | `versions.names()` | `versions.arch_names()` | |
 | `needs.add_platform_files` | `needs.add_pinned_files` | |
 | `needs._parse_one` | `needs.read_needs_file` (public; the dashboard uses it) | |
-| `needs.parsers` | `needs.python_lockfiles`, `needs.js_lockfiles` | |
+| `needs.parsers` | `needs.python_lockfiles`, `needs.js_lockfiles` | `parse_python_file`, `parse_js_file` -> `read_python_lockfile`, `read_js_lockfile`; the `parse_<format>` functions keep their names |
 | `infra.proxy.package_need`, `add_package` | `needs.proxy_package_need`, `needs.add_proxy_package` | |
 | `infra.common.os_family`, `apk_branch_of` | `distros.os_family`, `distros.apk_branch_of` | |
-| `fetch.rpm.split`, `distro_for_host`, `OS_IDS`; `fetch.apt.DEBIAN`, `UBUNTU` | `distros.split_rpm_distro`, `rpm_distro_of_host`, `RPM_OS_IDS`, `DEBIAN`, `UBUNTU` | |
+| `fetch.rpm.split`, `distro_for_host`, `OS_IDS`; `fetch.apt.DEBIAN`, `UBUNTU` | `distros.split_rpm_distro`, `rpm_distro_of_host`, `RPM_OS_IDS`, `DEBIAN`, `UBUNTU` | `rpm_distro_of_host(facts)` takes the facts dict, as `os_family` does. `fetch.rpm.DISTROS` is split: images go to `distros.RPM_IMAGES`, mirror keys and paths stay as `fetch.rpm.REPOSITORIES` |
+| `infra.proxy.PACKAGE` | `needs.PROXY_PACKAGE` | |
+| `box` signature check in `gitea/upload._check_signature` | `box.check_signature(box, box_public_key)` | returns `SIGNATURE_VALID`, `SIGNATURE_INVALID`, `UNSIGNED` or `NO_PUBLIC_KEY` (not `bool \| None`: upload says different things for "unsigned" and "no box.pub") |
 | `ui.projects.kind_for_distro` | `distros.kind_for_distro` | |
 | `pki.ensure_ca(pki_dir, secrets_dir)` | `pki.ensure_ca(workspace)` | |
 | `pki.ensure_server_cert` | `pki.ensure_gitea_cert(workspace, name, ip)` | |
@@ -397,6 +405,7 @@ imports sit inside functions). Fix every old name you find.
 | **Also** | `http` logs every request and download at DEBUG (style guide). Keep the retry line on stderr: tests and users see it. |
 | **Risks** | `test_fetch` patches `mod.fetch` for each kind in `fetch_all`'s plan: keep the plan's call shape `fetch(needs, box, mirrors, log=...)`. `versions.ARCH` stays a module global that `use_arch` sets: oci, fetch and infra read it at call time, so don't import the name `ARCH` by value. `test_infra` and `test_proxy` call `os_family`, `package_need` and `add_package` under their old names. The pip download writes `box/pypi/.requirements-py*.txt`: `upload` and `box_status` filter by suffix, so keep that. `test_real_gitea` imports `oci` and `fetch.apk`. |
 | **Verify** | CLAUDE.md checks; help diff; `outpost needs` output for the template workspace is identical before and after (save it in A) |
+| **Done (as built)** | All of the above, plus: `distros.distro_of_host(facts)` (the proxy setup's `_distro_of` uses it); `fetch.in_container.fetch_os_packages(kind, packages, box, OsPackageRecipe, log, run)` holds the per-distro loop that apt, apk and rpm shared, and `run_in_container(image, shell, script, out_dir, label, run)` the `docker run`; `oci/media_types.py` holds the media types (so `layout` and `registry` need not import each other); Workspace gets `ca_key`, `gitea_cert`, `gitea_key`, `box_signing_key`. `http` retries only GET and HEAD (a PUT or POST that got a 5xx may have landed); `Http.request(data=Path)` streams the file, and `oci.Registry` pushes blobs that way. Bugs fixed: an unquoted `python: 3.10` in a needs file is an error that says to quote it (YAML reads it as 3.1); Gitea's certificate is reissued when its names differ (the check was a substring match on the name and ignored the IP); `write_manifest` drops a `manifest.sig` left by an earlier pack (fetch after pack made upload refuse box/); one image or file that fails no longer stops the rest of its kind (they list it under `failed`, as npm and pypi do); a 202 without `Location` on a blob upload is an `HttpError`. Left for later: `gitea/client.py` uploads still read whole files into memory (C: `Http.request` takes a `Path` now); `Registry.push` still returns only the digest (bug 7, C); `ui/projects.py` keeps its image-name heuristics (`_CODENAMES`, `_UBUNTU`, `_RPM_IMAGES`, D); `hosts.cached` is still called under its old name from `needs/pinned.py` and `ui/server.py` (D). |
 
 ### C. Gitea, checks, demo
 

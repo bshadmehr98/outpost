@@ -23,13 +23,14 @@ outpost/
   system.py       AirGappedSystem: workspace, config, state, secrets and Hosts, in one object
   endpoints.py    how nodes reach Gitea and the egress proxy
   rotate_ca.py    `outpost pki rotate`
-  versions.py     pinned Gitea, Docker, Compose, k3s versions and URLs
-  needs/          needs files and lockfile parsers
-  fetch/          one module per kind: images, pypi, npm, apt, files
-  box.py          manifest, pack, unpack
-  pki.py          CA, server cert, box signing (openssl CLI)
-  oci.py          pull and push container images over HTTP
-  http.py         urllib wrapper: private CA, Host header, auth, downloads
+  versions.py     pinned Gitea, Docker, Compose, k3s versions and URLs, and the CPU type
+  distros.py      distro names and families: bookworm, v3.20, rocky9; os_family from /etc/os-release
+  needs/          needs files, lockfile readers, and what Outpost adds (pinned files, tinyproxy)
+  fetch/          one module per kind: images, pypi, npm, apt, apk, rpm, files
+  box.py          manifest, pack, unpack, signature check
+  pki.py          CA, Gitea's certificate, box signing (openssl CLI)
+  oci/            pull and push container images over HTTP: refs, registry, layout
+  http.py         urllib wrapper: private CA, Host header, auth, downloads, retries for reads
   ssh/            Host.run / write / put / get and the Tunnel (one module per job; see its __init__.py)
   gitea/          client (API + registries), setup (install over SSH), upload, connect
   infra/          clients (config files), egress, context, common steps, compose, swarm, k3s, verify,
@@ -45,8 +46,9 @@ tests/integration real Gitea container, Docker Hub, and the full flow on the lab
 
 ## Adding a lockfile format
 
-Write `parse_<format>(path)` in `outpost/needs/parsers.py` returning `["name==version", ...]`
-or `[NpmNeed(...)]`, add one line to `parse_python_file` or `parse_js_file`, add a test.
+Write `parse_<format>(path)` in `outpost/needs/python_lockfiles.py` returning `["name==version", ...]`,
+or in `outpost/needs/js_lockfiles.py` returning `[NpmNeed(...)]`, add one line to
+`read_python_lockfile` or `read_js_lockfile`, add a test.
 
 ## Adding an infrastructure type
 

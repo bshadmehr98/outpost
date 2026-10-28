@@ -38,7 +38,7 @@ flowchart TB
 |---|---|---|
 | CLI (`outpost/cli/`) | laptop | one file per command, in the order you use them |
 | needs + fetch (`outpost/needs`, `outpost/fetch`) | laptop | lockfiles in, box out |
-| box (`outpost/box.py`, `outpost/oci.py`) | laptop | manifest, OCI layouts, pack, sign |
+| box (`outpost/box.py`, `outpost/oci/`) | laptop | manifest, OCI layouts, pack, sign |
 | ssh (`outpost/ssh/`) | laptop | `Host.run / write / put / get` and `Tunnel`; the only way servers are touched |
 | Gitea client + setup + upload (`outpost/gitea`) | laptop | install over SSH, speak the registry APIs through the tunnel |
 | infra (`outpost/infra`) | laptop, writes to nodes | common steps, egress, compose, swarm, k3s, runner, verify |

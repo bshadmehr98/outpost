@@ -22,7 +22,7 @@ box/
 
 ## Images without Docker
 
-`outpost/oci.py` is a small, readable skopeo: it speaks the registry HTTP API directly.
+`outpost/oci/` is a small, readable skopeo: it speaks the registry HTTP API directly.
 
 - **Pull:** GET the manifest with the standard `Accept` headers; when it is a multi-arch index,
   pick `linux/amd64`; then GET every blob by digest and store it under `blobs/sha256/`. On a

@@ -351,8 +351,8 @@ publishes them as a site: `uvx --with mkdocs-material mkdocs serve`.
 ```
 outpost/
   cli/            the commands, one file each; system.py holds one workspace's config, state and servers
-  needs/ fetch/   lockfile parsers; one fetcher per kind (images, pypi, npm, apt, apk, rpm, files)
-  box.py oci.py   manifest, pack, sign; pull and push images over HTTP
+  needs/ fetch/   needs files and lockfiles; one fetcher per kind (images, pypi, npm, apt, apk, rpm, files)
+  box.py oci/     manifest, pack, sign; pull and push images over HTTP
   ssh/ http.py    Host.run / write / put / get, the Tunnel; urllib with a private CA
   pki.py          CA, server certificate, box signing, with the openssl CLI
   gitea/          client (API + registries), setup over SSH, upload, connect (tunnel)
