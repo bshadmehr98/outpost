@@ -63,7 +63,8 @@ variable per workload.
 
 **The proxy on the Gitea host by default.** Every node already resolves the Gitea name and may
 reach Gitea's address, so a proxy there needs no new allow entry, no new name in `/etc/hosts`, and
-no host to prepare; the URL is just `http://<gitea name>:3128`. Gitea is already the one machine
+no host to prepare; the URL is just `http://<gitea address>:3128` (the address, not the name,
+because of an apt quirk; see "A proxy named like its destination" below). Gitea is already the one machine
 the platform depends on, and the proxy is small. `egress_proxy.host` moves it elsewhere when that
 is not wanted (the exception in the seal then lives on that host instead).
 
@@ -263,3 +264,15 @@ the log directory back to its own user on every upgrade, so the unit hands it ov
 each start. Lesson: when a file is readable and a program still cannot open it, look at the
 kernel's denials before the permissions; and a packaged daemon is safest where its package
 expects it to be.
+
+**A proxy named like its destination.** With the proxy on the Gitea host, its URL was
+`http://<gitea name>:3128`, and `NO_PROXY` started with the Gitea name. Once the proxy ran in CI,
+the demo's build failed at `apt-get update` with `Reading from proxy failed ... [IP: <gitea> 443]`:
+a proxy error on Gitea's HTTPS port. apt's https method (`methods/http.cc`) reads `https_proxy`,
+then clears it with `Proxy = ""` when `no_proxy` matches; `URI::CopyFrom("")` empties the scheme
+but returns before it touches the host, so the proxy URI keeps `gitea.internal`. apt connects
+directly, as it should, and then, because `Host == Proxy.Host && tls`, wraps the connection in a
+`CONNECT` request addressed to Gitea itself, which hangs up. curl, pip and Python honour `NO_PROXY`
+without this, which is why every check but apt's passed. The URL is now the Gitea address; Gitea is
+always reached by name, so the two can no longer be equal. Lesson: a proxy's name and the names on
+`NO_PROXY` should not overlap, however harmless it looks.

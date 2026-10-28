@@ -102,7 +102,7 @@ def test_setup_again_keeps_the_proxy_exception_on_the_gitea_host(prepared):
     assert "--uid-owner" not in host.files["/usr/local/sbin/outpost-egress"]   # no proxy: the plain seal
     path = platform.servers_file
     path.write_text(path.read_text() + "\negress_proxy: {allow: [api.twilio.com]}\n")
-    platform.write_state("proxy", {"host": "gitea-1", "url": "http://gitea.internal:3128", "allow": ["api.twilio.com"]})
+    platform.write_state("proxy", {"host": "gitea-1", "url": "http://10.0.0.5:3128", "allow": ["api.twilio.com"]})
     setupmod.setup(platform, load_servers(path), log=lambda *_: None)
     script = host.files["/usr/local/sbin/outpost-egress"]
     assert 'PROXY_USER="outpost-proxy"' in script and "--uid-owner" in script

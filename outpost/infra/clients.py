@@ -99,7 +99,7 @@ class GiteaInfo:
 @dataclass(frozen=True)
 class ProxyInfo:
     """Where the egress proxy is, as the nodes see it. Built by infra/proxy.py from servers.yml."""
-    url: str                 # http://gitea.internal:3128, or http://proxy.internal:3128 on another host
+    url: str                 # http://<gitea address>:3128, or http://proxy.internal:3128 on another host
     no_proxy: str            # what must never go through the proxy: Gitea, loopback, private networks
     ip: str                  # the address the proxy listens on
     name: str                # the name nodes use for it (the Gitea name when it runs on the Gitea host)

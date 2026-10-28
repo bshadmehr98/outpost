@@ -166,12 +166,12 @@ def test_6b_proxy(rig):
     assert main(["--dir", str(rig), "proxy", "setup"]) == 0
     assert main(["--dir", str(rig), "proxy", "verify"]) == 0
     state = json.loads((rig / "state" / "proxy.json").read_text())
-    assert state["url"] == f"http://{GITEA_NAME}:3128" and state["ip"] == GITEA_IP and state["tinyproxy"] and state["verify"]["result"] == "ok"
+    assert state["url"] == f"http://{GITEA_IP}:3128" and state["ip"] == GITEA_IP and state["tinyproxy"] and state["verify"]["result"] == "ok"
     # the Gitea host is still sealed for everyone but the proxy's own user
     assert "sealed" in ssh("lab-gitea", "/usr/local/sbin/outpost-egress status").stdout
     assert ssh("lab-gitea", "curl --noproxy '*' -sS --max-time 5 https://example.org/", check=False).returncode != 0
     # the node set up before the proxy existed got its settings
-    assert f"HTTPS_PROXY=http://{GITEA_NAME}:3128" in ssh("lab-node-1", "cat /etc/outpost/proxy.env").stdout
+    assert f"HTTPS_PROXY=http://{GITEA_IP}:3128" in ssh("lab-node-1", "cat /etc/outpost/proxy.env").stdout
     # a container with HTTPS_PROXY reaches example.org through it; without the variables it does not, and
     # through it a name that is not on the list is refused by the proxy (403)
     image = f"{GITEA_NAME}/pkgs/library/python:3.12-slim"
@@ -180,7 +180,7 @@ def test_6b_proxy(rig):
     fetch = ("import sys, urllib.request as u, urllib.error as e\n"
              "try: print(u.urlopen('https://' + sys.argv[1] + '/', timeout=20).status)\n"
              "except e.HTTPError as x: print('HTTP', x.code)")
-    via = f"-e HTTPS_PROXY=http://{GITEA_NAME}:3128 -e https_proxy=http://{GITEA_NAME}:3128"
+    via = f"-e HTTPS_PROXY=http://{GITEA_IP}:3128 -e https_proxy=http://{GITEA_IP}:3128"
     unset = "-e HTTPS_PROXY= -e https_proxy= -e HTTP_PROXY= -e http_proxy="   # also overrides the Docker client config
     reached = ssh("lab-node-1", f'docker run --rm {via} {image} python -c "{fetch}" example.org', check=False)
     assert reached.returncode == 0 and re.search(r"\b[1-5]\d\d\b", reached.stdout), reached.stderr

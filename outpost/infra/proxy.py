@@ -196,15 +196,21 @@ WantedBy=multi-user.target
 
 
 def info(cfg: ProxyConfig, gitea: GiteaInfo, gitea_host: str, ip: str | None = None) -> ProxyInfo:
-    """How nodes reach the proxy. On the Gitea host it is http://<gitea name>:<port>, a name every node
-    already resolves and an address every node already allows; elsewhere http://<egress_proxy.name>:<port>."""
+    """How nodes reach the proxy. On the Gitea host it is http://<gitea address>:<port>, an address every
+    node already allows; elsewhere http://<egress_proxy.name>:<port>.
+
+    Not the Gitea *name* on the Gitea host: apt's https method (methods/http.cc) clears a proxy that
+    no_proxy matches with `Proxy = ""`, which leaves the proxy URI's host in place, and then sends a
+    CONNECT to the destination itself when that host equals the destination's. With the proxy at
+    http://gitea.internal:3128, every apt fetch from https://gitea.internal went that way and Gitea's
+    TLS port hung up ("Reading from proxy failed"). Gitea is reached by name, so an address cannot collide."""
     on_gitea = cfg.host == gitea_host
     name = gitea.name if on_gitea else cfg.name
     address = gitea.ip if on_gitea else ip
     if not address:
         raise RuntimeError(f"the egress proxy host {cfg.host} has no known address; run `outpost proxy setup`")
     no_proxy = [gitea.name, gitea.ip, "localhost", "127.0.0.1", *clients.PRIVATE_NETS] + ([] if on_gitea else [name, address])
-    return ProxyInfo(url=f"http://{name}:{cfg.port}", no_proxy=",".join(dict.fromkeys(no_proxy)), ip=address, name=name,
+    return ProxyInfo(url=f"http://{address if on_gitea else name}:{cfg.port}", no_proxy=",".join(dict.fromkeys(no_proxy)), ip=address, name=name,
                      allowed=tuple(cfg.allow), host=cfg.host, on_gitea=on_gitea)
 
 

@@ -70,7 +70,8 @@ def test_config_rejects(tmp_path, block, message):
 # -- where nodes find it --------------------------------------------------------------
 
 def test_info_on_the_gitea_host_and_elsewhere():
-    assert ON_GITEA.url == "http://gitea.internal:3128" and ON_GITEA.on_gitea and ON_GITEA.ip == "10.0.0.5"
+    # the address, not the Gitea name: apt would send a CONNECT for https://gitea.internal to Gitea itself
+    assert ON_GITEA.url == "http://10.0.0.5:3128" and ON_GITEA.name == "gitea.internal" and ON_GITEA.on_gitea and ON_GITEA.ip == "10.0.0.5"
     assert ON_GITEA.no_proxy == NO_PROXY
     assert ELSEWHERE.url == "http://proxy.internal:3128" and not ELSEWHERE.on_gitea
     assert ELSEWHERE.no_proxy == NO_PROXY + ",proxy.internal,10.0.0.40"
@@ -203,20 +204,20 @@ def test_client_files_with_and_without_a_proxy():
         and clients.PATH_PROFILE not in clients.config_image_files(G, "CA", None, [])
     files = {**clients.client_files(G, "CA", None, [], proxy=ON_GITEA), **clients.host_files(G, "CA", "10.0.0.11", proxy=ON_GITEA)}
     env = dict(line.split("=", 1) for line in files[clients.PATH_PROXY_ENV].splitlines() if line and not line.startswith("#"))
-    assert env == {"HTTPS_PROXY": "http://gitea.internal:3128", "HTTP_PROXY": "http://gitea.internal:3128", "NO_PROXY": NO_PROXY,
-                   "https_proxy": "http://gitea.internal:3128", "http_proxy": "http://gitea.internal:3128", "no_proxy": NO_PROXY,
+    assert env == {"HTTPS_PROXY": "http://10.0.0.5:3128", "HTTP_PROXY": "http://10.0.0.5:3128", "NO_PROXY": NO_PROXY,
+                   "https_proxy": "http://10.0.0.5:3128", "http_proxy": "http://10.0.0.5:3128", "no_proxy": NO_PROXY,
                    "OUTPOST_PROXY_ALLOWED": "api.twilio.com,*.sendgrid.net"}
-    assert "export HTTPS_PROXY=http://gitea.internal:3128\n" in files[clients.PATH_PROFILE] and "export PIP_CERT" in files[clients.PATH_PROFILE]
+    assert "export HTTPS_PROXY=http://10.0.0.5:3128\n" in files[clients.PATH_PROFILE] and "export PIP_CERT" in files[clients.PATH_PROFILE]
     image = clients.config_image_files(G, "CA", None, [], proxy=ON_GITEA)
     assert image[clients.PATH_PROXY_ENV][0].decode() == files[clients.PATH_PROXY_ENV]
-    assert image[clients.PATH_PROFILE][0].decode().startswith("export HTTPS_PROXY=http://gitea.internal:3128\n")
+    assert image[clients.PATH_PROFILE][0].decode().startswith("export HTTPS_PROXY=http://10.0.0.5:3128\n")
 
 
 def test_docker_client_config_is_merged_and_only_ours_is_removed():
     existing = json.dumps({"auths": {"gitea.internal": {"auth": "eA=="}}})
     merged = json.loads(clients.docker_client_config(existing, ON_GITEA, G.name))
     assert merged["auths"] == {"gitea.internal": {"auth": "eA=="}}
-    assert merged["proxies"] == {"default": {"httpProxy": "http://gitea.internal:3128", "httpsProxy": "http://gitea.internal:3128", "noProxy": NO_PROXY}}
+    assert merged["proxies"] == {"default": {"httpProxy": "http://10.0.0.5:3128", "httpsProxy": "http://10.0.0.5:3128", "noProxy": NO_PROXY}}
     assert clients.docker_client_config(json.dumps(merged), ON_GITEA, G.name) is None          # nothing to change
     assert clients.docker_client_config("", None, G.name) is None                              # no proxy, no file: nothing written
     assert clients.docker_client_config("not json", ON_GITEA, G.name) is None                  # never clobber what we cannot read
@@ -228,7 +229,7 @@ def test_docker_client_config_is_merged_and_only_ours_is_removed():
 
 def test_environment_lines_are_replaced_in_place():
     script = clients.environment_script(ON_GITEA)
-    assert "echo HTTPS_PROXY=http://gitea.internal:3128;" in script and "> /etc/environment.outpost && cat /etc/environment.outpost > /etc/environment" in script
+    assert "echo HTTPS_PROXY=http://10.0.0.5:3128;" in script and "> /etc/environment.outpost && cat /etc/environment.outpost > /etc/environment" in script
     assert clients.environment_script(None).startswith("if grep -qs '^# Outpost egress proxy' /etc/environment")
 
 
@@ -256,7 +257,7 @@ def test_prepare_node_with_a_proxy_elsewhere():
 def test_configmap_and_verify_lines():
     doc = yaml.safe_load(k3s.configmap_yaml(ON_GITEA))
     assert doc["kind"] == "ConfigMap" and doc["metadata"]["name"] == "outpost-proxy" and doc["metadata"]["namespace"] == "default"
-    assert doc["data"]["HTTPS_PROXY"] == "http://gitea.internal:3128" and doc["data"]["NO_PROXY"] == NO_PROXY
+    assert doc["data"]["HTTPS_PROXY"] == "http://10.0.0.5:3128" and doc["data"]["NO_PROXY"] == NO_PROXY
     assert doc["data"]["OUTPOST_PROXY_ALLOWED"] == "api.twilio.com,*.sendgrid.net"
     server = FakeHost("k3s-1")
     k3s.apply_configmap(server, ON_GITEA, log=lambda *_: None)
@@ -266,7 +267,7 @@ def test_configmap_and_verify_lines():
     assert verify.proxy_checks(NodeContext(gitea=G, ca_pem="CA")) == []
     checks = dict(verify.proxy_checks(NodeContext(gitea=G, ca_pem="CA", proxy=ON_GITEA)))
     assert set(checks) == {"proxy settings for programs that opt in", "proxy reachable", "proxy refuses unknown names"}
-    assert "curl -x http://gitea.internal:3128" in checks["proxy reachable"] and "https://api.twilio.com/" in checks["proxy reachable"]
+    assert "curl -x http://10.0.0.5:3128" in checks["proxy reachable"] and "https://api.twilio.com/" in checks["proxy reachable"]
     assert "%{http_connect}" in checks["proxy refuses unknown names"] and "https://example.com/" in checks["proxy refuses unknown names"]
     assert '= 403' in checks["proxy refuses unknown names"]
     # the direct path is tested without the proxy variables a node's ssh session may carry
@@ -454,12 +455,12 @@ def test_check_env_comes_from_the_proxy_state(platform_dir, monkeypatch):
     path.write_text(path.read_text() + "\negress_proxy: {allow: ['*.sendgrid.net', example.org]}\n")
     platform = Platform(platform_dir)
     platform.write_state("gitea", {"ip": "10.0.0.5"})
-    platform.write_state("proxy", {"url": "http://gitea.internal:3128", "allow": ["*.sendgrid.net", "example.org"], "host": "gitea-1"})
+    platform.write_state("proxy", {"url": "http://10.0.0.5:3128", "allow": ["*.sendgrid.net", "example.org"], "host": "gitea-1"})
     seen = []
     monkeypatch.setattr(climod, "Host", lambda alias: FakeHost(alias))
     monkeypatch.setattr(checksmod, "run_check", lambda check, host, env, log=print: seen.append(env) or {"name": check.name, "ok": True, "steps": []})
     assert main(["--dir", str(platform_dir), "check", "hello-proxy", "--infra", "dev"]) == 0
-    assert seen[0]["PROXY_URL"] == "http://gitea.internal:3128" and seen[0]["PROXY_ALLOWED"] == "example.org" and seen[0]["PROXY_REFUSED"] == "example.com"
+    assert seen[0]["PROXY_URL"] == "http://10.0.0.5:3128" and seen[0]["PROXY_ALLOWED"] == "example.org" and seen[0]["PROXY_REFUSED"] == "example.com"
 
 
 # -- day two --------------------------------------------------------------------------
@@ -484,7 +485,7 @@ def test_report_has_a_named_exceptions_section(platform_dir):
     path = platform.servers_file
     path.write_text(path.read_text() + "\negress_proxy: {allow: [api.twilio.com]}\n")
     servers = load_servers(path)
-    platform.write_state("proxy", {"host": "gitea-1", "ip": "10.0.0.5", "url": "http://gitea.internal:3128", "allow": ["api.twilio.com"],
+    platform.write_state("proxy", {"host": "gitea-1", "ip": "10.0.0.5", "url": "http://10.0.0.5:3128", "allow": ["api.twilio.com"],
                                    "tinyproxy": "1.11.1", "when": "2026-10-28T10:00:00",
                                    "verify": {"result": "ok", "checks": [], "when": "2026-10-28T10:01:00"}})
     hosts.record(platform, "gitea-1", {"reachable": True, "egress": "sealed", "installed": {}, "proxy_log_tail": ["CONNECT api.twilio.com:443"]})
@@ -526,7 +527,7 @@ def test_proxy_setup_command_records_state_and_updates_set_up_nodes(platform_dir
     state = platform.read_state("proxy")
     assert state["host"] == "gitea-1" and state["ip"] == "10.0.0.5" and state["port"] == 3128 and state["allow"] == ["api.twilio.com"]
     assert state["tinyproxy"] == "1.11.1" and state["when"] and state["verify"]["result"] == "ok"
-    assert "HTTPS_PROXY=http://gitea.internal:3128" in made["dev-1"].files[clients.PATH_PROXY_ENV]   # the node set up before
+    assert "HTTPS_PROXY=http://10.0.0.5:3128" in made["dev-1"].files[clients.PATH_PROXY_ENV]   # the node set up before
     assert "--uid-owner" in made["gitea-1"].files[egress.SCRIPT_PATH] and egress.SCRIPT_PATH not in made["dev-1"].files
     assert (platform_dir / "state" / "hosts" / "gitea-1.json").exists()
     assert "Next: outpost check hello-proxy" in capsys.readouterr().out
@@ -543,7 +544,7 @@ def test_demo_probes_the_proxy_and_still_deploys_without_one(monkeypatch):
     for var in ("HTTPS_PROXY", "https_proxy", "OUTPOST_PROXY_ALLOWED"):
         monkeypatch.delenv(var, raising=False)
     assert probe.probe_proxy() is None
-    monkeypatch.setenv("HTTPS_PROXY", "http://gitea.internal:3128")
+    monkeypatch.setenv("HTTPS_PROXY", "http://10.0.0.5:3128")
     monkeypatch.setenv("OUTPOST_PROXY_ALLOWED", "api.twilio.com,*.sendgrid.net")
     answers = {"api.twilio.com": "reached", "sendgrid.net": "reached", "example.com": "refused"}
     monkeypatch.setattr(probe, "through_proxy", lambda name, proxy: {"target": name, "result": answers[name], "detail": "", "ms": 1})

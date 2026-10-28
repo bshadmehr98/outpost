@@ -37,7 +37,7 @@ A proxy can check the name, because the client tells it the name. That is the wh
 ```mermaid
 sequenceDiagram
     participant C as container (HTTPS_PROXY set)
-    participant P as tinyproxy on gitea.internal:3128
+    participant P as tinyproxy on 10.0.0.5:3128 (the Gitea host)
     participant T as api.twilio.com
     C->>P: CONNECT api.twilio.com:443
     Note over P: name on the allow list?<br/>no: "HTTP/1.0 403 Filtered", logged
@@ -135,13 +135,17 @@ installed script carries it.
 Every node gets the same values, in the places programs look for them:
 
 ```
-HTTPS_PROXY=http://gitea.internal:3128        (and HTTP_PROXY, https_proxy, http_proxy)
+HTTPS_PROXY=http://10.0.0.5:3128              (and HTTP_PROXY, https_proxy, http_proxy)
 NO_PROXY=gitea.internal,10.0.0.5,localhost,127.0.0.1,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16
 OUTPOST_PROXY_ALLOWED=api.twilio.com,*.sendgrid.net     (informational: the proxy enforces the list)
 ```
 
-On the Gitea host the URL is `http://<gitea name>:<port>`, a name every node resolves and an address
-every node may reach already. On another host it is `http://<egress_proxy.name>:<port>`
+On the Gitea host the URL is `http://<gitea address>:<port>`, an address every node may reach
+already. Not the Gitea name: apt's https method, when `no_proxy` matches a destination, clears the
+proxy but keeps the proxy URL's host name, and if that equals the destination's it sends its
+`CONNECT` to the destination itself. With `HTTPS_PROXY=http://gitea.internal:3128`, every `apt-get
+update` from `https://gitea.internal` in a build (which gets the variables from the Docker client
+config) went to Gitea's TLS port as a proxy request and failed with "Reading from proxy failed". On another host it is `http://<egress_proxy.name>:<port>`
 (`proxy.internal` by default); that name goes into every node's `/etc/hosts`, so CoreDNS answers it
 for containers too, and the proxy's address joins every node's allow list. In both cases
 `NO_PROXY` keeps Gitea and the private networks off the proxy.
