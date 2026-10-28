@@ -362,6 +362,7 @@ def test_unreadable_configuration_and_failed_start_say_why():
     script = proxy.access_script("/usr/bin/tinyproxy")
     assert script.startswith("set +e +o pipefail\n") and "namei -l /etc/outpost/proxy.conf" in script
     assert "timeout 2 runuser -u outpost-proxy -- /usr/bin/tinyproxy -d -c /etc/outpost/proxy.conf" in script
+    assert "/sys/kernel/security/apparmor/profiles" in script and "-c /tmp/outpost-proxy-copy.conf" in script
     assert "tinyproxy -d" not in proxy.access_script()
 
 

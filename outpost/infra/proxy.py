@@ -359,7 +359,18 @@ def access_script(binary: str | None = None) -> str:
     if binary:
         lines.append(f"echo '--- {binary} -d -c {CONF_PATH} as {USER}, outside systemd'; "
                      f"timeout 2 runuser -u {USER} -- {binary} -d -c {CONF_PATH} 2>&1 | tail -5; echo \"exit ${{PIPESTATUS[0]}}\"")
-        lines.append("echo '--- systemctl cat outpost-proxy'; systemctl show outpost-proxy -p User -p ProtectSystem -p ProtectHome -p PrivateTmp 2>&1")
+        # the file is readable by the user but tinyproxy cannot open it: tell a path-based MAC (AppArmor on the
+        # kernel, which a privileged container shares) from anything else
+        lines += [
+            f"echo '--- as root'; timeout 2 {binary} -d -c {CONF_PATH} 2>&1 | tail -2; echo \"exit ${{PIPESTATUS[0]}}\"",
+            f"cp {CONF_PATH} /tmp/outpost-proxy-copy.conf && chmod 0644 /tmp/outpost-proxy-copy.conf; "
+            f"echo '--- copy in /tmp, as {USER}'; timeout 2 runuser -u {USER} -- {binary} -d -c /tmp/outpost-proxy-copy.conf 2>&1 | tail -2; echo \"exit ${{PIPESTATUS[0]}}\"",
+            f"echo '--- ls -l {binary}'; ls -lL {binary} 2>&1; getcap {binary} 2>&1",
+            "echo '--- apparmor'; cat /sys/module/apparmor/parameters/enabled 2>&1; "
+            "grep -i tinyproxy /sys/kernel/security/apparmor/profiles 2>&1 | head -5; cat /proc/self/attr/current 2>&1",
+            "echo '--- kernel denials'; dmesg 2>&1 | grep -iE 'denied|apparmor' | tail -8",
+        ]
+        lines.append("echo '--- systemctl show outpost-proxy'; systemctl show outpost-proxy -p User -p ProtectSystem -p ProtectHome -p PrivateTmp 2>&1")
     return "\n".join(lines) + "\n"
 
 
