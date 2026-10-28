@@ -324,7 +324,8 @@ special case; a bare `FROM python:3.12-slim` on a sealed node fails at once, on 
 **Security updates for the OS?** Not mirrored unless you list the packages. Open egress for a
 window with a reason, run the upgrade, seal. The log keeps the record.
 
-**ARM servers?** Not yet; wheels, images and binaries are fetched for x86_64.
+**ARM servers?** Wired through but not yet run on ARM servers: `arch: arm64` in `servers.yml`
+fetches wheels, images and binaries for aarch64. The default is amd64.
 
 **Why not DROP everything instead of REJECT?** Because a rejected connection fails in
 milliseconds with the name of the host, which turns the firewall into a to-do list. The
