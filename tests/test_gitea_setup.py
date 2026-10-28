@@ -31,6 +31,11 @@ def prepared(workspace_dir, monkeypatch):
         responses=[
             (r"generate-access-token", "abc123token\n"),
             (r"admin user list", ""),
+            (
+                r"admin user create",
+                "generated random password is 'Random-pw-24-characters'\nNew user 'outpost' created\n",
+            ),
+            (r"api/v1/admin/users/outpost", "200"),
             (r"api/v1/user", "200"),
             (r"test -s /etc/gitea/app.ini", Result(1, "", "")),
         ],
@@ -66,7 +71,8 @@ def test_setup_installs_everything_in_order(prepared):
     assert "runuser -u git --" in joined and "sudo -u git" not in joined
     assert "admin user create --admin --username outpost" in joined
     assert workspace.read_secret("gitea-token") == "abc123token"
-    assert workspace.read_secret("gitea-admin-password")
+    assert workspace.read_secret("gitea-admin-password") == "Random-pw-24-characters"
+    assert "--password" not in joined and "api/v1/admin/users" not in joined
     assert workspace.read_state("gitea")["ip"] == "10.0.0.5"
     seal = next(i for i, s in enumerate(host.scripts) if s.endswith("outpost-egress seal 'gitea setup'"))
     restart = next(i for i, s in enumerate(host.scripts) if "systemctl restart gitea" in s)
@@ -78,6 +84,19 @@ def test_setup_installs_everything_in_order(prepared):
     )
     assert 'echo "egress=' in host.scripts[-1]  # the host facts are cached last, for the dashboard and the report
     assert (workspace.state_dir / "hosts" / "gitea-1.json").exists()
+
+
+def test_admin_password_never_on_a_command_line(prepared):
+    """A saved password is set back through the API, from a here-document, not from argv."""
+    system, host = prepared
+    system.write_secret("gitea-admin-password", 'Saved"pw\\1')
+    gitea.setup(system, log=lambda *_: None)
+    change = next(s for s in host.scripts if "api/v1/admin/users/outpost" in s)
+    command_line, request = change.split("\n", 1)
+    assert "Saved" not in command_line and "Random-pw" not in command_line
+    assert 'user = "outpost:Random-pw-24-characters"' in request
+    assert r"\"password\": \"Saved\\\"pw\\\\1\"" in request
+    assert system.secret("gitea-admin-password") == 'Saved"pw\\1'
 
 
 def test_setup_is_idempotent(prepared):

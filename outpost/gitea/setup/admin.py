@@ -1,6 +1,7 @@
 """Steps 5 and 6 of `gitea setup`: the admin user, the API token Outpost uses, and the organisation."""
 
-import secrets as pysecrets
+import json
+import re
 import shlex
 import time
 
@@ -15,17 +16,24 @@ def ensure_admin_user(system: AirGappedSystem, host, log=print) -> None:
     """Create the admin user of servers.yml (gitea.user) if Gitea has none by that name.
 
     Its password goes into secrets/gitea-admin-password; one that is there already is used again.
+    The password never goes on a command line that `ps` shows on the server: Gitea makes a random
+    one and prints it, and a saved one is set back through the API, with curl reading it on stdin.
     """
     user, gitea_name = system.servers.gitea.user, system.servers.gitea.name
     admins = host.run(f"{GITEA_CLI} admin user list --admin 2>/dev/null || true", raise_on_failure=True).stdout
     if user in admins.split():
         return
-    password = system.secret(GITEA_ADMIN_PASSWORD) or pysecrets.token_urlsafe(18)
-    host.run(
-        f"{GITEA_CLI} admin user create --admin --username {shlex.quote(user)} --password {shlex.quote(password)} "
+    created = host.run(
+        f"{GITEA_CLI} admin user create --admin --username {shlex.quote(user)} "
+        f"--random-password --random-password-length 24 "
         f"--email {shlex.quote(user + '@' + gitea_name)} --must-change-password=false",
         raise_on_failure=True,
     )
+    password = _random_password_in(created.stdout)
+    saved = system.secret(GITEA_ADMIN_PASSWORD)
+    if saved:
+        _change_password(host, user, old=password, new=saved)
+        password = saved
     system.write_secret(GITEA_ADMIN_PASSWORD, password)
     log(f"[{host.alias}] created admin user {user} (password in secrets/gitea-admin-password)")
 
@@ -55,3 +63,46 @@ def ensure_org(system: AirGappedSystem, log=print) -> str:
         version = client.version()
     log(f"[{alias}] gitea {version}, org {org}")
     return version
+
+
+# -- the admin password, off the command line -------------------------------------------
+
+_REQUEST_END = "OUTPOST_CURL_REQUEST"  # ends the here-document that hands curl its request
+_RANDOM_PASSWORD = re.compile(r"generated random password is '(.+)'")
+
+
+def _random_password_in(output: str) -> str:
+    """The password that `gitea admin user create --random-password` printed."""
+    found = _RANDOM_PASSWORD.search(output)
+    if not found:
+        raise RuntimeError(f"gitea admin user create printed no password:\n{output.strip()[-300:]}")
+    return found.group(1)
+
+
+def _change_password(host, user: str, old: str, new: str) -> None:
+    """Set user's password to new through Gitea's admin API, logging in with old.
+
+    curl reads its whole request from stdin (`-K -`, a here-document), so neither password is on
+    its command line.
+    """
+    body = json.dumps({"login_name": user, "source_id": 0, "password": new, "must_change_password": False})
+    request = "\n".join(
+        [
+            f"url = {_curl_quoted(f'https://127.0.0.1/api/v1/admin/users/{user}')}",
+            'request = "PATCH"',
+            f"user = {_curl_quoted(f'{user}:{old}')}",
+            'header = "Content-Type: application/json"',
+            f"data = {_curl_quoted(body)}",
+        ]
+    )
+    result = host.run(
+        f"curl -sk --max-time 10 -o /dev/null -w '%{{http_code}}' -K - <<'{_REQUEST_END}'\n{request}\n{_REQUEST_END}",
+        raise_on_failure=True,
+    )
+    if result.stdout.strip() != "200":
+        raise RuntimeError(f"[{host.alias}] Gitea refused the saved admin password (HTTP {result.stdout.strip()})")
+
+
+def _curl_quoted(text: str) -> str:
+    """text as a double-quoted value in a curl config file."""
+    return '"' + text.replace("\\", "\\\\").replace('"', '\\"') + '"'

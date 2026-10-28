@@ -147,6 +147,7 @@ def test_gitea_setup_backs_up_before_upgrading(workspace_dir, monkeypatch):
             (r"stat -c %s", "7"),
             (r"generate-access-token", "tok\n"),
             (r"admin user list", ""),
+            (r"admin user create", "generated random password is 'pw'\n"),
             (r"api/v1/user", "200"),
             (r"test -s /etc/gitea/app.ini", Result(1, "", "")),
         ],
