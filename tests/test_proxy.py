@@ -386,6 +386,11 @@ def test_host_checks_cover_the_exception_and_the_log():
     assert "proxy exception only for its own user" in names and "public internet rejected for other users" in names
     host = FakeHost("gitea-1", responses=[(r"CHECK\|", "CHECK|proxy service active|OK|active\n")])
     assert proxy.verify(host, NodeContext(gitea=G, ca_pem="CA", proxy=ON_GITEA), CFG) == [{"name": "proxy service active", "ok": True, "detail": "active"}]
+    # proxy.env is written on nodes, and on a proxy host of its own (prepared like a node), not on the Gitea host
+    assert "proxy settings for programs that opt in" not in host.scripts[-1] and "CHECK|proxy refuses unknown names|" in host.scripts[-1]
+    elsewhere = FakeHost("proxy-1", responses=[(r"CHECK\|", "CHECK|proxy service active|OK|active\n")])
+    proxy.verify(elsewhere, NodeContext(gitea=G, ca_pem="CA", proxy=ELSEWHERE), ProxyConfig(host="proxy-1", allow=["api.twilio.com"]))
+    assert "CHECK|proxy settings for programs that opt in|" in elsewhere.scripts[-1]
 
 
 # -- tinyproxy in the box -------------------------------------------------------------

@@ -69,19 +69,20 @@ def common_checks(ctx: common.NodeContext) -> list[tuple[str, str]]:
     ] + proxy_checks(ctx)
 
 
-def proxy_checks(ctx: common.NodeContext) -> list[tuple[str, str]]:
+def proxy_checks(ctx: common.NodeContext, node: bool = True) -> list[tuple[str, str]]:
     """With an egress proxy: CONNECT to an allowed name is answered 200 by the proxy and the far end then
     answers over the tunnel (any HTTP status: it was reached), and CONNECT to a name not on the list is
     answered by the proxy itself with 403. %{http_connect} is the proxy's answer to CONNECT, so the second
-    check passes exactly when the proxy refused, not when the name was merely unreachable."""
+    check passes exactly when the proxy refused, not when the name was merely unreachable. `node` False is
+    the Gitea host running the proxy: it is not a node and gets no proxy.env."""
     from . import proxy as proxymod
     p = ctx.proxy
     if not p:
         return []
     allowed, other = proxymod.probe_name(list(p.allowed)), proxymod.refused_name(list(p.allowed))
     url = shlex.quote(p.url)
-    return [
-        ("proxy settings for programs that opt in", f"grep -qx {shlex.quote('HTTPS_PROXY=' + p.url)} {clients.PATH_PROXY_ENV}"),
+    settings = [("proxy settings for programs that opt in", f"grep -qx {shlex.quote('HTTPS_PROXY=' + p.url)} {clients.PATH_PROXY_ENV}")]
+    return (settings if node else []) + [
         ("proxy reachable",
          f"out=$(curl -x {url} -sS --max-time 15 -o /dev/null -w '%{{http_connect}} %{{http_code}}' https://{allowed}/ 2>/dev/null); "
          f"case \"$out\" in '200 '[12345]??) echo \"{allowed} through the proxy -> ${{out#* }}\" ;; "

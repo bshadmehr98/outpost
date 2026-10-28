@@ -426,7 +426,7 @@ def host_checks(ctx: common.NodeContext, cfg: ProxyConfig) -> list[tuple[str, st
 
 def verify(host, ctx: common.NodeContext, cfg: ProxyConfig) -> list[dict]:
     from . import verify as verifymod
-    checks = host_checks(ctx, cfg) + verifymod.proxy_checks(ctx)
+    checks = host_checks(ctx, cfg) + verifymod.proxy_checks(ctx, node=not ctx.proxy.on_gitea)   # the Gitea host is no node
     result = host.run(verifymod.script(checks), check=False, timeout=300)
     parsed = verifymod.parse(result.stdout)
     return parsed or [{"name": "connect", "ok": False, "detail": result.stderr.strip()[-300:] or "no output"}]
