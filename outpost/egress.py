@@ -31,6 +31,8 @@ Sealed servers in the field run the script this module wrote. Keep its text stab
 greps it ("egress script is the current one").
 """
 
+import shlex
+
 from outpost.client_config import PRIVATE_NETS
 from outpost.ssh import Host
 from outpost.system import AirGappedSystem
@@ -62,19 +64,34 @@ def install_seal(host: Host, gitea_ip: str, allow: list[str], proxy_user: str | 
 
 
 def seal_host(host: Host, reason: str = "") -> str:
-    """Turn the seal on. Returns what the script printed: "sealed"."""
-    return host.run(f"{SCRIPT_PATH} seal {reason}", raise_on_failure=True).stdout.strip()
+    """Turn the seal on. Returns what the script printed: "sealed".
+
+    Args:
+        reason: written to the server's egress log; any text (the dashboard asks the user for it).
+    """
+    return host.run(_seal_command("seal", reason), raise_on_failure=True).stdout.strip()
 
 
 def open_host(host: Host, reason: str = "") -> str:
-    """Turn the seal off. Returns what the script printed: "open"."""
-    return host.run(f"{SCRIPT_PATH} open {reason}", raise_on_failure=True).stdout.strip()
+    """Turn the seal off. Returns what the script printed: "open".
+
+    Args:
+        reason: written to the server's egress log; any text (the dashboard asks the user for it).
+    """
+    return host.run(_seal_command("open", reason), raise_on_failure=True).stdout.strip()
 
 
 def seal_status(host: Host) -> str:
     """ "sealed", "open", or "not installed"."""
     result = host.run(f"test -x {SCRIPT_PATH} && {SCRIPT_PATH} status || echo 'not installed'")
     return (result.stdout or result.stderr).strip()
+
+
+def _seal_command(action: str, reason: str) -> str:
+    """`outpost-egress seal|open [reason]`. The reason is one quoted argument: a ' in it broke the
+    command, and $(...) in it ran on the server. The script logs its arguments joined by spaces, so
+    the log line reads as before."""
+    return " ".join([SCRIPT_PATH, action, *([shlex.quote(reason)] if reason else [])])
 
 
 def target_hosts(system: AirGappedSystem, target: str) -> list[Host]:

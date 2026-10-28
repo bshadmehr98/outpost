@@ -535,3 +535,19 @@ def test_gitea_and_the_layer_below_do_not_load_infra():
     for name in ("outpost.infra.verify", "outpost.infra.proxy.verify", "outpost.infra.proxy.setup"):
         source = inspect.getsource(importlib.import_module(name))
         assert "    from outpost" not in source and "    import outpost" not in source, name
+
+
+def test_a_reason_with_quotes_reaches_the_egress_log_as_typed(tmp_path):
+    """The dashboard asks "Why open the internet?" and passes the answer as --reason. It went into the
+    command unquoted: "can't build" broke it, and $(...) ran on the server as root."""
+    import subprocess
+
+    host = FakeHost(responses=[(r"outpost-egress", "open\n")])
+    reason = "can't build $(touch " + str(tmp_path / "ran") + ")"
+    egress.open_host(host, reason)
+    log = tmp_path / "egress.log"
+    stub = tmp_path / "outpost-egress"  # logs its arguments the way the real script does: log "open ${*:2}"
+    stub.write_text(f'#!/bin/bash\necho "$1 ${{*:2}}" > {log}\n')
+    stub.chmod(0o755)
+    subprocess.run(["bash", "-c", host.scripts[-1].replace(egress.SCRIPT_PATH, str(stub))], check=True)
+    assert log.read_text() == f"open {reason}\n" and not (tmp_path / "ran").exists()

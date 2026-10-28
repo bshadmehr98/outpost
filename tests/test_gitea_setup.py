@@ -68,7 +68,7 @@ def test_setup_installs_everything_in_order(prepared):
     assert workspace.read_secret("gitea-token") == "abc123token"
     assert workspace.read_secret("gitea-admin-password")
     assert workspace.read_state("gitea")["ip"] == "10.0.0.5"
-    seal = next(i for i, s in enumerate(host.scripts) if s.endswith("outpost-egress seal gitea setup"))
+    seal = next(i for i, s in enumerate(host.scripts) if s.endswith("outpost-egress seal 'gitea setup'"))
     restart = next(i for i, s in enumerate(host.scripts) if "systemctl restart gitea" in s)
     create_user = next(i for i, s in enumerate(host.scripts) if "admin user create" in s)
     assert restart < create_user < seal
