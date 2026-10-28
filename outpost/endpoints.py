@@ -15,9 +15,9 @@ in the AirGappedSystem.
 from dataclasses import dataclass, field
 from urllib.parse import quote
 
-from outpost import hosts
 from outpost.client_config import PRIVATE_NETS
 from outpost.config import GiteaConfig, ProxyConfig
+from outpost.hosts import cached_facts
 from outpost.ssh import SshError
 from outpost.system import AirGappedSystem
 from outpost.workspace import STATE_GITEA, STATE_PROXY
@@ -127,7 +127,7 @@ def _proxy_host_address(system: AirGappedSystem, alias: str) -> str:
     recorded = system.state(STATE_PROXY) or {}
     if recorded.get("host") == alias and recorded.get("ip"):
         return recorded["ip"]
-    cached = hosts.cached(system.workspace).get(alias) or {}
+    cached = cached_facts(system.workspace).get(alias) or {}
     return cached.get("ip") or system.host(alias).ip()
 
 

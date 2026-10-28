@@ -81,7 +81,7 @@ def check_server_arch(alias: str, facts: dict) -> None:
     wanted = arch_names()["uname"]
     if facts.get("arch") and facts["arch"] != wanted:
         raise RuntimeError(
-            f"[{alias}] is {facts['arch']} but this platform is built for {wanted} (arch: {ARCH} in servers.yml)."
+            f"[{alias}] is {facts['arch']} but this workspace is built for {wanted} (arch: {ARCH} in servers.yml)."
         )
 
 

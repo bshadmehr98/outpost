@@ -1,7 +1,7 @@
 """outpost hosts: what every server runs right now (versions, seal, workloads)."""
 
-from outpost import hosts
 from outpost.cli.output import say
+from outpost.hosts import cached_facts, refresh_facts, version_drift
 from outpost.system import AirGappedSystem
 
 
@@ -15,15 +15,15 @@ def add_parser(commands) -> None:
 
 def run(args) -> int:
     system = AirGappedSystem.load(args.dir)
-    cached = hosts.cached(system.workspace)
+    cached = cached_facts(system.workspace)
     if args.refresh or not cached:
         say("Asking every server (one SSH round trip each)")
-        facts = hosts.refresh(system.workspace, system.servers, log=say, make_host=system.host)
+        facts = refresh_facts(system, log=say)
     else:
         facts = cached
         _say_cached(cached)
     for alias, data in facts.items():
-        drift = hosts.drift(data)
+        drift = version_drift(data)
         if drift:
             say(
                 f"  {alias}: not at the pinned version: {', '.join(drift)}; run `outpost infra setup` (or `gitea setup`) to bring it up to date"

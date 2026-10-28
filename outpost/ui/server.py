@@ -40,12 +40,12 @@ from urllib.parse import parse_qs, urlparse
 import yaml
 
 from .. import demo, egress, ssh, versions
-from .. import hosts as hostsmod
-from .. import report as reportmod
 from ..checks import load_checks
 from ..config import ConfigError, load_mirrors, load_servers
+from ..hosts import cached_facts, pinned_versions, refresh_facts, server_roles, version_drift
 from ..http import HttpError
 from ..needs import Needs, add_pinned_files, add_proxy_package, load_needs, read_needs_file
+from ..report import render_html, report_data, verdict
 from ..ssh import SshError
 from ..system import AirGappedSystem
 from ..workspace import Workspace
@@ -126,7 +126,7 @@ def needs_detail(workspace: Workspace, infra_types: set[str], servers=None) -> d
     add_pinned_files(needs, versions.pinned_files(load_mirrors(workspace.mirrors_file), infra_types))
     if servers and servers.egress_proxy:
         with contextlib.suppress(ConfigError):
-            add_proxy_package(needs, servers.egress_proxy, hostsmod.cached(workspace).get(servers.egress_proxy.host))
+            add_proxy_package(needs, servers.egress_proxy, cached_facts(workspace).get(servers.egress_proxy.host))
     return {
         "images": needs.images,
         "pypi": {py: specs for py, specs in needs.pypi.items()},
@@ -198,7 +198,7 @@ def overview(workspace: Workspace) -> dict:
     data["secrets"] = {"gitea-token": (workspace.secrets_dir / "gitea-token").exists()}
     data["ssh_aliases"] = ssh_aliases()
     data["lab"] = lab_status()
-    data["versions"] = hostsmod.expected_versions()
+    data["versions"] = pinned_versions()
     data["running"] = [{"id": rid, "args": r["args"]} for rid, r in RUNS.items() if r["proc"].poll() is None]
     data["demo"] = {
         "local": (workspace.root / "demo").exists(),
@@ -206,11 +206,11 @@ def overview(workspace: Workspace) -> dict:
         "files": sorted(demo.project_files(workspace.root / "demo")) if (workspace.root / "demo").exists() else [],
         "status": workspace.read_state("demo-status"),
     }
-    data["hosts"] = hostsmod.cached(workspace)
-    data["roles"] = hostsmod.roles(servers) if servers else {}
-    data["drift"] = {a: hostsmod.drift(h) for a, h in data["hosts"].items() if hostsmod.drift(h)}
+    data["hosts"] = cached_facts(workspace)
+    data["roles"] = server_roles(servers) if servers else {}
+    data["drift"] = {a: version_drift(h) for a, h in data["hosts"].items() if version_drift(h)}
     data["backups"] = list_backups(workspace)
-    data["report"] = reportmod.verdict(reportmod.build(workspace, servers))
+    data["report"] = verdict(report_data(workspace, servers))
     return data
 
 
@@ -233,12 +233,9 @@ def list_backups(workspace: Workspace) -> list[dict]:
 
 def refresh_hosts(workspace: Workspace, aliases: list[str] | None) -> dict:
     """Ask the servers again (one SSH round trip each) and cache the answers."""
-    servers = load_servers(workspace.servers_file)
-    ssh.use_config(servers.ssh_config)
+    system = AirGappedSystem.load(workspace.root)
     wanted = [a for a in (aliases or []) if re.fullmatch(r"[A-Za-z0-9._-]+", a)] or None
-    return hostsmod.refresh(
-        workspace, servers, wanted, log=lambda *_: None, make_host=lambda a: ssh.Host(a, connect_timeout=8)
-    )
+    return refresh_facts(system, wanted, log=lambda *_: None, make_host=lambda a: ssh.Host(a, connect_timeout=8))
 
 
 # -- writing files -------------------------------------------------------------
@@ -502,7 +499,7 @@ class Handler(BaseHTTPRequestHandler):
             elif path == "/api/overview":
                 self._json(overview(self.workspace))
             elif path == "/api/hosts":
-                self._json(hostsmod.cached(self.workspace))
+                self._json(cached_facts(self.workspace))
             elif path == "/api/backups":
                 self._json(list_backups(self.workspace))
             elif path == "/report.html":
@@ -510,7 +507,7 @@ class Handler(BaseHTTPRequestHandler):
                     servers = load_servers(self.workspace.servers_file)
                 except ConfigError:
                     servers = None
-                body = reportmod.render(reportmod.build(self.workspace, servers)).encode()
+                body = render_html(report_data(self.workspace, servers)).encode()
                 self.send_response(200)
                 self.send_header("Content-Type", "text/html; charset=utf-8")
                 self.send_header("Content-Length", str(len(body)))

@@ -7,9 +7,10 @@ tinyproxy is the distro's own package, so it is fetched for the proxy host's dis
 servers.yml names (`egress_proxy.distro`), or the one `outpost hosts` saw on the server.
 """
 
-from outpost import hosts, versions
+from outpost import versions
 from outpost.config import ConfigError, ProxyConfig
 from outpost.distros import is_apt_distro, os_family, rpm_distro_of_host, split_rpm_distro
+from outpost.hosts import cached_facts
 from outpost.needs.model import FileNeed, Needs, add_unique
 from outpost.needs.needs_file import load_needs
 from outpost.system import AirGappedSystem
@@ -28,7 +29,7 @@ def all_needs(system: AirGappedSystem) -> Needs:
     add_pinned_files(needs, versions.pinned_files(system.mirrors, system.servers.infra_types))
     proxy = system.servers.egress_proxy
     if proxy:
-        facts = None if proxy.distro else hosts.cached(system.workspace).get(proxy.host)
+        facts = None if proxy.distro else cached_facts(system.workspace).get(proxy.host)
         add_proxy_package(needs, proxy, facts)
     return needs
 

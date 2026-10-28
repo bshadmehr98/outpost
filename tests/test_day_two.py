@@ -230,28 +230,26 @@ def test_docker_install_restarts_the_daemon_on_a_version_change():
 
 
 def test_inspect_parses_facts_services_and_workloads():
-    data = hosts.inspect(FakeHost(responses=[(r"egress_boot", HOST_FACTS)]))
+    data = hosts.inspect_server(FakeHost(responses=[(r"egress_boot", HOST_FACTS)]))
     assert data["reachable"] and data["pretty"] == "Ubuntu 24.04.5 LTS" and data["egress"] == "sealed"
     assert data["installed"]["docker"] == "29.9.2" and data["installed"]["gitea"] == ""
     assert data["services"] == {"docker": "active", "outpost-dns": "active"}
     assert data["workloads"]["compose_projects"] == ["demo-dev"] and data["workloads"]["stacks"] == ["demo-prod"]
     assert data["workloads"]["services"] == ["demo-prod_web 2/2"] and data["workloads"]["containers"] == 2
-    assert hosts.drift(data) == []
+    assert hosts.version_drift(data) == []
     data["installed"]["docker"] = "29.0.0"
-    assert hosts.drift(data) == [f"docker 29.0.0 (pinned {versions.DOCKER})"]
+    assert hosts.version_drift(data) == [f"docker 29.0.0 (pinned {versions.DOCKER})"]
 
 
 def test_inspect_reports_an_unreachable_host_and_refresh_caches(workspace_dir):
-    assert hosts.inspect(FakeHost()) == {"reachable": False, "error": "no answer"}
-    workspace, servers = Workspace(workspace_dir), load_servers(workspace_dir / "servers.yml")
-    out = hosts.refresh(
-        workspace,
-        servers,
-        log=lambda *_: None,
-        make_host=lambda a: FakeHost(a, responses=[(r"egress_boot", HOST_FACTS)]),
+    assert hosts.inspect_server(FakeHost()) == {"reachable": False, "error": "no answer"}
+    system = AirGappedSystem.load(workspace_dir)
+    workspace, servers = system.workspace, system.servers
+    out = hosts.refresh_facts(
+        system, log=lambda *_: None, make_host=lambda a: FakeHost(a, responses=[(r"egress_boot", HOST_FACTS)])
     )
-    assert set(out) == {"gitea-1", "dev-1"} and hosts.cached(workspace)["dev-1"]["ip"] == "10.0.0.11"
-    assert hosts.roles(servers) == {"gitea-1": ["gitea"], "dev-1": ["dev: compose"]}
+    assert set(out) == {"gitea-1", "dev-1"} and hosts.cached_facts(workspace)["dev-1"]["ip"] == "10.0.0.11"
+    assert hosts.server_roles(servers) == {"gitea-1": ["gitea"], "dev-1": ["dev: compose"]}
 
 
 # -- translations and summaries ---------------------------------------------------
@@ -317,20 +315,22 @@ def test_steps_and_box_changes(tmp_path):
 
 def test_report_says_what_is_proven(workspace_dir):
     workspace, servers = Workspace(workspace_dir), load_servers(workspace_dir / "servers.yml")
-    data = report.build(workspace, servers)
-    assert report.verdict(data)["ok"] is False and "Not fully proven" in report.render(data)
+    data = report.report_data(workspace, servers)
+    assert report.verdict(data)["ok"] is False and "Not fully proven" in report.render_html(data)
     workspace.write_state("gitea", {"name": "gitea.internal", "ip": "10.0.0.5", "host": "gitea-1", "version": "28.2.0"})
     workspace.write_state(
         "verify-dev", {"result": "ok", "nodes": {"dev-1": [{"name": "egress sealed", "ok": True, "detail": ""}]}}
     )
-    hosts.record(workspace, "gitea-1", {**hosts.inspect(FakeHost(responses=[(r"egress_boot", HOST_FACTS)]))})
-    hosts.record(workspace, "dev-1", {**hosts.inspect(FakeHost(responses=[(r"egress_boot", HOST_FACTS)]))})
-    data = report.build(workspace, servers)
+    hosts.record_facts(
+        workspace, "gitea-1", {**hosts.inspect_server(FakeHost(responses=[(r"egress_boot", HOST_FACTS)]))}
+    )
+    hosts.record_facts(workspace, "dev-1", {**hosts.inspect_server(FakeHost(responses=[(r"egress_boot", HOST_FACTS)]))})
+    data = report.report_data(workspace, servers)
     v = report.verdict(data)
     assert v["ok"] and v["sealed"] == ["dev-1", "gitea-1"] and v["verified"] == ["dev"]
-    html = report.render(data)
+    html = report.render_html(data)
     assert "Sealed and verified" in html and "egress sealed" in html and "switched off" in html
-    out = report.write(workspace, servers)
+    out = report.write_report(workspace)
     assert out == workspace.state_dir / "report.html" and out.read_text().startswith("<!doctype html>")
     assert main(["--dir", str(workspace_dir), "report"]) == 0
 
@@ -373,7 +373,7 @@ def test_setup_refuses_a_node_of_the_wrong_architecture():
     from outpost.infra.context import NodeContext
 
     ctx = NodeContext(gitea=GiteaEndpoint("gitea.internal", "10.0.0.5", "pkgs"), ca_pem="CA")
-    with pytest.raises(RuntimeError, match="aarch64 but this platform is built for x86_64"):
+    with pytest.raises(RuntimeError, match="aarch64 but this workspace is built for x86_64"):
         compose.setup(ctx, [FakeHost(facts={"ip": "10.0.0.11", "arch": "aarch64"})], log=lambda *_: None)
 
 

@@ -4,8 +4,8 @@ set_up_infra(system, system.infra("dev"), log=print)    # every node, the runtim
 verify_infra(system, system.infra("dev"), log=print)    # read-only
 """
 
-from outpost import hosts
 from outpost.config import InfraConfig
+from outpost.hosts import inspect_and_record
 from outpost.infra import compose, k3s, runner, swarm
 from outpost.infra.context import NodeContext, node_context
 from outpost.infra.proxy import proxy_verifications
@@ -62,6 +62,6 @@ def _verify(system: AirGappedSystem, infra: InfraConfig, ctx: NodeContext, log) 
         results = run_verifications(node, verifications)
         report[node.alias] = results
         all_passed &= log_verifications(node.alias, results, log)
-        hosts.record(system.workspace, node.alias, hosts.inspect(node))
+        inspect_and_record(system, node)
     system.write_state(verify_state(infra.name), {"result": "ok" if all_passed else "problems", "nodes": report})
     return all_passed

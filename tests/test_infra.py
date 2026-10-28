@@ -496,6 +496,20 @@ def test_upgrade_script_works_without_id_like_under_set_u(tmp_path):
         assert out.returncode == 0 and ran in out.stdout, out.stderr
 
 
+def test_facts_script_works_without_pretty_name_under_set_u(tmp_path):
+    """PRETTY_NAME is optional in os-release; `echo "pretty=$PRETTY_NAME"` stopped the facts script
+    under `set -u`, so `outpost hosts` saw such a server as unreachable."""
+    from outpost.hosts import FACTS_SCRIPT
+
+    os_release = tmp_path / "os-release"
+    os_release.write_text(OS_RELEASES["debian"])
+    out = run_like_host_run(FACTS_SCRIPT, os_release)
+    assert out.returncode == 0, out.stderr
+    assert "id=debian" in out.stdout.splitlines() and "pretty=" in out.stdout.splitlines()
+    out = run_like_host_run(FACTS_SCRIPT, tmp_path / "missing")  # no os-release at all
+    assert out.returncode == 0 and "id=" in out.stdout.splitlines(), out.stderr
+
+
 def test_a_version_verification_survives_a_tool_that_writes_after_the_match(tmp_path):
     """Flaky: `coredns -version | grep -q 1.15.0` failed now and then after a reboot. grep -q exits at
     the first match, coredns then writes its second line into a closed pipe and dies of SIGPIPE, and

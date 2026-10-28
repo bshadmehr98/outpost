@@ -2,8 +2,8 @@
 
 import time
 
-from outpost import hosts
 from outpost.endpoints import ProxyEndpoint
+from outpost.hosts import inspect_and_record
 from outpost.infra import k3s, node
 from outpost.infra.context import egress_proxy_config, node_context, proxy_host_context
 from outpost.infra.proxy.setup import set_up_on_host
@@ -57,7 +57,7 @@ def verify_egress_proxy(system: AirGappedSystem, log=print) -> bool:
     all_passed = log_verifications(proxy.host, results, log)
     verification = {"result": "ok" if all_passed else "problems", "checks": results, "when": _now()}
     system.write_state(STATE_PROXY, {**(system.state(STATE_PROXY) or {}), "verify": verification})
-    hosts.record(system.workspace, proxy.host, hosts.inspect(host))
+    inspect_and_record(system, host)
     return all_passed
 
 

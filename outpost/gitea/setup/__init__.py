@@ -28,7 +28,7 @@ Seven steps, logged as `==> [n/7]` (the dashboard shows them as progress):
     files.py                  APP_INI, UNIT, TOKEN_SCOPES
 """
 
-from outpost import hosts, hostsfile, versions
+from outpost import hostsfile, versions
 from outpost.gitea.setup.admin import ensure_admin_user, ensure_api_token, ensure_org
 from outpost.gitea.setup.binary import check_box_has_gitea, ensure_git, install_binary
 from outpost.gitea.setup.files import APP_INI, TOKEN_SCOPES, UNIT
@@ -40,6 +40,7 @@ from outpost.gitea.setup.service_config import (
     write_app_ini,
     write_certificate,
 )
+from outpost.hosts import inspect_and_record
 from outpost.system import AirGappedSystem
 from outpost.workspace import STATE_GITEA
 
@@ -86,7 +87,7 @@ def setup(system: AirGappedSystem, log=print) -> dict:
 
     log("==> [7/7] sealing the server")
     seal_gitea_server(system, host, ip, log)
-    hosts.record(system.workspace, gitea_config.host, hosts.inspect(host))
+    inspect_and_record(system, host)
     return {"name": gitea_config.name, "ip": ip, "version": version}
 
 

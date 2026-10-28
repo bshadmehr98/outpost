@@ -715,19 +715,23 @@ def test_inspect_reads_tinyproxy_and_the_log_tail(tmp_path):
 
     tail = 'NOTICE    Oct 28 10:00:01 [42]: Proxying refused on filtered domain "example.com"\nCONNECT   Oct 28 10:00:02 [42]: Request (file descriptor 7): CONNECT api.twilio.com:443 HTTP/1.1\n'
     facts = f"id=ubuntu\nip=10.0.0.5\negress=sealed\ntinyproxy=1.11.1\nsvc_outpost-proxy=active\nproxy_log_tail={base64.b64encode(tail.encode()).decode()}\n"
-    data = hosts.inspect(FakeHost(responses=[(r"egress_boot", facts)]))
+    data = hosts.inspect_server(FakeHost(responses=[(r"egress_boot", facts)]))
     assert data["installed"]["tinyproxy"] == "1.11.1" and data["services"]["outpost-proxy"] == "active"
-    assert data["proxy_log_tail"][1].endswith("CONNECT api.twilio.com:443 HTTP/1.1") and hosts.drift(data) == []
-    assert "proxy_log_tail=" in hosts.SCRIPT and "if [ -f /var/log/tinyproxy/tinyproxy.log ]" in hosts.SCRIPT
+    assert data["proxy_log_tail"][1].endswith("CONNECT api.twilio.com:443 HTTP/1.1") and hosts.version_drift(data) == []
+    assert (
+        "proxy_log_tail=" in hosts.FACTS_SCRIPT and "if [ -f /var/log/tinyproxy/tinyproxy.log ]" in hosts.FACTS_SCRIPT
+    )
     servers = load_servers(servers_yml(tmp_path, "egress_proxy: {host: proxy-1, allow: [api.twilio.com]}\n"))
-    assert hosts.roles(servers)["proxy-1"] == ["egress proxy"]
+    assert hosts.server_roles(servers)["proxy-1"] == ["egress proxy"]
     on_gitea = load_servers(servers_yml(tmp_path, "egress_proxy: {allow: [api.twilio.com]}\n"))
-    assert hosts.roles(on_gitea)["gitea-1"] == ["gitea", "egress proxy"]
+    assert hosts.server_roles(on_gitea)["gitea-1"] == ["gitea", "egress proxy"]
 
 
 def test_report_has_a_named_exceptions_section(workspace_dir):
     workspace = Workspace(workspace_dir)
-    assert "There is no egress proxy" in report.render(report.build(workspace, load_servers(workspace.servers_file)))
+    assert "There is no egress proxy" in report.render_html(
+        report.report_data(workspace, load_servers(workspace.servers_file))
+    )
     path = workspace.servers_file
     path.write_text(path.read_text() + "\negress_proxy: {allow: [api.twilio.com]}\n")
     servers = load_servers(path)
@@ -743,12 +747,12 @@ def test_report_has_a_named_exceptions_section(workspace_dir):
             "verify": {"result": "ok", "checks": [], "when": "2026-10-28T10:01:00"},
         },
     )
-    hosts.record(
+    hosts.record_facts(
         workspace,
         "gitea-1",
         {"reachable": True, "egress": "sealed", "installed": {}, "proxy_log_tail": ["CONNECT api.twilio.com:443"]},
     )
-    page = report.render(report.build(workspace, servers))
+    page = report.render_html(report.report_data(workspace, servers))
     section = page[page.index("<h2>Named exceptions</h2>") :]
     assert (
         "<code>api.twilio.com</code>" in section and "tinyproxy 1.11.1" in section and "2026-10-28T10:00:00" in section
@@ -761,7 +765,7 @@ def test_report_has_a_named_exceptions_section(workspace_dir):
             "verify": {"result": "problems", "checks": [{"name": "proxy reachable", "ok": False}], "when": "x"},
         },
     )
-    assert "egress proxy" in report.verdict(report.build(workspace, servers))["problems"]
+    assert "egress proxy" in report.verdict(report.report_data(workspace, servers))["problems"]
 
 
 def test_explain_knows_the_proxy_failures():

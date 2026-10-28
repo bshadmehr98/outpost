@@ -5,7 +5,7 @@ apt-get on Debian and Ubuntu, apk on Alpine, dnf on the RHEL family, decided on 
 upload, then run this; the seal stays on throughout.
 """
 
-from outpost import hosts
+from outpost.hosts import inspect_and_record
 from outpost.ssh import Host
 from outpost.system import AirGappedSystem
 
@@ -59,5 +59,5 @@ def _upgrade_node(system: AirGappedSystem, node: Host, log) -> bool:
         log(f"  [{node.alias}] FAILED: {result.stderr.strip()[-300:]}")
     elif REBOOT_REQUIRED in result.stdout:
         log(f"  [{node.alias}] a reboot is required for the new kernel or libc to take effect")
-    hosts.record(system.workspace, node.alias, hosts.inspect(node))
+    inspect_and_record(system, node)
     return upgraded

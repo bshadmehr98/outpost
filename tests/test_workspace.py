@@ -146,7 +146,7 @@ def test_proxy_endpoint_prefers_recorded_then_cached_then_asked(workspace_dir, m
     add_to_servers_yml(workspace_dir, "egress_proxy: {host: proxy-1, allow: [api.twilio.com]}\n")
     system = AirGappedSystem.load(workspace_dir)
     assert proxy_endpoint(system).ip == "10.0.0.99"  # pyright: ignore[reportOptionalMemberAccess]
-    hosts.record(system.workspace, "proxy-1", {"reachable": True, "ip": "10.0.0.50"})
+    hosts.record_facts(system.workspace, "proxy-1", {"reachable": True, "ip": "10.0.0.50"})
     assert proxy_endpoint(system).ip == "10.0.0.50"  # pyright: ignore[reportOptionalMemberAccess]
     system.write_state(STATE_PROXY, {"host": "proxy-1", "ip": "10.0.0.40"})
     endpoint = proxy_endpoint(system)
