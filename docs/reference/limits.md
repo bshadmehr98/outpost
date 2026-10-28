@@ -46,6 +46,14 @@ Things Outpost does not do, on purpose or not yet.
   without wheels fall back to an sdist and are fetched without their dependencies. Use lockfiles.
 - **Gitea Actions runners** run in host mode only: jobs are shell steps on the node. Workflows
   cannot use `uses:` actions or job containers, since there is nothing to fetch them from.
+- **The Actions runner runs jobs as root.** `outpost-runner.service` has no `User=`, so every
+  `run:` step of a workflow runs as root on the first node of its infrastructure, and could open
+  the seal there (`outpost-egress open`). Whoever can push a workflow into the organisation has
+  root on those nodes. A separate runner user would not change that much: the deploy steps need
+  `docker` (the docker group is root in all but name: a privileged container can do anything)
+  and `k3s kubectl` (the k3s admin config, which can start a privileged pod). Give write access
+  to the organisation's repositories only to people you would give root on the nodes, and protect
+  their main branches in Gitea.
 - **Runners belong to the organisation** in `servers.yml` (`pkgs` by default), so repositories
   in that organisation can use them. The token Outpost keeps has no admin scope; registering
   instance-wide runners would need one.

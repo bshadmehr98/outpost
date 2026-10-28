@@ -25,6 +25,10 @@ Gitea, and cannot get anything from outside Gitea.** This page is the precise ve
 - **Root on a node can open the internet.** The seal is iptables; root can remove it. Outpost
   logs flips made through its script and makes the normal path easy, but it is not a sandbox
   against an administrator.
+- **Who can push a workflow is root on the first node.** Actions jobs run as root on the node
+  (host mode), so a workflow in the organisation can open that node's seal. See
+  [limits](../reference/limits.md): a separate runner user would still need Docker or the k3s
+  admin config, which are root-equivalent.
 - **The Gitea server is a single point.** No HA. `outpost gitea backup` exists and an upgrade
   takes one by itself, but running it regularly and storing the archive elsewhere is yours.
 - **Content is not vetted.** Outpost mirrors what the lockfiles say. If a lockfile pins a

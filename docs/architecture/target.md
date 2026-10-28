@@ -78,13 +78,14 @@ outpost/
     cache.py               record_facts(), cached_facts(), inspect_and_record(), refresh_facts()
     roles.py               server_roles()
     drift.py               pinned_versions(), version_drift()
-  egress.py              the seal: script, unit, install/seal/open/status  <- infra/egress.py
-  hostsfile.py           keep the Gitea name in /etc/hosts                 <- infra/hostsfile.py
+  egress.py              the seal: seal_script, UNIT, install_seal/seal_host/open_host/seal_status, target_hosts
+                         <- infra/egress.py
+  hostsfile.py           keep the Gitea name in /etc/hosts: boot_script, rewrite_script, keep_names  <- infra/hostsfile.py
   client_config/         files that point pip/npm/apt/apk/dnf/Docker at Gitea   <- infra/clients.py
     __init__.py            overview, re-exports
     paths.py               PATH_* constants, PRIVATE_NETS, RUNNER_HOME, STOCK_RPM_REPOS
     package_sources.py     apt_source_line, apk_repository_line, rpm_repo_section, client_files,
-                           disabled_apt_sources, disabled_os_sources
+                           apt_trusts_the_ca, disabled_apt_sources, disabled_os_sources
     proxy_settings.py      proxy_env, proxy_exports, docker_client_config, environment_script, NO_PROXY_ENV
     node_files.py          corefile, profile_script, node_files            <- host_files
     config_image.py        config_image_files
@@ -106,23 +107,25 @@ outpost/
     upload.py              upload(system, sources, log), upload_box, push_config_image, KIND_UPLOADERS, Tally
     backup.py              backup(system, out_dir=None, ...), restore(system, archive, log)
   infra/                 set up, verify, upgrade the nodes of an infrastructure
-    __init__.py            overview, TYPES, re-exports
+    __init__.py            overview, re-exports (set_up_infra, verify_infra, upgrade_nodes, TYPES, NodeContext, proxy)
     context.py       (new) NodeContext, node_context(system, infra), proxy_host_context(system)
                            <- infra/common.NodeContext, cli._node_context, the ctx in cli.cmd_proxy
     node/                  steps every node goes through                  <- infra/common.py
       __init__.py            prepare_node(host, ctx, log): six named steps
-      checks.py              check_arch (shared with gitea setup and the proxy)
       names.py               write_hosts_entries
       trust.py               write_client_files, trust_ca, check_reaches_gitea
-      os_packages.py         configure_apt_sources, configure_apk_sources, configure_rpm_sources
+      os_packages.py         configure_os_packages, configure_apt_sources, configure_apk_sources, configure_rpm_sources
       proxy_settings.py      apply_proxy_settings, merge_proxy_settings
+      seal.py          (new) seal_node (prepare_node and apply_proxy_settings)
       dns.py                 install_node_dns, DNS_UNIT
       docker.py              install_docker, DOCKER_UNIT, registry_verification
-      shell.py               download_from_gitea (was curl)
+      download.py            download_from_gitea (was curl)
     compose.py swarm.py k3s.py   one infrastructure type each: setup(), verifications()
-    runner.py              Actions runner: labels_for, install, install_runner_for(system, ...)
-    verify.py              verifications on a node, the script and its parser
-    setup.py         (new) set_up_infra(system, infra, log), verify_infra(system, infra, log)  <- cli._infra_setup
+    runner.py              Actions runner: labels_for, install, register_script, install_runner_for(system, ...)
+    verify.py              node_verifications, run_verifications, log_verifications, verification_script,
+                           parse_verifications, by_family, gitea_only_sources_by_family
+    setup.py         (new) set_up_infra(system, infra, log), verify_infra(system, infra, log), verifications_for,
+                           TYPES  <- cli._infra_setup
     upgrade.py       (new) UPGRADE_SCRIPT, upgrade_nodes(system, hosts, log)  <- cli.UPGRADE_SCRIPT, _infra_upgrade
     proxy/                 the egress proxy (tinyproxy)                   <- infra/proxy.py
       __init__.py            overview, re-exports
@@ -130,7 +133,7 @@ outpost/
       tinyproxy.py           paths, LOG_PREP, LOGROTATE, conf, filter_type_line, unit, INSTALL
       setup.py               set_up_on_host(host, ctx, cfg, ...): six named steps
       diagnose.py            diagnose_script, access_script, access_report
-      verify.py              host_verifications, verify_proxy_host
+      verify.py              host_verifications, verify_proxy_host, proxy_verifications (every node runs them too)
       recipe.py              set_up_egress_proxy(system, log), verify_egress_proxy(system), update_set_up_nodes(system, log)
                              <- cli.cmd_proxy
   checks/                smoke checks                                     <- checks/__init__.py
@@ -360,7 +363,10 @@ from state.
 | `common._configure_apt/_apk/_rpm` | `node.configure_apt_sources/...` (public) | the proxy setup calls them |
 | `common.install_dns` | `node.install_node_dns` | |
 | `common.registry_check` | `node.registry_verification` | glossary: one line of verify is a verification |
-| `verify.common_checks`, `proxy_checks`, `script`, `parse` | `node_verifications`, `proxy_verifications`, `verification_script`, `parse_verifications` | the `CHECK\|` marker on the wire stays (tests match it) |
+| `verify.common_checks`, `proxy_checks`, `script`, `parse` | `node_verifications`, `proxy.proxy_verifications`, `verification_script`, `parse_verifications` | the `CHECK\|` marker on the wire stays (tests match it). `proxy_verifications` lives in `infra/proxy/verify.py`, and `infra/setup.verifications_for` adds it to the list, so `verify` and `proxy` no longer import each other |
+| `verify.verify_node(host, ctx, extra)` | `verify.run_verifications(host, verifications)` | the caller passes the whole list (`verifications_for`) |
+| `verify.source_commands` | `verify.gitea_only_sources_by_family` | |
+| the arch check, copied in `prepare_node`, `gitea/setup` and `proxy.setup` | `versions.check_server_arch(alias, facts)` | not `infra/node/checks.py`: gitea (layer 2) uses it too, and "check" means a smoke check |
 | `<type>.extra_checks(ctx)`, `runner.extra_checks()` | `<type>.verifications(ctx)`, `runner.verifications()` | the verification names (strings) stay |
 | `proxy.host_checks`, `proxy.verify` | `proxy.host_verifications`, `proxy.verify_proxy_host` | |
 | `hosts.inspect`, `record`, `cached`, `refresh`, `roles`, `drift`, `expected_versions`, `hosts_dir` | `inspect_server`, `record_facts`, `cached_facts`, `refresh_facts`, `server_roles`, `version_drift`, `pinned_versions`, `workspace.hosts_state_dir` | |
@@ -430,6 +436,7 @@ imports sit inside functions). Fix every old name you find.
 | **Bug fixes here** | bugs 2 to 6 and 9 |
 | **Risks** | `test_proxy` patches `common.prepare_node` (415, 449), which becomes `outpost.infra.node.prepare_node`: the proxy setup must call it through the name the test patches. Verification names and the `CHECK\|` marker are read by the tests, the report and the integration flow ("tests: full flow reads check results by name"), so keep every name string. The seal script text is checked by a verification (`grep -q 'build_chain $ipt security DROP'`): keep it byte for byte. Moving egress, hostsfile and client_config out of `infra/` breaks `test_real_gitea`'s `from outpost.infra import clients` and `from outpost.infra.clients import GiteaInfo`: update them. The dashboard's JSON keys (`/api/overview`) and URLs are read by `ui/index.html`: keep them. `test_full_flow` (387 to 393) calls `ui.server.overview(Platform(rig))` and `refresh_hosts`: point it to the new names. |
 | **Verify** | CLAUDE.md checks; help diff; `grep -rn "noqa: C901" outpost` is empty; `outpost ui` opens and every page loads against the template workspace; when Docker is around, `OUTPOST_INTEGRATION=1 python -m pytest -q tests/integration` |
+| **Done in D1 (as built)** | D was split. D1 did `egress.py`, `hostsfile.py`, `client_config/`, `infra/` (context, node/, compose, swarm, k3s, runner, verify, setup, upgrade, proxy/) and their callers in `cli/`, `gitea/`, `ui/server.py`, `rotate_ca`. gitea no longer imports infra (a test checks it). Differences from the tree above: `node/checks.py` became `versions.check_server_arch`; `node/shell.py` is `node/download.py`; `node/seal.py` is new; `TYPES` lives in `infra/setup.py` (re-exported) so `infra/__init__.py` can import setup; `proxy_verifications` is in `infra/proxy/verify.py`. `client_config` imports the endpoint types under `TYPE_CHECKING` only, because `endpoints` imports `PRIVATE_NETS` from it. What lands on servers was compared byte for byte, old against new, for every script and file of every step (FakeHost, all families, with and without a proxy): the same, except the bug fixes below and one doubled space in the k3s install line. Bugs fixed: 2 (`${ID:-} ${ID_LIKE:-}`), 3 (`shlex.quote`, also for K3S_URL and K3S_TOKEN), the runner's registration token is in `GITEA_RUNNER_REGISTRATION_TOKEN` instead of `--token` (gitea-runner 5.2.2 reads it; the script goes on stdin). Also found and fixed: `egress.seal_host`/`open_host` put `--reason` into the command unquoted, so the dashboard's free-text reason with a `'` failed and `$(...)` in it ran on the server; now `shlex.quote` (the egress log line reads the same). Runner jobs still run as root: a runner user would still need Docker or the k3s admin config, which are root-equivalent, so it is a documented limit (`docs/reference/limits.md`). Left for D2: `hosts.record`, `hosts.inspect` and `hosts.cached` keep their names (callers in `infra/setup.py`, `infra/upgrade.py`, `infra/proxy/recipe.py`, `gitea/setup`, `needs/pinned.py`, `endpoints.py`, `ui`, `report`); `hosts.SCRIPT` reads `$PRETTY_NAME` without `:-` under `set -u` (PRETTY_NAME is optional in os-release); `ui/server.server_status` still makes its own `Host`. |
 
 ## 5. Known bugs to fix along the way
 
@@ -438,8 +445,8 @@ Line numbers are for today's code (commit `aac067b`).
 | # | where | bug | fix in |
 |---|---|---|---|
 | 1 (fixed in A) | `cli.py:727`, `cli.py:252` | `gitea backup --out` defaults to `"backups"`, relative to the **current directory**, not the workspace. `gitea setup` (`gitea/setup.py:151`) and the dashboard (`ui/server.py:221`) use `<workspace>/backups`. So backups land wherever outpost is run, and `tests/integration/test_full_flow.py:161-162` (`test_2b`) restores the newest archive in `rig/backups`, which is the older one from the upgrade in `test_2`. Fix: default `None` -> `system.workspace.backups_dir`; help "(default: backups/ in the workspace)". | C |
-| 2 | `infra/verify.py:21`, `cli.py:357` (`UPGRADE_SCRIPT`) | `case " $ID $ID_LIKE "` under `set -u`: `Host.run` puts `set -euo pipefail` at the top (`ssh/host.py:68`), and Debian and Alpine have no `ID_LIKE` in `/etc/os-release`. So on Debian and Alpine nodes, the verifications "package sources are gitea only" and "package index updates offline" fail ("ID_LIKE: unbound variable"), so does the proxy's "tinyproxy installed from gitea" (`infra/proxy.py:495`), and `infra upgrade` stops. The lab is Ubuntu, so the integration tests never see it. Fix: `${ID:-} ${ID_LIKE:-}` in both, plus a unit test whose script runs under `bash -u` with `ID_LIKE` unset. | D |
-| 3 | `infra/k3s.py:75` | `INSTALL_K3S_EXEC={exec_args!r}` uses Python's `repr()` as shell quoting. An `args:` with a `'` makes repr use double quotes, and then the shell expands `$` and backticks inside them. Fix: `shlex.quote`. | D |
+| 2 (fixed in D1) | `infra/verify.py:21`, `cli.py:357` (`UPGRADE_SCRIPT`) | `case " $ID $ID_LIKE "` under `set -u`: `Host.run` puts `set -euo pipefail` at the top (`ssh/host.py:68`), and Debian and Alpine have no `ID_LIKE` in `/etc/os-release`. So on Debian and Alpine nodes, the verifications "package sources are gitea only" and "package index updates offline" fail ("ID_LIKE: unbound variable"), so does the proxy's "tinyproxy installed from gitea" (`infra/proxy.py:495`), and `infra upgrade` stops. The lab is Ubuntu, so the integration tests never see it. Fix: `${ID:-} ${ID_LIKE:-}` in both, plus a unit test whose script runs under `bash -u` with `ID_LIKE` unset. | D |
+| 3 (fixed in D1) | `infra/k3s.py:75` | `INSTALL_K3S_EXEC={exec_args!r}` uses Python's `repr()` as shell quoting. An `args:` with a `'` makes repr use double quotes, and then the shell expands `$` and backticks inside them. Fix: `shlex.quote`. | D |
 | 4 | `lab.py:125-130` | `lab up` forgets the old state (`state/*.json`, token, password) but keeps `state/hosts/*.json`. The dashboard's Machines page and the report then show the removed servers' versions and "sealed" for brand-new open ones until `hosts --refresh`. Fix: also clear `workspace.hosts_state_dir`. | D |
 | 5 | `ui/server.py:173` | `load_mirrors` runs outside the `try` that guards the same call at line 167 (through `needs_detail`). A broken `mirrors.yml` turns all of `/api/overview` into a 400, so the dashboard shows nothing instead of the error. Fix: read mirrors once, inside the guarded block. | D |
 | 6 | `ui/status.py:254-256` | One needs image that does not parse empties `wanted_images`, so every image in the box is listed as unneeded. Fix: parse each reference on its own and skip the bad ones. | D |

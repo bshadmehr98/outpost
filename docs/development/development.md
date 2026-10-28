@@ -32,10 +32,14 @@ outpost/
   oci/            pull and push container images over HTTP: refs, registry, layout
   http.py         urllib wrapper: private CA, Host header, auth, downloads, retries for reads
   ssh/            Host.run / write / put / get and the Tunnel (one module per job; see its __init__.py)
+  egress.py       the seal: the outpost-egress script and unit; install_seal, seal_host, open_host, seal_status
+  hostsfile.py    keep the Gitea name (and the egress proxy's) in /etc/hosts across reboots
+  client_config/  the files that point pip, npm, apt, apk, dnf and Docker at Gitea, on nodes and in the config image
   gitea/          setup/ (install over ssh, in seven named steps), upload (one uploader per kind), backup,
                   connect (the tunnel), client (API), packages (the registries), service
-  infra/          clients (config files), egress, context, common steps, compose, swarm, k3s, verify,
-                  runner, setup, upgrade, proxy
+  infra/          setup and verify (set_up_infra, verify_infra), upgrade, context (NodeContext),
+                  node/ (prepare_node: the steps every node goes through), compose, swarm, k3s, runner,
+                  verify (the verifications and their script), proxy/ (the egress proxy: tinyproxy)
   demo/           the demo project: workflow generation, push through Gitea's API, status
   checks/         smoke checks: check, load, run
   ui/             the dashboard: server.py (JSON endpoints), projects.py (folder scan), index.html
@@ -53,8 +57,8 @@ or in `outpost/needs/js_lockfiles.py` returning `[NpmNeed(...)]`, add one line t
 
 ## Adding an infrastructure type
 
-Create `outpost/infra/<type>.py` with `setup(ctx, hosts, log)` and `extra_checks(ctx)`, call
-`common.prepare_node` for each host first, register it in `outpost/infra/__init__.py` and in
+Create `outpost/infra/<type>.py` with `setup(ctx, hosts, log)` and `verifications(ctx)`, call
+`node.prepare_node` for each host first, register it in `TYPES` in `outpost/infra/setup.py` and in
 `config.INFRA_TYPES`, add a test with `FakeHost`.
 
 ## Principles

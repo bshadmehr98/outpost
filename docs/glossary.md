@@ -123,7 +123,7 @@ code is cleaned up.
 **egress proxy**
 : The optional tinyproxy that lets sealed workloads reach a short list of allowed names, such as
   `api.twilio.com`. Declared under `egress_proxy:` in `servers.yml`. Say **egress proxy**, not
-  "proxy" alone, in prose and docs; `proxy` is fine inside `outpost/infra/proxy.py` and in the
+  "proxy" alone, in prose and docs; `proxy` is fine inside `outpost/infra/proxy/` and in the
   command `outpost proxy setup`.
 
 **proxy host**

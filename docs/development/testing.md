@@ -82,7 +82,7 @@ Use `FakeHost` and assert on `host.scripts` and `host.files`:
 ```python
 def test_dns_is_installed_after_the_seal(platform_dir):
     host = FakeHost("node-1")
-    common.prepare_node(host, ctx, log=lambda *_: None)
+    node.prepare_node(host, ctx, log=lambda *_: None)
     seal = next(i for i, s in enumerate(host.scripts) if "outpost-egress seal" in s)
     dns = next(i for i, s in enumerate(host.scripts) if "coredns" in s)
     assert seal < dns
