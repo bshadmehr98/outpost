@@ -268,7 +268,7 @@ class GiteaClient:
         """A container-registry view of the same Gitea. Tokens come from /v2/token with our Basic auth."""
         return oci.Registry(self.http, token_url=f"{self.http.base}/v2/token")
 
-    def push_image(self, layout: Path, owner: str, image: str, tag: str) -> str:
+    def push_image(self, layout: Path, owner: str, image: str, tag: str) -> oci.Pushed:
         return self.registry().push(layout, f"{owner}/{image}", tag)
 
 

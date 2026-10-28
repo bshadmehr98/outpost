@@ -1,5 +1,6 @@
 """Shared test doubles: a fake SSH host and a fake Gitea / container registry speaking real HTTP."""
 
+import hashlib
 import json
 import re
 import threading
@@ -225,6 +226,10 @@ class _Handler(BaseHTTPRequestHandler):
         m = re.match(r"^/v2/(.+)/blobs/(sha256:[0-9a-f]+)$", self.path)
         if m:
             return self._send(200 if (m[1], m[2]) in g.blobs else 404)
+        m = re.match(r"^/v2/(.+)/manifests/([^/]+)$", self.path)
+        if m and (m[1], m[2]) in g.manifests:
+            body = g.manifests[(m[1], m[2])][0]
+            return self._send(200, headers={"Docker-Content-Digest": "sha256:" + hashlib.sha256(body).hexdigest()})
         return self._send(404)
 
     def do_POST(self):

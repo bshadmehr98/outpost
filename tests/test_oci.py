@@ -126,12 +126,14 @@ def test_pull_with_token_and_multiarch_index(tmp_path, fake_gitea):
 def test_push_then_pull_roundtrip(tmp_path, fake_gitea):
     source = oci.build_layout({"/etc/x": (b"y", 0o644)}, tmp_path / "src", "pkgs/config:latest")
     registry = oci.Registry(Http(fake_gitea.url), token_url=f"{fake_gitea.url}/v2/token")
-    digest = registry.push(source, "pkgs/config", "latest")
-    assert ("pkgs/config", "latest") in fake_gitea.manifests
+    digest, uploaded = registry.push(source, "pkgs/config", "latest")
+    assert uploaded and ("pkgs/config", "latest") in fake_gitea.manifests
     assert fake_gitea.manifests[("pkgs/config", "latest")][1] == oci.MANIFEST_TYPES[0]
-    # second push uploads no blobs again
-    before = len([r for r in fake_gitea.requests if r[0] == "POST"])
-    registry.push(source, "pkgs/config", "latest")
-    assert len([r for r in fake_gitea.requests if r[0] == "POST"]) == before
+    # second push uploads no blobs and no manifest again, and says so
+    before = len([r for r in fake_gitea.requests if r[0] in ("POST", "PUT")])
+    assert registry.push(source, "pkgs/config", "latest") == oci.Pushed(digest, uploaded=False)
+    assert len([r for r in fake_gitea.requests if r[0] in ("POST", "PUT")]) == before
+    # the same blobs under a new tag are new: the tag moved
+    assert registry.push(source, "pkgs/config", "other").uploaded
     pulled = oci.Registry(Http(fake_gitea.url)).pull(oci.parse_ref("example.com/pkgs/config:latest"), tmp_path / "back")
     assert json.loads((pulled / "index.json").read_text())["manifests"][0]["digest"] == digest

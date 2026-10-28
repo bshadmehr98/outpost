@@ -1,13 +1,15 @@
 """One registry endpoint: pull an image into an OCI layout, push a layout, with token handling.
 
 Pulling: GET the manifest (pick linux/<arch> from a multi-arch index), then GET every blob.
-Pushing: HEAD each blob, upload the missing ones from disk, then PUT the manifest.
+Pushing: HEAD each blob, upload the missing ones from disk, then PUT the manifest, unless the tag
+         already names it. push() says whether anything was new.
 Auth:    on 401 the registry says where to get a token; the token is fetched and the call sent again.
 """
 
 import json
 import re
 from pathlib import Path
+from typing import NamedTuple
 from urllib.parse import quote, urlencode
 
 from outpost import versions
@@ -15,6 +17,13 @@ from outpost.http import Http, HttpError, Response
 from outpost.oci.layout import blob_path, blobs_dir, digest_of, write_index
 from outpost.oci.media_types import ACCEPT, INDEX_TYPES, MANIFEST_TYPES
 from outpost.oci.refs import Ref
+
+
+class Pushed(NamedTuple):
+    """What Registry.push did: the manifest's digest, and whether the registry got anything new."""
+
+    digest: str
+    uploaded: bool
 
 
 class Registry:
@@ -89,32 +98,38 @@ class Registry:
         self.http.download(f"/v2/{repo}/blobs/{digest}", target, sha256=digest.removeprefix("sha256:"), quiet=True)
 
     # -- push ---------------------------------------------------------------------
-    def push(self, layout: Path, repo: str, tag: str) -> str:
+    def push(self, layout: Path, repo: str, tag: str) -> "Pushed":
         """Push an OCI layout folder as repo:tag; blobs the registry has are not sent again.
 
         Returns:
-            The manifest's digest.
+            Pushed: the manifest's digest, and whether the registry got anything new (a blob, or
+            the tag moved to this manifest).
 
         Raises:
             HttpError: the registry refused a blob or the manifest.
         """
         entry = json.loads((layout / "index.json").read_text())["manifests"][0]
-        manifest_bytes = blob_path(layout, entry["digest"]).read_bytes()
+        digest = entry["digest"]
+        manifest_bytes = blob_path(layout, digest).read_bytes()
         manifest = json.loads(manifest_bytes)
-        for blob in [manifest["config"]] + manifest.get("layers", []):
+        sent_blobs = [
             self._push_blob(repo, blob["digest"], blob_path(layout, blob["digest"]))
+            for blob in [manifest["config"]] + manifest.get("layers", [])
+        ]
+        if not any(sent_blobs) and self._tag_points_at(repo, tag, digest):
+            return Pushed(digest, uploaded=False)
         media_type = entry.get("mediaType") or manifest.get("mediaType") or MANIFEST_TYPES[0]
         resp = self.call(
             "PUT", f"/v2/{repo}/manifests/{tag}", repo, data=manifest_bytes, headers={"Content-Type": media_type}
         )
         if resp.status not in (200, 201):
             raise HttpError(resp.status, resp.text, f"push {repo}:{tag}")
-        return entry["digest"]
+        return Pushed(digest, uploaded=True)
 
-    def _push_blob(self, repo: str, digest: str, path: Path) -> None:
-        """Upload one blob, streamed from its file, unless the registry has it already."""
+    def _push_blob(self, repo: str, digest: str, path: Path) -> bool:
+        """Upload one blob, streamed from its file, unless the registry has it already. True when it was sent."""
         if self.call("HEAD", f"/v2/{repo}/blobs/{digest}", repo).status == 200:
-            return
+            return False
         start = self.call("POST", f"/v2/{repo}/blobs/uploads/", repo, data=b"")
         if start.status != 202:
             raise HttpError(start.status, start.text, f"start upload {repo}")
@@ -131,6 +146,13 @@ class Registry:
         )
         if resp.status not in (201, 204):
             raise HttpError(resp.status, resp.text, f"upload blob {digest}")
+        return True
+
+    def _tag_points_at(self, repo: str, tag: str, digest: str) -> bool:
+        """True when repo:tag is already the manifest with this digest."""
+        resp = self.call("HEAD", f"/v2/{repo}/manifests/{tag}", repo, headers={"Accept": ACCEPT})
+        found = next((v for k, v in resp.headers.items() if k.lower() == "docker-content-digest"), "")
+        return resp.status == 200 and found == digest
 
     # -- tokens -------------------------------------------------------------------
     def _authorize(self, challenge: str, repo: str) -> bool:
