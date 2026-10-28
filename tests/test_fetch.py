@@ -10,6 +10,7 @@ import pytest
 from outpost import oci, versions
 from outpost.config import Mirrors
 from outpost.fetch import apk, apt, files, images, npm, pypi, rpm
+from outpost.http import Http
 from outpost.needs import FileNeed, NpmNeed
 
 
@@ -228,4 +229,22 @@ def test_files_fetch_skips_existing(tmp_path):
     need = FileNeed("tool", "1.0", "http://127.0.0.1:9/never", "tool")
     (tmp_path / "files" / "tool" / "1.0").mkdir(parents=True)
     (tmp_path / "files" / "tool" / "1.0" / "tool").write_bytes(b"x")
-    assert files.fetch([need], tmp_path, Mirrors(), log=lambda *_: None) == {"downloaded": 0, "skipped": 1}
+    assert files.fetch([need], tmp_path, Mirrors(), log=lambda *_: None) == {
+        "downloaded": 0,
+        "skipped": 1,
+        "failed": [],
+    }
+
+
+def test_one_file_or_image_that_fails_does_not_stop_the_others(tmp_path, fake_gitea, monkeypatch):
+    """A file or an image that failed used to end its whole kind, so the ones after it were never fetched."""
+    monkeypatch.setattr(Http, "_sleep", staticmethod(lambda s: None))
+    src = oci.build_layout({"/a": (b"a", 0o644)}, tmp_path / "src", "alpine:3.20")
+    fake_gitea.add_layout(src, "library/alpine", "3.20")
+    mirrors = Mirrors(docker=fake_gitea.url)
+    result = images.fetch(["missing:1", "alpine:3.20"], tmp_path / "box", mirrors, log=lambda *_: None)
+    assert result["pulled"] == 1 and len(result["failed"]) == 1 and result["failed"][0].startswith("missing:1: ")
+    broken = FileNeed("broken", "1.0", "http://127.0.0.1:9/never", "broken")
+    good = FileNeed("tool", "1.0", f"{fake_gitea.url}/api/v1/version", "tool")
+    result = files.fetch([broken, good], tmp_path / "box", Mirrors(), log=lambda *_: None)
+    assert result["downloaded"] == 1 and result["failed"][0].startswith("broken 1.0: ")

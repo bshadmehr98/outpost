@@ -28,8 +28,8 @@ from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
 
-from . import __version__, pki
-from .http import sha256_file
+from outpost import __version__, pki
+from outpost.http import sha256_file
 
 KINDS = ("images", "pypi", "npm", "apt", "apk", "rpm", "files")
 MANIFEST = "manifest.json"

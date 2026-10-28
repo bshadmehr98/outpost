@@ -9,9 +9,9 @@ import shlex
 import subprocess
 from pathlib import Path
 
-from ..config import Mirrors
-from ..distros import DEBIAN, UBUNTU
-from .in_container import OUT, OsPackageRecipe, fetch_os_packages
+from outpost.config import Mirrors
+from outpost.distros import DEBIAN, UBUNTU
+from outpost.fetch.in_container import OUT, OsPackageRecipe, fetch_os_packages
 
 
 def fetch(apt: dict[str, list[str]], box: Path, mirrors: Mirrors, log=print, run=subprocess.run) -> dict:

@@ -1,20 +1,28 @@
-"""Download what the needs files ask for into the box. Runs wherever there is internet.
+"""Download what the needs ask for into the box. The only step that needs the internet.
 
-Each kind is one module with a fetch(...) function. They are independent, so a failure in
-one kind does not stop the others; the summary at the end says what to look at.
-
-    results = fetch_into_box(system, all_needs(system), only=None, log=print)
+    results = fetch_into_box(system, all_needs(system), only=None, log=print)   # writes state/fetch.json
     for problem in failures(results): ...
+
+Each kind is one module with a fetch(needs, box, mirrors, log) function. The kinds are independent,
+so a failure in one does not stop the others, and within a kind one package that fails does not
+stop the rest; the summary at the end says what to look at.
+
+    images.py         container images, over plain HTTP (outpost.oci)
+    pypi.py           wheels and sdists, with pip download
+    npm.py            npm tarballs
+    apt.py apk.py rpm.py   OS packages, in a container of the distro
+    in_container.py   fetch_os_packages(), run_in_container(): the docker run they share
+    files.py          plain downloads
 """
 
 from pathlib import Path
 
-from .. import box as boxmod
-from ..config import Mirrors
-from ..needs import Needs
-from ..system import AirGappedSystem
-from ..workspace import STATE_FETCH
-from . import apk, apt, files, images, npm, pypi, rpm
+from outpost import box as boxmod
+from outpost.config import Mirrors
+from outpost.fetch import apk, apt, files, images, npm, pypi, rpm
+from outpost.needs import Needs
+from outpost.system import AirGappedSystem
+from outpost.workspace import STATE_FETCH
 
 
 def fetch_into_box(system: AirGappedSystem, needs: Needs, only: set[str] | None = None, log=print) -> dict:

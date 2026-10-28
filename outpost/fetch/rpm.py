@@ -13,10 +13,10 @@ import shlex
 import subprocess
 from pathlib import Path
 
-from .. import versions
-from ..config import Mirrors
-from ..distros import RPM_IMAGES, split_rpm_distro
-from .in_container import OUT, OsPackageRecipe, fetch_os_packages
+from outpost import versions
+from outpost.config import Mirrors
+from outpost.distros import RPM_IMAGES, split_rpm_distro
+from outpost.fetch.in_container import OUT, OsPackageRecipe, fetch_os_packages
 
 # family -> (the mirrors.yml key, the repositories under that mirror)
 REPOSITORIES = {

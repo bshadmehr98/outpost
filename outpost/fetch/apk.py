@@ -10,9 +10,9 @@ import shlex
 import subprocess
 from pathlib import Path
 
-from ..config import Mirrors
-from ..distros import apk_branch_version
-from .in_container import OUT, OsPackageRecipe, fetch_os_packages
+from outpost.config import Mirrors
+from outpost.distros import apk_branch_version
+from outpost.fetch.in_container import OUT, OsPackageRecipe, fetch_os_packages
 
 # apk's own name for the CPU type, used in the repository paths and by Gitea
 ARCHES = {"amd64": "x86_64", "arm64": "aarch64"}

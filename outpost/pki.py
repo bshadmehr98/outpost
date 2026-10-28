@@ -26,7 +26,7 @@ import tempfile
 import time
 from pathlib import Path
 
-from .workspace import Workspace
+from outpost.workspace import Workspace
 
 logger = logging.getLogger(__name__)
 

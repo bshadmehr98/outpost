@@ -1,20 +1,20 @@
-"""Plain downloads: binaries, installers, release tarballs. Stored under files/<name>/<version>/."""
+"""Plain downloads: binaries, installers, release tarballs. Stored under box/files/<name>/<version>/."""
 
 from pathlib import Path
 
-from ..http import Http
+from outpost.config import Mirrors
+from outpost.http import Http
+from outpost.needs import FileNeed
 
 
-def rewrite(url: str, mirrors) -> str:
-    """Use the GitHub mirror for github.com links when one is configured."""
-    if url.startswith("https://github.com/") and mirrors.github != "https://github.com":
-        return mirrors.github + url[len("https://github.com") :]
-    return url
+def fetch(needs: list[FileNeed], box: Path, mirrors: Mirrors, log=print) -> dict:
+    """Download each file that is not in the box yet. One file that fails does not stop the others.
 
-
-def fetch(needs, box: Path, mirrors, log=print) -> dict:
+    Returns:
+        {"downloaded": n, "skipped": n, "failed": ["<name> <version>: <why>", ...]}.
+    """
     http = Http()
-    done, skipped = 0, 0
+    done, skipped, failed = 0, 0, []
     for need in needs:
         dest = box / "files" / need.name / need.version / need.filename
         if dest.exists():
@@ -22,7 +22,18 @@ def fetch(needs, box: Path, mirrors, log=print) -> dict:
             continue
         url = rewrite(need.url, mirrors)
         log(f"    {need.name} {need.version}  <- {url}")
-        http.download(url, dest)
-        done += 1
-    log(f"    {done} downloaded, {skipped} already in box")
-    return {"downloaded": done, "skipped": skipped}
+        try:
+            http.download(url, dest)
+            done += 1
+        except Exception as e:  # keep going; the summary lists it
+            failed.append(f"{need.name} {need.version}: {e}")
+            log(f"    FAILED {need.name} {need.version}: {e}")
+    log(f"    {done} downloaded, {skipped} already in box" + (f", {len(failed)} failed" if failed else ""))
+    return {"downloaded": done, "skipped": skipped, "failed": failed}
+
+
+def rewrite(url: str, mirrors: Mirrors) -> str:
+    """Use the GitHub mirror for github.com links when one is configured."""
+    if url.startswith("https://github.com/") and mirrors.github != "https://github.com":
+        return mirrors.github + url[len("https://github.com") :]
+    return url
