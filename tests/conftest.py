@@ -10,7 +10,7 @@ from pathlib import Path
 
 import pytest
 
-from outpost.ssh import Result
+from outpost.ssh import CommandFailed, Result
 
 # Gitea's image name rule below the owner, from go-gitea/gitea v28.2.0 routers/api/packages/container/container.go
 GITEA_IMAGE_NAME = re.compile(r"\A[a-z0-9]+([._-][a-z0-9]+)*(/[a-z0-9]+([._-][a-z0-9]+)*)*\Z")
@@ -29,13 +29,13 @@ class FakeHost:
         self.puts: list[tuple[str, str]] = []
         self.gets: list[tuple[str, str]] = []
 
-    def run(self, script, check=True, timeout=0):
+    def run(self, script, raise_on_failure=False, timeout=0):
         self.scripts.append(script)
         for pattern, stdout in self.responses:
             if re.search(pattern, script, re.S):
                 if isinstance(stdout, Result):
-                    if check and not stdout.ok:
-                        raise RuntimeError(stdout.stderr)
+                    if raise_on_failure and not stdout.ok:
+                        raise CommandFailed(f"[{self.alias}] command failed (exit {stdout.returncode}):\n{stdout.stderr.strip()}", stdout)
                     return stdout
                 return Result(0, stdout, "")
         return Result(0, "", "")

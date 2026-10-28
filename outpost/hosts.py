@@ -67,7 +67,7 @@ def expected_versions() -> dict:
 def inspect(host) -> dict:
     """Facts from one host. Never raises: an unreachable host comes back with reachable=False and why."""
     try:
-        out = host.run(SCRIPT, check=False, timeout=90)
+        out = host.run(SCRIPT, timeout=90)
     except SshError as e:
         return {"reachable": False, "error": str(e).strip().splitlines()[-1][:300]}
     if not out.stdout.strip():

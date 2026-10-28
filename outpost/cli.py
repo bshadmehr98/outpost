@@ -347,7 +347,7 @@ def _infra_upgrade(platform: Platform, servers, infra, hosts: list[Host]) -> int
     failed = []
     for host in hosts:
         log(f"==> {host.alias}: package index update and upgrade from Gitea")
-        out = host.run(UPGRADE_SCRIPT, check=False, timeout=3600)
+        out = host.run(UPGRADE_SCRIPT, timeout=3600)
         for line in out.stdout.strip().splitlines():
             log(f"  [{host.alias}] {line}")
         if not out.ok or any(marker in out.stdout for marker in ("E:", "ERROR:", "Error:")):   # apt, apk, dnf
@@ -595,7 +595,7 @@ def cmd_pki(args) -> int:
         hosts = [Host(n) for n in infra.nodes]
         rc |= _infra_setup(platform, servers, infra, hosts, setup=True)
         for host in hosts:   # Docker and containerd read the CA file when they next connect; the runner needs a restart
-            host.run("systemctl try-restart outpost-runner 2>/dev/null || true", check=False)
+            host.run("systemctl try-restart outpost-runner 2>/dev/null || true")
     log("rotation done. Images built before today still work; rebuild anything that baked the old pki/ca.crt into itself.")
     return rc
 

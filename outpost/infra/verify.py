@@ -114,7 +114,7 @@ def parse(output: str) -> list[dict]:
 
 def verify_node(host, ctx: common.NodeContext, extra: list[tuple[str, str]]) -> list[dict]:
     checks = common_checks(ctx) + extra
-    result = host.run(script(checks), check=False, timeout=600)
+    result = host.run(script(checks), timeout=600)
     parsed = parse(result.stdout)
     if not parsed:
         parsed = [{"name": "connect", "ok": False, "detail": result.stderr.strip()[-300:] or "no output"}]

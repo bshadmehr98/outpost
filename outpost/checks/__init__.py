@@ -79,19 +79,19 @@ def _tar_folder(folder: Path) -> Path:
 def run_check(check: Check, host, env: dict[str, str], log=print, timeout: int = 900) -> dict:
     remote_dir = f"{REMOTE_ROOT}/{check.name}"
     exports = " ".join(f"{k}={shlex.quote(v)}" for k, v in env.items())
-    host.run(f"rm -rf {remote_dir} && mkdir -p {remote_dir}")
+    host.run(f"rm -rf {remote_dir} && mkdir -p {remote_dir}", raise_on_failure=True)
     if check.context:
         archive = _tar_folder(check.context)
         try:
             host.put(archive, f"{remote_dir}/context.tgz")
         finally:
             archive.unlink(missing_ok=True)
-        host.run(f"tar -xzf {remote_dir}/context.tgz -C {remote_dir} && rm {remote_dir}/context.tgz")
+        host.run(f"tar -xzf {remote_dir}/context.tgz -C {remote_dir} && rm {remote_dir}/context.tgz", raise_on_failure=True)
 
     results = []
     ok = True
     for step in check.steps:
-        result = host.run(f"export {exports}\ncd {remote_dir}\n{step['run']}", check=False, timeout=timeout)
+        result = host.run(f"export {exports}\ncd {remote_dir}\n{step['run']}", timeout=timeout)
         output = (result.stdout + result.stderr).strip()
         passed = result.ok and (step["expect"] is None or step["expect"] in output)
         results.append({"run": step["run"], "ok": passed, "output": output[-2000:]})
@@ -101,5 +101,5 @@ def run_check(check: Check, host, env: dict[str, str], log=print, timeout: int =
             for line in output.splitlines()[-8:]:
                 log(f"       | {line}")
             break
-    host.run(f"rm -rf {remote_dir}", check=False)
+    host.run(f"rm -rf {remote_dir}")
     return {"name": check.name, "node": host.alias, "ok": ok, "steps": results}

@@ -45,15 +45,15 @@ def configmap_yaml(proxy: clients.ProxyInfo) -> str:
 def apply_configmap(server, proxy: clients.ProxyInfo | None, log=print) -> None:
     """Idempotent: `kubectl apply` of the same ConfigMap changes nothing; without a proxy it is removed."""
     if proxy:
-        server.run(f"cat <<'OUTPOST_EOF' | k3s kubectl apply -f -\n{configmap_yaml(proxy)}OUTPOST_EOF\n")
+        server.run(f"cat <<'OUTPOST_EOF' | k3s kubectl apply -f -\n{configmap_yaml(proxy)}OUTPOST_EOF\n", raise_on_failure=True)
         log(f"  [{server.alias}] ConfigMap default/{CONFIGMAP}: pods opt in with envFrom configMapRef {CONFIGMAP}")
     else:
-        server.run(f"k3s kubectl -n default delete configmap {CONFIGMAP} --ignore-not-found >/dev/null")
+        server.run(f"k3s kubectl -n default delete configmap {CONFIGMAP} --ignore-not-found >/dev/null", raise_on_failure=True)
 
 
 def _install(host, ctx: common.NodeContext, exec_args: str, env: str, log) -> None:
     g = ctx.gitea
-    if versions.K3S.split("+")[0] in host.run("k3s --version 2>/dev/null | head -1 || true").stdout:
+    if versions.K3S.split("+")[0] in host.run("k3s --version 2>/dev/null | head -1 || true", raise_on_failure=True).stdout:
         log(f"  [{host.alias}] k3s {versions.K3S} already installed")
         return
     log(f"==> {host.alias}: installing k3s {versions.K3S} from Gitea")
@@ -64,7 +64,8 @@ def _install(host, ctx: common.NodeContext, exec_args: str, env: str, log) -> No
         f"{common.curl(ctx, g.generic('k3s-airgap-images', versions.K3S, f'k3s-airgap-images-{versions.ARCH}.tar.gz'), IMAGES_DIR + '/k3s-airgap-images.tar.gz')}\n"
         f"{common.curl(ctx, g.generic('k3s-install', versions.K3S, 'install.sh'), '/tmp/k3s-install.sh')}\n"
         f"INSTALL_K3S_SKIP_DOWNLOAD=true INSTALL_K3S_EXEC={exec_args!r} {env} sh /tmp/k3s-install.sh\n"
-        "rm -f /tmp/k3s-install.sh\n"
+        "rm -f /tmp/k3s-install.sh\n",
+        raise_on_failure=True,
     )
 
 
@@ -78,8 +79,8 @@ def setup(ctx: common.NodeContext, hosts: list, log=print) -> dict:
     server.run(
         "for i in $(seq 1 90); do "
         "k3s kubectl get nodes --no-headers 2>/dev/null | grep -q ' Ready' && k3s kubectl -n default get serviceaccount default >/dev/null 2>&1 && break; "
-        "sleep 2; done; k3s kubectl get nodes")
-    token = server.run("cat /var/lib/rancher/k3s/server/node-token").stdout.strip()
+        "sleep 2; done; k3s kubectl get nodes", raise_on_failure=True)
+    token = server.run("cat /var/lib/rancher/k3s/server/node-token", raise_on_failure=True).stdout.strip()
     log(f"  [{server.alias}] k3s server ready")
     apply_configmap(server, ctx.proxy, log)
 

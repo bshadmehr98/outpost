@@ -325,10 +325,10 @@ def setup(host, ctx: common.NodeContext, cfg: ProxyConfig, *, egress_allow: list
         common.prepare_node(host, ctx, log)
 
     log(f"==> [3/6] {PACKAGE} from Gitea")
-    out = host.run(f"systemctl mask {STOCK_UNIT} >/dev/null 2>&1 || true\n" + INSTALL[family], check=False, timeout=900)
+    out = host.run(f"systemctl mask {STOCK_UNIT} >/dev/null 2>&1 || true\n" + INSTALL[family], timeout=900)
     if "OUTPOST-NO-TINYPROXY" in out.stdout:
         name, kind = REGISTRY[family]
-        seen = host.run(diagnose_script(family, g, distro), check=False, timeout=300)
+        seen = host.run(diagnose_script(family, g, distro), timeout=300)
         detail = (seen.stdout + seen.stderr).strip()[-3000:]
         raise RuntimeError(f"Gitea's {name} registry has no {PACKAGE} for {distro}. Run `outpost fetch --only {kind}` and "
                            f"`outpost upload` (with egress_proxy in servers.yml, fetch adds {PACKAGE} for {distro} by itself), "
@@ -337,7 +337,7 @@ def setup(host, ctx: common.NodeContext, cfg: ProxyConfig, *, egress_allow: list
         raise RuntimeError(f"[{host.alias}] installing {PACKAGE} from Gitea failed: {(out.stderr or out.stdout).strip()[-400:]}")
     found = host.run(f"systemctl disable --now {STOCK_UNIT} >/dev/null 2>&1 || true\n"
                      f"command -v {PACKAGE} || ls /usr/sbin/{PACKAGE} /usr/bin/{PACKAGE} 2>/dev/null | head -1 || true\n"
-                     f"{PACKAGE} -v 2>&1 | head -1 || true").stdout.split()
+                     f"{PACKAGE} -v 2>&1 | head -1 || true", raise_on_failure=True).stdout.split()
     binary = next((w for w in found if w.startswith("/")), f"/usr/bin/{PACKAGE}")
     version = next((w for w in reversed(found) if re.fullmatch(r"\d+\.\d+(\.\d+)?\S*", w)), "")
     log(f"  [{host.alias}] {PACKAGE} {version or '(version unknown)'} at {binary}, stock {STOCK_UNIT} masked")
@@ -347,13 +347,14 @@ def setup(host, ctx: common.NodeContext, cfg: ProxyConfig, *, egress_allow: list
         f"getent group {USER} >/dev/null || groupadd --system {USER}\n"
         f"id -u {USER} >/dev/null 2>&1 || useradd --system --gid {USER} --no-create-home --home-dir /nonexistent --shell /usr/sbin/nologin {USER}\n"
         f"mkdir -p /etc/tinyproxy /usr/share/tinyproxy && chmod 0755 /etc/tinyproxy /usr/share/tinyproxy && {LOG_PREP}\n"
-        f"rm -f {' '.join(OLD_PATHS)}\n"
+        f"rm -f {' '.join(OLD_PATHS)}\n",
+        raise_on_failure=True,
     )
     host.write(CONF_PATH, conf(p.ip, cfg.port, client_allow, version or "1.11.1"))
     host.write(ALLOW_PATH, allow_file(list(cfg.allow), g.name))
     host.write(LOGROTATE_PATH, LOGROTATE)
     readable = host.run(f"runuser -u {USER} -- test -r {CONF_PATH} && runuser -u {USER} -- test -r {ALLOW_PATH} && "
-                        f"runuser -u {USER} -- test -w {LOG_PATH}", check=False)
+                        f"runuser -u {USER} -- test -w {LOG_PATH}")
     if not readable.ok:
         raise RuntimeError(f"[{host.alias}] {USER} cannot read its configuration or write its log:\n{_access_report(host)}")
     log(f"  [{host.alias}] allows {', '.join(cfg.allow)} (and {g.name}); everything else gets 403")
@@ -361,9 +362,9 @@ def setup(host, ctx: common.NodeContext, cfg: ProxyConfig, *, egress_allow: list
     log("==> [5/6] service outpost-proxy")
     host.write(UNIT_PATH, unit(binary))
     started = host.run("systemctl daemon-reload && systemctl enable outpost-proxy >/dev/null 2>&1; "
-                       "systemctl restart outpost-proxy && sleep 1 && systemctl is-active outpost-proxy", check=False)
+                       "systemctl restart outpost-proxy && sleep 1 && systemctl is-active outpost-proxy")
     if not started.ok:
-        journal = host.run("journalctl -u outpost-proxy -n 15 --no-pager 2>&1 || true", check=False).stdout.strip()
+        journal = host.run("journalctl -u outpost-proxy -n 15 --no-pager 2>&1 || true").stdout.strip()
         raise RuntimeError(f"[{host.alias}] outpost-proxy did not start:\n{journal[-800:]}\n{_access_report(host, binary)}")
 
     log("==> [6/6] sealing, with the one exception for the proxy's own user")
@@ -399,7 +400,7 @@ def access_script(binary: str | None = None) -> str:
 
 
 def _access_report(host, binary: str | None = None) -> str:
-    out = host.run(access_script(binary), check=False, timeout=60)
+    out = host.run(access_script(binary), timeout=60)
     return (out.stdout + out.stderr).strip()[-2000:]
 
 
@@ -433,6 +434,6 @@ def host_checks(ctx: common.NodeContext, cfg: ProxyConfig) -> list[tuple[str, st
 def verify(host, ctx: common.NodeContext, cfg: ProxyConfig) -> list[dict]:
     from . import verify as verifymod
     checks = host_checks(ctx, cfg) + verifymod.proxy_checks(ctx, node=not ctx.proxy.on_gitea)   # the Gitea host is no node
-    result = host.run(verifymod.script(checks), check=False, timeout=300)
+    result = host.run(verifymod.script(checks), timeout=300)
     parsed = verifymod.parse(result.stdout)
     return parsed or [{"name": "connect", "ok": False, "detail": result.stderr.strip()[-300:] or "no output"}]

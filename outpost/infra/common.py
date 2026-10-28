@@ -143,9 +143,10 @@ def prepare_node(host, ctx: NodeContext, log=print) -> dict:
         "if command -v update-ca-certificates >/dev/null; then "
         f"  cp {clients.PATH_CA} /usr/local/share/ca-certificates/outpost-ca.crt && update-ca-certificates >/dev/null; "
         "elif command -v update-ca-trust >/dev/null; then "
-        f"  cp {clients.PATH_CA} /etc/pki/ca-trust/source/anchors/outpost-ca.crt && update-ca-trust; fi"
+        f"  cp {clients.PATH_CA} /etc/pki/ca-trust/source/anchors/outpost-ca.crt && update-ca-trust; fi",
+        raise_on_failure=True,
     )
-    reach = host.run(f"curl --cacert {clients.PATH_CA} -fsS --max-time 10 {g.url}/api/v1/version", check=False)
+    reach = host.run(f"curl --cacert {clients.PATH_CA} -fsS --max-time 10 {g.url}/api/v1/version")
     if not reach.ok:
         raise RuntimeError(f"[{host.alias}] cannot reach {g.url}: {reach.stderr.strip()}. Check servers.yml gitea.ip and firewalls (port 443).")
     log(f"  [{host.alias}] reaches Gitea {reach.stdout.strip()}")
@@ -168,7 +169,7 @@ def prepare_node(host, ctx: NodeContext, log=print) -> dict:
 
 def _write_hosts(host, ctx: NodeContext) -> None:
     entries = ctx.hosts_entries()
-    host.run(hostsfile.rewrite(entries))
+    host.run(hostsfile.rewrite(entries), raise_on_failure=True)
     hostsfile.install(host, entries[0][0], entries[0][1], entries[1:])
 
 
@@ -181,11 +182,11 @@ def _proxy_settings(host, ctx: NodeContext, log=print) -> None:
         host.write(clients.PATH_PROXY_ENV, clients.NO_PROXY_ENV)
     for home in ("/root", RUNNER_HOME):
         path = f"{home}/.docker/config.json"
-        existing = host.run(f"cat {path} 2>/dev/null || true", check=False).stdout
+        existing = host.run(f"cat {path} 2>/dev/null || true").stdout
         updated = clients.docker_client_config(existing, ctx.proxy, g.name)
         if updated is not None:
             host.write(path, updated, mode="0600")
-    host.run(clients.environment_script(ctx.proxy))
+    host.run(clients.environment_script(ctx.proxy), raise_on_failure=True)
     if ctx.proxy:
         log(f"  [{host.alias}] egress proxy {ctx.proxy.url} for programs that opt in (HTTPS_PROXY), containers through the Docker client config")
 
@@ -221,7 +222,8 @@ def _configure_apt(host, ctx: NodeContext, facts: dict) -> None:
         f"mkdir -p /etc/apt/sources.disabled /etc/apt/sources.list.d\n"
         f"for f in /etc/apt/sources.list.d/*; do [ -e \"$f\" ] && [ \"$(basename $f)\" != outpost.list ] && mv \"$f\" /etc/apt/sources.disabled/; done; true\n"
         f"if [ -s /etc/apt/sources.list ]; then mv /etc/apt/sources.list /etc/apt/sources.disabled/sources.list; fi\n"
-        f"{{ {lines}\n}} > /etc/apt/sources.list.d/outpost.list\n"
+        f"{{ {lines}\n}} > /etc/apt/sources.list.d/outpost.list\n",
+        raise_on_failure=True,
     )
 
 
@@ -243,7 +245,8 @@ def _configure_apk(host, ctx: NodeContext, facts: dict) -> None:
         f"(cd {clients.PATH_APK_KEYS} && curl --cacert {clients.PATH_CA} -fsSL -J -O {shlex.quote(g.apk_repo + '/key')} && "
         f"{{ [ ! -f key ] || mv key {shlex.quote(g.org + '.rsa.pub')}; }}) || true\n"
         f"if [ -e {clients.PATH_APK_REPOS} ] && ! grep -q {shlex.quote(g.apk_repo)} {clients.PATH_APK_REPOS}; then mv {clients.PATH_APK_REPOS} {clients.PATH_APK_REPOS}.disabled; fi\n"
-        f"{{ {lines}\n}} > {clients.PATH_APK_REPOS}\n"
+        f"{{ {lines}\n}} > {clients.PATH_APK_REPOS}\n",
+        raise_on_failure=True,
     )
 
 
@@ -261,20 +264,22 @@ def _configure_rpm(host, ctx: NodeContext, facts: dict) -> None:
         f"{curl(ctx, g.rpm_repo + '/repository.key', clients.PATH_RPM_KEY)} || true\n"
         f"mkdir -p /etc/yum.repos.d.disabled /etc/yum.repos.d\n"
         f"for f in /etc/yum.repos.d/*.repo; do [ -e \"$f\" ] && [ \"$(basename $f)\" != outpost.repo ] && mv \"$f\" /etc/yum.repos.d.disabled/; done; true\n"
-        f"{{ {lines}\n}} > {clients.PATH_RPM_REPO}\n"
+        f"{{ {lines}\n}} > {clients.PATH_RPM_REPO}\n",
+        raise_on_failure=True,
     )
 
 
 def install_dns(host, ctx: NodeContext, log=print) -> None:
     g = ctx.gitea
     url = g.generic("coredns", versions.COREDNS, f"coredns_{versions.COREDNS}_linux_{versions.ARCH}.tgz")
-    if versions.COREDNS not in host.run("/usr/local/bin/coredns -version 2>/dev/null || true").stdout:
+    if versions.COREDNS not in host.run("/usr/local/bin/coredns -version 2>/dev/null || true", raise_on_failure=True).stdout:
         host.run(
             f"{curl(ctx, url, '/tmp/coredns.tgz')}\n"
-            "tar -xzf /tmp/coredns.tgz -C /usr/local/bin coredns && chmod 755 /usr/local/bin/coredns && rm -f /tmp/coredns.tgz\n"
+            "tar -xzf /tmp/coredns.tgz -C /usr/local/bin coredns && chmod 755 /usr/local/bin/coredns && rm -f /tmp/coredns.tgz\n",
+            raise_on_failure=True,
         )
     host.write("/etc/systemd/system/outpost-dns.service", DNS_UNIT)
-    host.run("systemctl daemon-reload && systemctl enable outpost-dns >/dev/null 2>&1; systemctl restart outpost-dns && sleep 1 && systemctl is-active outpost-dns")
+    host.run("systemctl daemon-reload && systemctl enable outpost-dns >/dev/null 2>&1; systemctl restart outpost-dns && sleep 1 && systemctl is-active outpost-dns", raise_on_failure=True)
     log(f"  [{host.alias}] node dns (coredns {versions.COREDNS}) answers {g.name} for containers")
 
 
@@ -283,7 +288,7 @@ def install_docker(host, ctx: NodeContext, log=print) -> None:
     docker_url = g.generic("docker", versions.DOCKER, f"docker-{versions.DOCKER}.tgz")
     compose_url = g.generic("docker-compose", versions.COMPOSE, "docker-compose")
     buildx_url = g.generic("docker-buildx", versions.BUILDX, "docker-buildx")
-    have = host.run("docker --version 2>/dev/null || true").stdout
+    have = host.run("docker --version 2>/dev/null || true", raise_on_failure=True).stdout
     if versions.DOCKER in have:
         log(f"  [{host.alias}] docker {versions.DOCKER} already installed")
     else:
@@ -294,11 +299,12 @@ def install_docker(host, ctx: NodeContext, log=print) -> None:
             f"{curl(ctx, docker_url, '/tmp/docker.tgz')}\n"
             "tar -xzf /tmp/docker.tgz -C /usr/local/bin --strip-components=1 && rm -f /tmp/docker.tgz\n"
             "groupadd -f docker\n"
-            "if [ -n \"${SUDO_USER:-}\" ]; then usermod -aG docker \"$SUDO_USER\"; fi\n"
+            "if [ -n \"${SUDO_USER:-}\" ]; then usermod -aG docker \"$SUDO_USER\"; fi\n",
+            raise_on_failure=True,
         )
         host.write("/etc/systemd/system/docker.service", DOCKER_UNIT)
         # restart, not `enable --now`: an already running daemon would keep the old binary
-        host.run("systemctl daemon-reload && systemctl enable docker >/dev/null 2>&1; systemctl restart docker")
+        host.run("systemctl daemon-reload && systemctl enable docker >/dev/null 2>&1; systemctl restart docker", raise_on_failure=True)
     host.run(
         "mkdir -p /usr/local/lib/docker/cli-plugins\n"
         f"if ! docker compose version 2>/dev/null | grep -q {versions.COMPOSE}; then "
@@ -306,6 +312,7 @@ def install_docker(host, ctx: NodeContext, log=print) -> None:
         f"if ! docker buildx version 2>/dev/null | grep -q {versions.BUILDX}; then "
         f"{curl(ctx, buildx_url, '/usr/local/lib/docker/cli-plugins/docker-buildx')} && chmod 755 /usr/local/lib/docker/cli-plugins/docker-buildx; fi\n"
         "for i in $(seq 1 30); do docker info >/dev/null 2>&1 && break; sleep 1; done\n"
-        "docker info --format '{{.ServerVersion}}' >/dev/null"
+        "docker info --format '{{.ServerVersion}}' >/dev/null",
+        raise_on_failure=True,
     )
     log(f"  [{host.alias}] docker ready, compose {versions.COMPOSE}, buildx {versions.BUILDX}")

@@ -49,4 +49,4 @@ def rewrite(entries: list[tuple[str, str]]) -> str:
 def install(host, ip: str, name: str, extra: list[tuple[str, str]] | tuple = ()) -> None:
     host.write(SCRIPT_PATH, script(ip, name, extra), mode="0755")
     host.write(UNIT_PATH, UNIT)
-    host.run(f"systemctl daemon-reload && systemctl enable outpost-hosts.service >/dev/null 2>&1; {SCRIPT_PATH}")
+    host.run(f"systemctl daemon-reload && systemctl enable outpost-hosts.service >/dev/null 2>&1; {SCRIPT_PATH}", raise_on_failure=True)

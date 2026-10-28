@@ -179,19 +179,19 @@ def install(host, gitea_ip: str, allow: list[str], proxy_user: str | None = None
     """`proxy_user` only on the host that runs the egress proxy: its user may then open 443 and 80."""
     host.write(SCRIPT_PATH, script(gitea_ip, allow, proxy_user), mode="0755")
     host.write(UNIT_PATH, UNIT)
-    host.run("systemctl daemon-reload && systemctl enable outpost-egress.service >/dev/null 2>&1 && touch /var/log/outpost-egress.log")
+    host.run("systemctl daemon-reload && systemctl enable outpost-egress.service >/dev/null 2>&1 && touch /var/log/outpost-egress.log", raise_on_failure=True)
     if not proxy_user:
-        host.run(f"if iptables -S {OUT_CHAIN} >/dev/null 2>&1 || iptables -t security -S {OUT_CHAIN} >/dev/null 2>&1; then\n{DROP_OUT_CHAIN}fi")
+        host.run(f"if iptables -S {OUT_CHAIN} >/dev/null 2>&1 || iptables -t security -S {OUT_CHAIN} >/dev/null 2>&1; then\n{DROP_OUT_CHAIN}fi", raise_on_failure=True)
 
 
 def seal(host, reason: str = "") -> str:
-    return host.run(f"{SCRIPT_PATH} seal {reason}").stdout.strip()
+    return host.run(f"{SCRIPT_PATH} seal {reason}", raise_on_failure=True).stdout.strip()
 
 
 def open_(host, reason: str = "") -> str:
-    return host.run(f"{SCRIPT_PATH} open {reason}").stdout.strip()
+    return host.run(f"{SCRIPT_PATH} open {reason}", raise_on_failure=True).stdout.strip()
 
 
 def status(host) -> str:
-    result = host.run(f"test -x {SCRIPT_PATH} && {SCRIPT_PATH} status || echo 'not installed'", check=False)
+    result = host.run(f"test -x {SCRIPT_PATH} && {SCRIPT_PATH} status || echo 'not installed'")
     return (result.stdout or result.stderr).strip()

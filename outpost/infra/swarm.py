@@ -12,19 +12,19 @@ def setup(ctx: common.NodeContext, hosts: list, log=print) -> dict:
 
     manager = hosts[0]
     manager_ip = facts[manager.alias]["ip"]
-    state = manager.run("docker info --format '{{.Swarm.LocalNodeState}}'").stdout.strip()
+    state = manager.run("docker info --format '{{.Swarm.LocalNodeState}}'", raise_on_failure=True).stdout.strip()
     if state != "active":
-        manager.run(f"docker swarm init --advertise-addr {manager_ip} {ctx.args}".strip())
+        manager.run(f"docker swarm init --advertise-addr {manager_ip} {ctx.args}".strip(), raise_on_failure=True)
         log(f"  [{manager.alias}] swarm initialised (manager)")
     else:
         log(f"  [{manager.alias}] already a swarm node")
-    token = manager.run("docker swarm join-token -q worker").stdout.strip()
+    token = manager.run("docker swarm join-token -q worker", raise_on_failure=True).stdout.strip()
 
     for host in hosts[1:]:
-        if host.run("docker info --format '{{.Swarm.LocalNodeState}}'").stdout.strip() == "active":
+        if host.run("docker info --format '{{.Swarm.LocalNodeState}}'", raise_on_failure=True).stdout.strip() == "active":
             log(f"  [{host.alias}] already joined")
             continue
-        host.run(f"docker swarm join --token {token} {manager_ip}:2377")
+        host.run(f"docker swarm join --token {token} {manager_ip}:2377", raise_on_failure=True)
         log(f"  [{host.alias}] joined as worker")
     return {"nodes": facts, "manager": manager.alias}
 

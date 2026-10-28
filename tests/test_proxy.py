@@ -283,9 +283,9 @@ class OrderedHost(FakeHost):
         super().__init__(*a, **kw)
         self.events: list[str] = []
 
-    def run(self, script, check=True, timeout=0):
+    def run(self, script, raise_on_failure=False, timeout=0):
         self.events.append("run: " + script)
-        return super().run(script, check, timeout)
+        return super().run(script, raise_on_failure, timeout)
 
     def write(self, path, content, mode="0644"):
         self.events.append("write: " + path)

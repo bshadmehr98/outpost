@@ -208,7 +208,7 @@ def status(platform: Platform, servers: Servers) -> dict:
     for name, where in urls(platform, servers).items():
         if not where["set_up"]:
             continue
-        out = Host(where["node"]).run(f"curl -fsS --max-time 5 http://127.0.0.1:{where['port']}/healthz", check=False)
+        out = Host(where["node"]).run(f"curl -fsS --max-time 5 http://127.0.0.1:{where['port']}/healthz")
         try:
             health = json.loads(out.stdout) if out.ok else None
         except ValueError:

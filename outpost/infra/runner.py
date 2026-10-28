@@ -69,20 +69,20 @@ def install(host, ctx: common.NodeContext, labels: list[str], registration_token
     g = ctx.gitea
     url = g.generic("gitea-runner", versions.RUNNER, "gitea-runner")
     log(f"==> {host.alias}: Actions runner")
-    if versions.RUNNER not in host.run(f"{BIN} --version 2>/dev/null || true").stdout:
+    if versions.RUNNER not in host.run(f"{BIN} --version 2>/dev/null || true", raise_on_failure=True).stdout:
         log(f"  [{host.alias}] installing gitea-runner {versions.RUNNER} from Gitea")
-        host.run(f"systemctl stop outpost-runner 2>/dev/null || true\n{common.curl(ctx, url, BIN)} && chmod 755 {BIN}")
-    host.run(f"mkdir -p {HOME}/work /etc/outpost")
+        host.run(f"systemctl stop outpost-runner 2>/dev/null || true\n{common.curl(ctx, url, BIN)} && chmod 755 {BIN}", raise_on_failure=True)
+    host.run(f"mkdir -p {HOME}/work /etc/outpost", raise_on_failure=True)
     host.write(CONFIG, RUNNER_CONFIG)
     name = host.alias
-    if name not in registered or not host.run(f"test -s {HOME}/.runner", check=False).ok:
+    if name not in registered or not host.run(f"test -s {HOME}/.runner").ok:
         host.run(
             f"systemctl stop outpost-runner 2>/dev/null || true\nrm -f {HOME}/.runner\ncd {HOME}\n"
             f"HOME={HOME} {BIN} register --config {CONFIG} --no-interactive --instance {g.url} "
-            f"--token {shlex.quote(registration_token)} --name {shlex.quote(name)} --labels {shlex.quote(','.join(labels))}")
+            f"--token {shlex.quote(registration_token)} --name {shlex.quote(name)} --labels {shlex.quote(','.join(labels))}", raise_on_failure=True)
         log(f"  [{host.alias}] registered runner {name} with Gitea")
     host.write("/etc/systemd/system/outpost-runner.service", UNIT.format(labels=shlex.quote(",".join(labels))))
-    host.run("systemctl daemon-reload && systemctl enable outpost-runner >/dev/null 2>&1; systemctl restart outpost-runner && sleep 1 && systemctl is-active outpost-runner")
+    host.run("systemctl daemon-reload && systemctl enable outpost-runner >/dev/null 2>&1; systemctl restart outpost-runner && sleep 1 && systemctl is-active outpost-runner", raise_on_failure=True)
     log(f"  [{host.alias}] actions runner active, labels: {', '.join(labels)}")
     return {"node": host.alias, "labels": labels}
 

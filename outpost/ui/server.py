@@ -284,13 +284,14 @@ def ssh_check(platform: Platform, alias: str) -> dict:
     """Reach a host the way Outpost will: ssh, then become root. Says what is missing in plain words."""
     from .. import ssh
     from ..ssh import Host, SshError
+    from ..ssh.options import ssh_options
     if not re.fullmatch(r"[A-Za-z0-9._-]+", alias or ""):
         return {"ok": False, "message": "that is not an SSH alias"}
     try:
         ssh.use_config(load_servers(platform.servers_file).ssh_config)
     except ConfigError:
         pass
-    plain = subprocess.run(["ssh", *ssh._base_opts(8), alias, "id -un"], capture_output=True, text=True)
+    plain = subprocess.run(["ssh", *ssh_options(8), alias, "id -un"], capture_output=True, text=True)
     if plain.returncode != 0:
         return {"ok": False, "message": f"ssh {alias} failed: {plain.stderr.strip() or 'no answer'}"}
     user = plain.stdout.strip()
@@ -316,8 +317,8 @@ def server_status(platform: Platform, alias: str) -> dict:
     host = Host(alias, connect_timeout=8)
     try:
         state = egress.status(host)
-        log = host.run("tail -n 40 /var/log/outpost-egress.log 2>/dev/null || true", check=False).stdout
-        facts = host.run("uptime -p 2>/dev/null; df -h / | awk 'NR==2{print $4\" free of \"$2}'", check=False).stdout.strip().splitlines()
+        log = host.run("tail -n 40 /var/log/outpost-egress.log 2>/dev/null || true").stdout
+        facts = host.run("uptime -p 2>/dev/null; df -h / | awk 'NR==2{print $4\" free of \"$2}'").stdout.strip().splitlines()
     except SshError as e:
         return {"ok": False, "message": str(e).splitlines()[-1]}
     return {"ok": True, "egress": state, "log": log, "uptime": facts[0] if facts else "", "disk": facts[1] if len(facts) > 1 else ""}
