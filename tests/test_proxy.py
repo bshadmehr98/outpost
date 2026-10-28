@@ -662,8 +662,8 @@ def test_cli_parses_proxy_setup_and_verify(workspace_dir, capsys):
 
 
 def test_check_needing_the_proxy_is_skipped_without_one(workspace_dir, monkeypatch, capsys):
-    import outpost.checks as checksmod
     import outpost.system as systemmod
+    from outpost.checks import run as checksmod
 
     Workspace(workspace_dir).write_state("gitea", {"ip": "10.0.0.5"})
     monkeypatch.setattr(systemmod, "Host", lambda alias: FakeHost(alias))
@@ -676,8 +676,8 @@ def test_check_needing_the_proxy_is_skipped_without_one(workspace_dir, monkeypat
 
 
 def test_check_env_comes_from_the_proxy_state(workspace_dir, monkeypatch):
-    import outpost.checks as checksmod
     import outpost.system as systemmod
+    from outpost.checks import run as checksmod
 
     path = workspace_dir / "servers.yml"
     path.write_text(path.read_text() + "\negress_proxy: {allow: ['*.sendgrid.net', example.org]}\n")
