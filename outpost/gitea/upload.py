@@ -14,7 +14,7 @@ import tempfile
 from pathlib import Path
 
 from .. import box as boxmod
-from .. import oci
+from .. import oci, pki
 from ..infra import clients
 from ..infra.clients import GiteaInfo, ProxyInfo
 from .client import GiteaClient
@@ -106,7 +106,8 @@ def push_config_image(client: GiteaClient, gitea: GiteaInfo, ca_pem: str, distro
     apk_key = client.alpine_key() if apk_branches else None
     rpm_key = client.rpm_key() if rpm_distros else None
     files = clients.config_image_files(gitea, ca_pem, apt_key, distros, apk_key=apk_key, apk_branches=apk_branches,
-                                       rpm_key=rpm_key, rpm_distros=rpm_distros, proxy=proxy)
+                                       rpm_key=rpm_key, rpm_distros=rpm_distros, proxy=proxy,
+                                       ca_hash=pki.subject_hash(ca_pem))
     with tempfile.TemporaryDirectory(prefix="outpost-config-image-") as tmp:
         layout = oci.build_layout(files, Path(tmp), gitea.config_image)
         client.ensure_org(gitea.org)

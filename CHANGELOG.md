@@ -28,6 +28,8 @@ All notable changes to Outpost. The format follows Keep a Changelog; versions fo
 
 ### Fixed
 - `outpost upload` failed at the first image with `NAME_INVALID`: the first version of the one-organisation layout joined owner and image as `library--python`, which the OCI spec allows but Gitea's own name rule (one `.`, `_` or `-` between alphanumerics) rejects. Images now use the nested path `pkgs/library/python`, checked against a real Gitea in the integration suite.
+- `apk add` over https in a build failed with `certificate verify failed`: apk has no CA option and reads only OpenSSL's defaults, and an Alpine base has no `update-ca-certificates`. The config image now also carries the CA as `/etc/ssl/certs/<subject hash>.0`, where OpenSSL looks it up (`hello-alpine` on the lab).
+- The full-flow integration test asked for the old check name `apt sources are gitea only`.
 
 ## 0.1.0 - 2026-10-26
 

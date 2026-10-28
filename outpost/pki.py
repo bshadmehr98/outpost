@@ -20,6 +20,11 @@ def _openssl(*args: str, input: bytes | None = None) -> bytes:
     return result.stdout
 
 
+def subject_hash(pem: str) -> str:
+    """OpenSSL's subject hash of a certificate, the name it looks for in a CA directory: `<hash>.0`."""
+    return _openssl("x509", "-noout", "-subject_hash", input=pem.encode()).decode().strip()
+
+
 def ensure_ca(pki_dir: Path, secrets_dir: Path, name: str = "Outpost CA") -> Path:
     cert, key = pki_dir / "ca.crt", secrets_dir / "ca.key"
     if cert.exists() and key.exists():

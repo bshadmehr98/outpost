@@ -283,3 +283,11 @@ def platform_dir(tmp_path):
     from outpost.cli import main
     assert main(["--dir", str(tmp_path), "init"]) == 0
     return tmp_path
+
+
+@pytest.fixture(scope="session")
+def ca_pem(tmp_path_factory):
+    """A real CA certificate (openssl is required anyway), for code that hashes or parses the CA."""
+    from outpost import pki
+    d = tmp_path_factory.mktemp("pki")
+    return pki.ensure_ca(d / "pki", d / "secrets").read_text()

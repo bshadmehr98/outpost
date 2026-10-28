@@ -30,7 +30,8 @@ services:
 ```
 
 The same two lines work on an Alpine base, where `apk add` is answered by Gitea's Alpine registry
-(the config image carries `/etc/apk/repositories` and Gitea's signing key under `/etc/apk/keys/`):
+(the config image carries `/etc/apk/repositories`, Gitea's signing key under `/etc/apk/keys/`, and the
+CA as `/etc/ssl/certs/<hash>.0`, where apk's OpenSSL looks it up, since apk has no CA option of its own):
 
 ```dockerfile
 ARG GITEA

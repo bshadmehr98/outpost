@@ -56,7 +56,7 @@ With the organisation `pkgs` and the name `gitea.lab`:
 | pip | `/etc/pip.conf` `index-url` | `https://gitea.lab/api/packages/pkgs/pypi/simple` |
 | npm | `/etc/npmrc` `registry` | `https://gitea.lab/api/packages/pkgs/npm/` |
 | apt | `sources.list.d/outpost.list` | `deb [signed-by=/etc/outpost/gitea-apt.asc] https://gitea.lab/api/packages/pkgs/debian bookworm main` |
-| apk | `/etc/apk/repositories`; key in `/etc/apk/keys/pkgs@<fingerprint>.rsa.pub` | `https://gitea.lab/api/packages/pkgs/alpine/v3.20/main` |
+| apk | `/etc/apk/repositories`; key in `/etc/apk/keys/pkgs@<fingerprint>.rsa.pub`; the CA as `/etc/ssl/certs/<subject hash>.0` in the config image | `https://gitea.lab/api/packages/pkgs/alpine/v3.20/main` |
 | dnf / yum | `/etc/yum.repos.d/outpost.repo`, one `[outpost-<distro>]` per distro; key `/etc/outpost/gitea-rpm.asc` | `baseurl=https://gitea.lab/api/packages/pkgs/rpm/rocky9` |
 | docker | `certs.d/gitea.lab/ca.crt`; the image name itself | `gitea.lab/pkgs/<owner>/<image>:<tag>`, e.g. `gitea.lab/pkgs/library/python:3.12-slim` |
 | k3s / containerd | `registries.yaml` with the CA for `gitea.lab`; the image name itself | the same `gitea.lab/pkgs/<owner>/<image>:<tag>` |

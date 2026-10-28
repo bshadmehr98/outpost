@@ -33,6 +33,7 @@ from dataclasses import dataclass, field
 from urllib.parse import quote
 
 PATH_CA = "/etc/outpost/ca.crt"
+PATH_CA_DIR = "/etc/ssl/certs"           # OpenSSL's default CA directory, looked up by subject hash
 PATH_APT_KEY = "/etc/outpost/gitea-apt.asc"
 PATH_RPM_KEY = "/etc/outpost/gitea-rpm.asc"
 PATH_APK_KEYS = "/etc/apk/keys"            # apk only reads keys from here, under the name the signer used
@@ -271,12 +272,17 @@ def host_files(gitea: GiteaInfo, ca_pem: str, node_ip: str, proxy: ProxyInfo | N
 def config_image_files(gitea: GiteaInfo, ca_pem: str, apt_key: str | None, distros: list[str],
                        apk_key=None, apk_branches: list[str] | None = None,
                        rpm_key: str | None = None, rpm_distros: list[str] | None = None,
-                       proxy: ProxyInfo | None = None) -> dict[str, tuple[bytes, int]]:
+                       proxy: ProxyInfo | None = None, ca_hash: str | None = None) -> dict[str, tuple[bytes, int]]:
     """Text files only: the config image is copied onto any base, so it must not carry a distro's binaries.
+    `ca_hash` is the CA's OpenSSL subject hash (pki.subject_hash): the CA is also written as
+    /etc/ssl/certs/<hash>.0, where OpenSSL's default lookup finds it. apk has no CA option of its own and an
+    Alpine base has no update-ca-certificates, so this is how `apk add` over https trusts Gitea in a build.
     With a proxy it carries /etc/outpost/proxy.env and the profile.d exports, for interactive shells and
     env_file; RUN steps get the variables from the Docker client config on the node, not from these files."""
     merged = {**disabled_apt_sources(), **disabled_os_sources(apk_branches),
               **client_files(gitea, ca_pem, apt_key, distros, apk_key, apk_branches, rpm_key, rpm_distros, proxy=proxy)}
     if proxy:
         merged[PATH_PROFILE] = proxy_exports(proxy)
+    if ca_hash:
+        merged[f"{PATH_CA_DIR}/{ca_hash}.0"] = ca_pem
     return {path: (content.encode(), 0o644) for path, content in merged.items()}

@@ -225,3 +225,15 @@ def test_verify_script_and_parse():
     host = FakeHost(responses=[(r"CHECK", "CHECK|a|OK|x\n")])
     assert verify.verify_node(host, CTX, []) == [{"name": "a", "ok": True, "detail": "x"}]
     assert verify.verify_node(FakeHost(), CTX, [])[0]["name"] == "connect"
+
+
+def test_config_image_puts_the_ca_where_openssl_looks_it_up(ca_pem):
+    """apk has no CA option and an Alpine base has no update-ca-certificates, so `apk add` over https only trusts
+    Gitea when the CA sits in OpenSSL's default directory under its subject hash."""
+    import subprocess
+    from outpost import pki
+    h = pki.subject_hash(ca_pem)
+    assert h == subprocess.run(["openssl", "x509", "-noout", "-subject_hash"], input=ca_pem.encode(), capture_output=True).stdout.decode().strip()
+    image = clients.config_image_files(G, ca_pem, None, [], ca_hash=h)
+    assert image[f"/etc/ssl/certs/{h}.0"][0] == image["/etc/outpost/ca.crt"][0] == ca_pem.encode()
+    assert not any(p.startswith("/etc/ssl/") for p in clients.config_image_files(G, ca_pem, None, []))

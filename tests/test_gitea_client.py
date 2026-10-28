@@ -100,7 +100,7 @@ def test_rpm_upload_per_group_and_key(client, fake_gitea, tmp_path):
     assert "PGP" in client.rpm_key()
 
 
-def test_upload_box_sends_apk_and_rpm_and_records_them_for_the_config_image(client, fake_gitea, tmp_path):
+def test_upload_box_sends_apk_and_rpm_and_records_them_for_the_config_image(client, fake_gitea, tmp_path, ca_pem):
     from outpost import box as boxmod
     from outpost.gitea.upload import upload_box
     from outpost.infra.clients import GiteaInfo
@@ -113,7 +113,7 @@ def test_upload_box_sends_apk_and_rpm_and_records_them_for_the_config_image(clie
     (box / "rpm" / "fedora40" / "curl-8.6.0-8.fc40.x86_64.rpm").write_bytes(b"rpm2")
     boxmod.write_manifest(box)
     assert boxmod.distros_in(box) == [] and boxmod.distros_in(box, "apk") == ["v3.20"] and boxmod.distros_in(box, "rpm") == ["fedora40", "rocky9"]
-    stats = upload_box(box, client, GiteaInfo(name="gitea.internal", ip="10.0.0.5", org="pkgs"), "CA PEM", log=lambda *_: None)
+    stats = upload_box(box, client, GiteaInfo(name="gitea.internal", ip="10.0.0.5", org="pkgs"), ca_pem, log=lambda *_: None)
     assert stats["apk"] == {"uploaded": 1, "exists": 0} and stats["rpm"] == {"uploaded": 2, "exists": 0}
     assert stats["config_image"] == {"distros": [], "apk_branches": ["v3.20"], "rpm_distros": ["fedora40", "rocky9"]}
     assert ("GET", "/api/packages/pkgs/alpine/key") in fake_gitea.requests and ("GET", "/api/packages/pkgs/rpm/repository.key") in fake_gitea.requests
@@ -121,7 +121,7 @@ def test_upload_box_sends_apk_and_rpm_and_records_them_for_the_config_image(clie
     assert ("pkgs/config", "latest") in fake_gitea.manifests
 
 
-def test_upload_puts_every_image_under_the_organisation(client, fake_gitea, tmp_path):
+def test_upload_puts_every_image_under_the_organisation(client, fake_gitea, tmp_path, ca_pem):
     """python:3.12-slim lands as pkgs/library/python, bitnami/redis as pkgs/bitnami/redis; no other org is made."""
     from outpost import box as boxmod
     from outpost import oci
@@ -134,7 +134,7 @@ def test_upload_puts_every_image_under_the_organisation(client, fake_gitea, tmp_
     boxmod.write_manifest(box)
     gitea = GiteaInfo(name="gitea.internal", ip="10.0.0.5", org="pkgs")
     lines = []
-    stats = upload_box(box, client, gitea, "CA PEM", log=lines.append)
+    stats = upload_box(box, client, gitea, ca_pem, log=lines.append)
     assert stats["images"] == {"uploaded": 3, "exists": 0}
     stored = {repo for repo, _tag in fake_gitea.manifests}
     assert stored == {"pkgs/library/python", "pkgs/bitnami/redis", "pkgs/org/app", "pkgs/config"}
