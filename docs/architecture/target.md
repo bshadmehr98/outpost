@@ -187,7 +187,7 @@ Gone: `paths.py`, `config.py`, `cli.py`, `oci.py`, `hosts.py`, `demo.py`, `repor
 cli/
   __init__.py     the flow of the whole tool in the docstring, in the order you use it; re-exports main, build_parser
   main.py         COMMANDS (ordered tuple of the modules below), build_parser(), main(): dispatch, errors -> exit codes
-  output.py       say() (was log), print_verifications() (was _print_results)
+  output.py       say() (was log), say_error()
   init.py  needs.py  fetch.py  pack.py  gitea.py  upload.py  infra.py  check.py  demo.py
   egress.py  proxy.py  ui.py  lab.py  hosts.py  report.py  pki.py
 ```
@@ -212,6 +212,7 @@ def run(args) -> int:
 
 Each `run()` is a short recipe: load the system, call one or two module functions, print.
 `pyproject.toml` keeps `outpost = "outpost.cli:main"`, so `cli/__init__.py` re-exports `main`.
+The docstring of `cli/__init__.py` is also `outpost --help`, so its file map is a comment below it.
 
 | today in cli.py | goes to |
 |---|---|
@@ -224,7 +225,7 @@ Each `run()` is a short recipe: load the system, call one or two module function
 | `_proxy_info_or_warn` | `endpoints.proxy_endpoint_or_none(system, gitea, log)` |
 | `_add_proxy_package` | `needs.all_needs(system)` (loads needs, adds pinned files and tinyproxy) |
 | `_node_context` | `infra.context.node_context(system, infra)` |
-| `_print_results` | `cli/output.print_verifications` |
+| `_print_results` | `infra/verify.log_verifications(node, results, log)` (built in A): infra setup/verify and the proxy verify log through it, so `rotate_ca` gets the same lines |
 | `cmd_init` | `cli/init.py` + `Workspace.create(target)` |
 | `cmd_needs` | `cli/needs.py` (prints) + `needs.all_needs(system)` |
 | `cmd_fetch` | `cli/fetch.py` + `fetch.fetch_into_box(system, needs, only, log)` (writes state) + `fetch.failures(results)` |
@@ -234,7 +235,7 @@ Each `run()` is a short recipe: load the system, call one or two module function
 | `cmd_infra`, `_infra_setup` | `cli/infra.py` + `infra.set_up_infra` / `infra.verify_infra` |
 | `UPGRADE_SCRIPT`, `_infra_upgrade` | `infra/upgrade.py: upgrade_nodes(system, hosts, log)` |
 | `_install_runner` | `infra/runner.py: install_runner_for(system, ctx, host, log)` |
-| `cmd_check`, `_proxy_check_env` | `cli/check.py` + `checks.run_checks(system, infra, only, log)` |
+| `cmd_check`, `_proxy_check_env` | `cli/check.py` + `checks.checks_for(system, infra, only)` + `checks.run_checks(system, infra, checks, log)` + `checks.proxy_check_env(system)` |
 | `cmd_demo` | `cli/demo.py` (prints the status table) + `demo.push/status(system)` |
 | `cmd_proxy` | `cli/proxy.py` + `infra.proxy.set_up_egress_proxy(system, log)` / `verify_egress_proxy(system)` |
 | `cmd_egress` | `cli/egress.py` + `egress.target_hosts(system, target)` + `egress.seal_host/open_host/seal_status` |
@@ -267,7 +268,7 @@ class AirGappedSystem:
 |---|---|---|
 | `workspace` | `Workspace` | `Workspace.open(root)`: raises `ConfigError("No servers.yml in {root}. Run `outpost init` here, or pass --dir.")` (today's wording) |
 | `servers` | `Servers` | `config.load_servers(workspace.servers_file)`, once, in `load()` |
-| `mirrors` | `Mirrors` | `config.load_mirrors(workspace.mirrors_file)`, once, in `load()` |
+| `mirrors` | `Mirrors` | `config.load_mirrors(workspace.mirrors_file)`, on first use (a `cached_property`), so a broken mirrors.yml stops only needs and fetch, as before |
 | side effects of `load()` | | `ssh.use_config(servers.ssh_config)` and `versions.use_arch(servers.arch)`, as `cli._servers` does today |
 | `state(name, default=None)` | one `state/<name>.json` | read from disk **on every call** (`workspace.read_state`) |
 | `write_state(name, data)` | | `workspace.write_state` |
@@ -280,6 +281,8 @@ class AirGappedSystem:
 | `proxy_host` | `Host \| None` | `host(servers.egress_proxy.host)` when servers.yml has an egress proxy |
 | `infra(name)` | `InfraConfig` | `servers.infra(name)` |
 | `set_up_infras()` | `list[InfraConfig]` | the infrastructures that have a `state/infra-<name>.json` (used by proxy setup, pki rotate, demo push) |
+| `gitea_is_set_up()` | `bool` | `state/gitea.json` exists (pki rotate) |
+| `AirGappedSystem(workspace, servers)` | | the plain constructor; `load()` is the usual way in |
 
 Things it does **not** hold: the Gitea and proxy endpoints (`endpoints.py` works them out, because
 that takes rules and maybe an ssh call), needs (`needs.all_needs(system)`), and anything cached
@@ -316,7 +319,7 @@ from state.
 | `config.py` | `config/` package | `config.__all__` no longer lists `versions` |
 | `infra.clients.GiteaInfo` | `endpoints.GiteaEndpoint` | it says how nodes reach Gitea; easy to confuse with `GiteaConfig` today |
 | `infra.clients.ProxyInfo` | `endpoints.ProxyEndpoint` | |
-| `gitea.connect.gitea_info(platform, servers)` | `endpoints.gitea_endpoint(system)` | |
+| `gitea.connect.gitea_info(platform, servers)` | `endpoints.gitea_endpoint(system)`, and the pure `endpoints.make_gitea_endpoint(gitea_config, gitea_state)` | done in A; `demo` calls the pure one until C gives it a `system` |
 | `infra.proxy.info(cfg, gitea, gitea_host, ip)` | `endpoints.make_proxy_endpoint(...)` | the pure part |
 | `gitea.connect.token_for(platform)` | `gitea.connect.api_token(system)` | |
 | `gitea.connect.connect(platform, servers)` | `gitea.connect(system)` | |
@@ -338,8 +341,8 @@ from state.
 | `pki.sign`, `pki.verify` | `pki.sign_file`, `pki.signature_is_valid` | |
 | `infra/egress.py` | `outpost/egress.py` | it is used by gitea, infra, proxy, cli, ui |
 | `egress.install`, `seal`, `open_`, `status`, `script` | `install_seal`, `seal_host`, `open_host`, `seal_status`, `seal_script` | |
-| `egress.PRIVATE` | `client_config.PRIVATE_NETS` (one list) | it is a copy of the same list today |
-| `infra.common.PROXY_USER` | `egress.PROXY_USER` | the only owner the seal exempts |
+| `egress.PRIVATE` | `client_config.PRIVATE_NETS` (one list) | it is a copy of the same list today. Since A, `clients.PRIVATE_NETS` lives in `endpoints.PRIVATE_NETS` (no_proxy needs it, and endpoints cannot import `infra`); D moves it to `client_config` and makes endpoints import it from there |
+| `infra.common.PROXY_USER` | `egress.PROXY_USER` | the only owner the seal exempts; done in A (`infra/egress.py`), so `infra/context.py` need not import `common` |
 | `infra.common.RUNNER_HOME` | `client_config.RUNNER_HOME` (runner.py uses it too) | today it is a copy of `runner.HOME` |
 | `infra/hostsfile.py`: `script`, `rewrite`, `install` | `outpost/hostsfile.py`: `boot_script`, `rewrite_script`, `keep_names(host, entries)` | |
 | `infra/clients.py` | `outpost/client_config/` | `host_files` -> `node_files` |
@@ -383,6 +386,7 @@ imports sit inside functions). Fix every old name you find.
 | **Signatures** | **Decision:** A renames `Platform` to `Workspace` everywhere (a mechanical change). Functions that already exist keep their parameters, so the cli passes `system.workspace, system.servers` to them for now. Each later package converts its own functions to `system` and updates the cli lines that call them. A stays reviewable, and B, C and D each own their own signature changes. |
 | **Risks** | Tests patch `outpost.cli.Host` (test_proxy: 668, 689, 802): change them to `outpost.system.Host`. That only works if every Host those commands use comes from `system`, so `node_context`, `run_checks` and the proxy recipe must use `system.host()`. Tests patch `cli.log` and call `cli._infra_upgrade(platform, servers, infra, [host])` (test_day_two): change them to `upgrade_nodes(system, hosts, log=...)`. `test_proxy` checks `args.func is cmd_proxy`: change it to `args.run is proxy_command.run`. Error output: `main` must still print `error: <message>` to stderr with exit 1 for `ConfigError, RuntimeError, SshError, HttpError, ValueError`, exit 2 for a missing infra name, and 130 on Ctrl-C. Tests read stderr ("no egress_proxy section"). `AirGappedSystem.load` reads mirrors.yml for every command, where today only needs and fetch do. Grep the tests for a broken mirrors.yml used with any other command. Import cycles: `infra/setup.py` imports `gitea.connect` while `gitea/setup.py` still imports `infra.egress`. Keep `infra/__init__.py` from importing `infra/setup.py` until D moves egress down a layer. The dashboard runs `python -m outpost --dir <root> ...`: that keeps working. Tests build paths to `templates/platform` (test_checks: 7, test_proxy: 818). |
 | **Verify** | the four checks in CLAUDE.md; the help diff; `python -m pytest -q tests/integration` (imports); `grep -rn "Platform\|outpost.paths\|platform_dir\b" outpost` is empty (the test fixture `platform_dir` may become `workspace_dir` in tests); `python -m outpost init /tmp/w && python -m outpost --dir /tmp/w needs` works |
+| **Done (as built)** | All of the above. Also in A: `fetch.fetch_into_box` and `fetch.failures` (listed under B); `egress.target_hosts(system, target)` in `infra/egress.py`; `hosts.refresh` gets `make_host=system.host`; bug 1 on the cli side (`gitea backup --out` defaults to `workspace.backups_dir`); `upload` prints a `warning:` line when the box is unsigned or `pki/box.pub` is missing. `set_up_infra`, `verify_infra`, `upgrade_nodes` and `rotate` return a bool (all passed); the cli turns it into the exit code and prints "Next: ..." itself, so `pki rotate` no longer prints that line per infrastructure. Left for later: `needs.all_needs` imports `infra.proxy` inside the function until B moves the proxy package rules and the distro tables down; `infra/proxy.verify` and `infra/verify.proxy_checks` still import each other lazily (D); `gitea.setup`, `gitea.backup`, `demo` still make their own `Host` and take `(workspace, servers)` (C). |
 
 ### B. Getting things in: needs, http, oci, box, fetch, versions, pki, distros
 
@@ -422,7 +426,7 @@ Line numbers are for today's code (commit `aac067b`).
 
 | # | where | bug | fix in |
 |---|---|---|---|
-| 1 | `cli.py:727`, `cli.py:252` | `gitea backup --out` defaults to `"backups"`, relative to the **current directory**, not the workspace. `gitea setup` (`gitea/setup.py:151`) and the dashboard (`ui/server.py:221`) use `<workspace>/backups`. So backups land wherever outpost is run, and `tests/integration/test_full_flow.py:161-162` (`test_2b`) restores the newest archive in `rig/backups`, which is the older one from the upgrade in `test_2`. Fix: default `None` -> `system.workspace.backups_dir`; help "(default: backups/ in the workspace)". | C |
+| 1 (fixed in A) | `cli.py:727`, `cli.py:252` | `gitea backup --out` defaults to `"backups"`, relative to the **current directory**, not the workspace. `gitea setup` (`gitea/setup.py:151`) and the dashboard (`ui/server.py:221`) use `<workspace>/backups`. So backups land wherever outpost is run, and `tests/integration/test_full_flow.py:161-162` (`test_2b`) restores the newest archive in `rig/backups`, which is the older one from the upgrade in `test_2`. Fix: default `None` -> `system.workspace.backups_dir`; help "(default: backups/ in the workspace)". | C |
 | 2 | `infra/verify.py:21`, `cli.py:357` (`UPGRADE_SCRIPT`) | `case " $ID $ID_LIKE "` under `set -u`: `Host.run` puts `set -euo pipefail` at the top (`ssh/host.py:68`), and Debian and Alpine have no `ID_LIKE` in `/etc/os-release`. So on Debian and Alpine nodes, the verifications "package sources are gitea only" and "package index updates offline" fail ("ID_LIKE: unbound variable"), so does the proxy's "tinyproxy installed from gitea" (`infra/proxy.py:495`), and `infra upgrade` stops. The lab is Ubuntu, so the integration tests never see it. Fix: `${ID:-} ${ID_LIKE:-}` in both, plus a unit test whose script runs under `bash -u` with `ID_LIKE` unset. | D |
 | 3 | `infra/k3s.py:75` | `INSTALL_K3S_EXEC={exec_args!r}` uses Python's `repr()` as shell quoting. An `args:` with a `'` makes repr use double quotes, and then the shell expands `$` and backticks inside them. Fix: `shlex.quote`. | D |
 | 4 | `lab.py:125-130` | `lab up` forgets the old state (`state/*.json`, token, password) but keeps `state/hosts/*.json`. The dashboard's Machines page and the report then show the removed servers' versions and "sealed" for brand-new open ones until `hosts --refresh`. Fix: also clear `workspace.hosts_state_dir`. | D |
@@ -434,9 +438,9 @@ Line numbers are for today's code (commit `aac067b`).
 
 Worth a decision, but not bugs:
 
-- `cli.py:286`: `upload` skips the signature check without a word when the box has `manifest.sig`
-  but `pki/box.pub` is missing, or when the box is unsigned. Consider printing "not signed" /
-  "cannot check the signature: pki/box.pub is missing".
+- Done in A: `upload` prints `warning: the box is not signed (no manifest.sig), ...` or
+  `warning: cannot check the box's signature: pki/box.pub is missing` instead of skipping the check
+  without a word. B's `box.check_signature` can take over the check; keep the two lines.
 - `gitea/setup.py:216` and `gitea/backup.py:107`: the API token goes into a `curl` command line
   on the Gitea server, where `ps` can see it. `service.token_works` (package C) can pass it on
   stdin (`curl -H @-`).

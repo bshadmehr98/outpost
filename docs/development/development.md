@@ -17,9 +17,12 @@ too. How the code is written: [style](style.md). The words it uses: [glossary](.
 
 ```
 outpost/
-  cli.py          the commands, in the order you use them
-  paths.py        the platform folder layout
-  config.py       servers.yml and mirrors.yml
+  cli/            the commands: main.py (COMMANDS, the parser), one small file per command
+  workspace.py    the workspace layout: Workspace, state, secrets
+  config/         servers.yml and mirrors.yml
+  system.py       AirGappedSystem: workspace, config, state, secrets and Hosts, in one object
+  endpoints.py    how nodes reach Gitea and the egress proxy
+  rotate_ca.py    `outpost pki rotate`
   versions.py     pinned Gitea, Docker, Compose, k3s versions and URLs
   needs/          needs files and lockfile parsers
   fetch/          one module per kind: images, pypi, npm, apt, files
@@ -29,7 +32,8 @@ outpost/
   http.py         urllib wrapper: private CA, Host header, auth, downloads
   ssh/            Host.run / write / put / get and the Tunnel (one module per job; see its __init__.py)
   gitea/          client (API + registries), setup (install over SSH), upload, connect
-  infra/          clients (config files), egress, common steps, compose, swarm, k3s, verify, runner
+  infra/          clients (config files), egress, context, common steps, compose, swarm, k3s, verify,
+                  runner, setup, upgrade, proxy
   demo.py         the demo project: workflow generation, push through Gitea's API, status
   checks/         smoke check loader and runner
   ui/             the dashboard: server.py (JSON endpoints), projects.py (folder scan), index.html

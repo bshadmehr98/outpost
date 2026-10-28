@@ -11,15 +11,15 @@ code is cleaned up.
   and maybe an egress proxy. Outpost builds and looks after one air-gapped system per workspace.
 
 **AirGappedSystem**
-: The context object that knows the whole state of one air-gapped system: its workspace, its
+: The context object (`outpost/system.py`) that knows the whole state of one air-gapped system: its workspace, its
   config, its state and its secrets. It only holds and reads things; it has no logic of its own.
   Commands get one and pass it on, instead of passing the workspace, the config and the
   secrets one by one.
 
 **workspace**
 : The folder made by `outpost init`, and everything Outpost keeps in it. One workspace is one
-  air-gapped system. Code today calls it "platform" (class `Platform` in `outpost/paths.py`,
-  "platform folder" in the docs): **workspace** wins.
+  air-gapped system. In code it is class `Workspace` in `outpost/workspace.py`. Older docs call
+  it "platform folder": **workspace** wins.
 
 **config**
 : What the user writes by hand to describe the system: `servers.yml` and `mirrors.yml` (and the

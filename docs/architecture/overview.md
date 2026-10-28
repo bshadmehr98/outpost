@@ -36,7 +36,7 @@ flowchart TB
 
 | piece | lives in | job |
 |---|---|---|
-| CLI (`outpost/cli.py`) | laptop | one function per command, in the order you use them |
+| CLI (`outpost/cli/`) | laptop | one file per command, in the order you use them |
 | needs + fetch (`outpost/needs`, `outpost/fetch`) | laptop | lockfiles in, box out |
 | box (`outpost/box.py`, `outpost/oci.py`) | laptop | manifest, OCI layouts, pack, sign |
 | ssh (`outpost/ssh/`) | laptop | `Host.run / write / put / get` and `Tunnel`; the only way servers are touched |

@@ -350,7 +350,7 @@ publishes them as a site: `uvx --with mkdocs-material mkdocs serve`.
 
 ```
 outpost/
-  cli.py          the commands, in the order you use them
+  cli/            the commands, one file each; system.py holds one workspace's config, state and servers
   needs/ fetch/   lockfile parsers; one fetcher per kind (images, pypi, npm, apt, apk, rpm, files)
   box.py oci.py   manifest, pack, sign; pull and push images over HTTP
   ssh/ http.py    Host.run / write / put / get, the Tunnel; urllib with a private CA
@@ -363,7 +363,7 @@ outpost/
   ui/             the dashboard: server.py, status.py, explain.py (errors into sentences), projects.py, index.html
   lab.py          throwaway servers in Docker
   templates/      what `outpost init` copies, and the lab server's Dockerfile
-tests/            217 unit tests with a fake SSH host and a fake Gitea speaking real HTTP
+tests/            unit tests with a fake SSH host and a fake Gitea speaking real HTTP
 tests/integration real Gitea container and Docker Hub; the full flow on the lab (fetch, a Gitea upgrade,
                   backup and restore, compose, swarm, k3s, the demo, a reboot, the dashboard's server side)
 ```
