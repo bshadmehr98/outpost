@@ -324,11 +324,14 @@ def setup(host, ctx: common.NodeContext, cfg: ProxyConfig, *, egress_allow: list
     host.run(
         f"getent group {USER} >/dev/null || groupadd --system {USER}\n"
         f"id -u {USER} >/dev/null 2>&1 || useradd --system --gid {USER} --no-create-home --home-dir /nonexistent --shell /usr/sbin/nologin {USER}\n"
-        f"mkdir -p /etc/outpost && touch {LOG_PATH} && chown {USER}:{USER} {LOG_PATH} && chmod 0640 {LOG_PATH}\n"
+        f"mkdir -p /etc/outpost && chmod 0755 /etc/outpost && touch {LOG_PATH} && chown {USER}:{USER} {LOG_PATH} && chmod 0640 {LOG_PATH}\n"
     )
     host.write(CONF_PATH, conf(p.ip, cfg.port, client_allow, version or "1.11.1"))
     host.write(ALLOW_PATH, allow_file(list(cfg.allow), g.name))
     host.write(LOGROTATE_PATH, LOGROTATE)
+    readable = host.run(f"runuser -u {USER} -- test -r {CONF_PATH} && runuser -u {USER} -- test -r {ALLOW_PATH}", check=False)
+    if not readable.ok:
+        raise RuntimeError(f"[{host.alias}] {USER} cannot read its configuration:\n{_access_report(host)}")
     log(f"  [{host.alias}] allows {', '.join(cfg.allow)} (and {g.name}); everything else gets 403")
 
     log("==> [5/6] service outpost-proxy")
@@ -337,13 +340,32 @@ def setup(host, ctx: common.NodeContext, cfg: ProxyConfig, *, egress_allow: list
                        "systemctl restart outpost-proxy && sleep 1 && systemctl is-active outpost-proxy", check=False)
     if not started.ok:
         journal = host.run("journalctl -u outpost-proxy -n 15 --no-pager 2>&1 || true", check=False).stdout.strip()
-        raise RuntimeError(f"[{host.alias}] outpost-proxy did not start:\n{journal[-800:]}")
+        raise RuntimeError(f"[{host.alias}] outpost-proxy did not start:\n{journal[-800:]}\n{_access_report(host, binary)}")
 
     log("==> [6/6] sealing, with the one exception for the proxy's own user")
     egress.install(host, g.ip, egress_allow, proxy_user=USER)
     log(f"  [{host.alias}] egress: {egress.seal(host, 'proxy setup')}; {USER} may open TCP 443 and 80, nothing else changed")
     return {"host": host.alias, "ip": p.ip, "port": cfg.port, "name": p.name, "url": p.url, "on_gitea": p.on_gitea,
             "allow": list(cfg.allow), "tinyproxy": version, "family": family, "distro": distro}
+
+
+def access_script(binary: str | None = None) -> str:
+    """Why tinyproxy may not get at its files: every directory on the way with its mode, what the proxy user
+    can read, and, with `binary`, tinyproxy run by hand as that user outside systemd's sandbox for two seconds."""
+    lines = ["set +e +o pipefail",
+             f"echo '--- namei -l {CONF_PATH}'; namei -l {CONF_PATH} 2>&1",
+             f"echo '--- id {USER}'; id {USER} 2>&1",
+             f"echo '--- as {USER}'; runuser -u {USER} -- head -c 80 {CONF_PATH} >/dev/null 2>/tmp/outpost-proxy-read.err && echo readable || cat /tmp/outpost-proxy-read.err"]
+    if binary:
+        lines.append(f"echo '--- {binary} -d -c {CONF_PATH} as {USER}, outside systemd'; "
+                     f"timeout 2 runuser -u {USER} -- {binary} -d -c {CONF_PATH} 2>&1 | tail -5; echo \"exit ${{PIPESTATUS[0]}}\"")
+        lines.append("echo '--- systemctl cat outpost-proxy'; systemctl show outpost-proxy -p User -p ProtectSystem -p ProtectHome -p PrivateTmp 2>&1")
+    return "\n".join(lines) + "\n"
+
+
+def _access_report(host, binary: str | None = None) -> str:
+    out = host.run(access_script(binary), check=False, timeout=60)
+    return (out.stdout + out.stderr).strip()[-2000:]
 
 
 # -- verify -------------------------------------------------------------------------

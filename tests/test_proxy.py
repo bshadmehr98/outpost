@@ -19,6 +19,7 @@ from outpost.infra.clients import GiteaInfo
 from outpost.infra.common import NodeContext
 from outpost.needs import Needs
 from outpost.paths import Platform
+from outpost.ssh import Result
 from tests.conftest import FakeHost
 
 G = GiteaInfo(name="gitea.internal", ip="10.0.0.5", org="pkgs")
@@ -344,6 +345,24 @@ def test_missing_package_error_shows_what_the_package_manager_saw():
     rpm = proxy.diagnose_script("rpm", G, "rocky9")
     assert "dnf makecache" in rpm and f"cat {clients.PATH_RPM_REPO}" in rpm and f"{G.rpm_repo}/rocky9/repodata/repomd.xml" in rpm
     assert "dnf info tinyproxy" in rpm
+
+
+def test_unreadable_configuration_and_failed_start_say_why():
+    facts = {"id": "ubuntu", "codename": "noble", "arch": "x86_64", "ip": "10.0.0.5"}
+    report = "--- namei -l /etc/outpost/proxy.conf\n drwx------ root root outpost\n"
+    host = FakeHost("gitea-1", facts=facts, responses=INSTALLED + [(r"--- namei", report), (r"test -r /etc/outpost/proxy.conf", Result(1, "", ""))])
+    with pytest.raises(RuntimeError, match=r"outpost-proxy cannot read its configuration:\n--- namei -l /etc/outpost/proxy.conf\n drwx------"):
+        proxy.setup(host, NodeContext(gitea=G, ca_pem="CA", proxy=ON_GITEA), CFG, egress_allow=[], client_allow=[], log=lambda *_: None)
+    assert any("chmod 0755 /etc/outpost" in s for s in host.scripts)
+
+    host = FakeHost("gitea-1", facts=facts, responses=INSTALLED + [(r"--- namei", report + "--- /usr/bin/tinyproxy -d -c\nexit 124\n"),
+                                                              (r"systemctl restart outpost-proxy", Result(3, "failed", ""))])
+    with pytest.raises(RuntimeError, match=r"did not start:(.|\n)*exit 124"):
+        proxy.setup(host, NodeContext(gitea=G, ca_pem="CA", proxy=ON_GITEA), CFG, egress_allow=[], client_allow=[], log=lambda *_: None)
+    script = proxy.access_script("/usr/bin/tinyproxy")
+    assert script.startswith("set +e +o pipefail\n") and "namei -l /etc/outpost/proxy.conf" in script
+    assert "timeout 2 runuser -u outpost-proxy -- /usr/bin/tinyproxy -d -c /etc/outpost/proxy.conf" in script
+    assert "tinyproxy -d" not in proxy.access_script()
 
 
 def test_host_checks_cover_the_exception_and_the_log():
