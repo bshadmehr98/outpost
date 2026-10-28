@@ -118,7 +118,7 @@ WantedBy=multi-user.target
 GITEA = GITEA_CLI
 
 
-def setup(platform: Platform, servers: Servers, log=print) -> dict:
+def setup(platform: Platform, servers: Servers, log=print) -> dict:  # noqa: C901 too complex; split into named steps in the refactor
     cfg = servers.gitea
     host = Host(cfg.host)
     binary = platform.box_dir / "files" / "gitea" / versions.GITEA / "gitea"

@@ -32,7 +32,7 @@ class SshError(Exception):
     """Base class for every error in outpost.ssh. Catch this to catch them all."""
 
 
-class Unreachable(SshError):
+class Unreachable(SshError):  # noqa: N818 public name of outpost.ssh, chosen to read as a sentence; rename is a refactor decision
     """ssh failed, not the command.
 
     Raised when ssh could not log in (the server is down, the address is wrong, the key was refused,
@@ -41,7 +41,7 @@ class Unreachable(SshError):
     """
 
 
-class CommandFailed(SshError):
+class CommandFailed(SshError):  # noqa: N818 public name of outpost.ssh, chosen to read as a sentence; rename is a refactor decision
     """The command ran on the server, and exited with a code other than 0.
 
     Attributes:

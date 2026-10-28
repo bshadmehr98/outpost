@@ -190,7 +190,7 @@ def _n(pattern: str, log: str, group: int = 1) -> str | None:
     return m.group(group) if m else None
 
 
-def summarize(args: list[str], log: str, exit_code: int | None) -> str:
+def summarize(args: list[str], log: str, exit_code: int | None) -> str:  # noqa: C901 too complex; split into named steps in the refactor
     """One human line for the Activity page."""
     cmd = args[0] if args else ""
     if exit_code is None:

@@ -145,19 +145,24 @@ class _Handler(BaseHTTPRequestHandler):
 
     def _authed(self):
         auth = self.headers.get("Authorization", "")
-        if self.path.startswith("/v2/") and self.path not in ("/v2/token",) and not self.path.startswith("/token"):
-            if self.gitea.require_token and not auth.startswith("Bearer good-token"):
-                self._send(
-                    401,
-                    b'{"errors":[{"code":"UNAUTHORIZED"}]}',
-                    {
-                        "WWW-Authenticate": f'Bearer realm="{self.gitea.url}/token",service="fake",scope="repository:x:pull,push"'
-                    },
-                )
-                return False
+        if (
+            self.path.startswith("/v2/")
+            and self.path not in ("/v2/token",)
+            and not self.path.startswith("/token")
+            and self.gitea.require_token
+            and not auth.startswith("Bearer good-token")
+        ):
+            self._send(
+                401,
+                b'{"errors":[{"code":"UNAUTHORIZED"}]}',
+                {
+                    "WWW-Authenticate": f'Bearer realm="{self.gitea.url}/token",service="fake",scope="repository:x:pull,push"'
+                },
+            )
+            return False
         return True
 
-    def do_GET(self):
+    def do_GET(self):  # noqa: C901 too complex; split into named steps in the refactor
         g = self.gitea
         g.requests.append(("GET", self.path))
         if self.path in ("/token", "/v2/token") or self.path.startswith(("/token?", "/v2/token?")):
@@ -257,7 +262,7 @@ class _Handler(BaseHTTPRequestHandler):
             return self._send(202, b"", {"Location": f"/v2/{m[1]}/blobs/uploads/{uid}"})
         return self._send(404, b"")
 
-    def do_PUT(self):
+    def do_PUT(self):  # noqa: C901 too complex; split into named steps in the refactor
         g = self.gitea
         g.requests.append(("PUT", self.path))
         body = self._body()

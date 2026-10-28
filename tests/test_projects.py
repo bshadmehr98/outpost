@@ -32,7 +32,7 @@ def test_read_dockerfile_skips_stages_and_args(tmp_path):
         "FROM build\nFROM web\nFROM scratch\n"
     )
     d = projects.read_dockerfile(df)
-    assert d["images"] == ["node:22-slim"] and d["apt"] == ["git", "ca-certificates=20230311".split("=")[0]]
+    assert d["images"] == ["node:22-slim"] and d["apt"] == ["git", "ca-certificates"]
     assert d["apk"] == [] and d["rpm"] == []
 
 

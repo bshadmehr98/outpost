@@ -81,7 +81,7 @@ def _add_unique(target: list, items) -> None:
             target.append(item)
 
 
-def _parse_one(path: Path, needs: Needs) -> None:
+def _parse_one(path: Path, needs: Needs) -> None:  # noqa: C901 too complex; split into named steps in the refactor
     try:
         data = yaml.safe_load(path.read_text()) or {}
     except yaml.YAMLError as e:

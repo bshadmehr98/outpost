@@ -20,7 +20,7 @@ from ..infra.clients import GiteaInfo, ProxyInfo
 from .client import GiteaClient
 
 
-def upload_box(
+def upload_box(  # noqa: C901 too complex; split into named steps in the refactor
     box: Path, client: GiteaClient, gitea: GiteaInfo, ca_pem: str, log=print, proxy: ProxyInfo | None = None
 ) -> dict:
     problems = boxmod.verify_manifest(box)

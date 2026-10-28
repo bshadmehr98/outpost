@@ -23,6 +23,7 @@ Commands run as subprocesses of this same tool, so the page can never do anythin
 the CLI cannot. Logs land in state/runs/.
 """
 
+import contextlib
 import json
 import os
 import re
@@ -127,10 +128,8 @@ def needs_detail(platform: Platform, infra_types: set[str], servers=None) -> dic
     if servers and servers.egress_proxy:
         from ..infra import proxy as proxymod
 
-        try:
+        with contextlib.suppress(ConfigError):
             proxymod.add_package(needs, servers.egress_proxy, hostsmod.cached(platform).get(servers.egress_proxy.host))
-        except ConfigError:
-            pass
     return {
         "images": needs.images,
         "pypi": {py: specs for py, specs in needs.pypi.items()},
@@ -494,7 +493,7 @@ class Handler(BaseHTTPRequestHandler):
     def _body(self) -> dict:
         return json.loads(self._body_bytes() or b"{}")
 
-    def do_GET(self):
+    def do_GET(self):  # noqa: C901 too complex; split into named steps in the refactor
         path = urlparse(self.path).path
         try:
             if path == "/":

@@ -15,7 +15,7 @@ import json
 import re
 import shutil
 import subprocess
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 from .. import oci
@@ -36,7 +36,7 @@ def _spec_parts(spec: str) -> tuple[str, str | None]:
     return (_norm(m.group(1)), m.group(2)) if m else (_norm(spec), None)
 
 
-def box_status(platform: Platform, needs: Needs) -> dict:
+def box_status(platform: Platform, needs: Needs) -> dict:  # noqa: C901 too complex; split into named steps in the refactor
     """{"kinds": {kind: {files, bytes}}, "missing": {kind: [...]}, "missing_total": n}"""
     box = platform.box_dir
     kinds = {k: {"files": 0, "bytes": 0} for k in KINDS}
@@ -93,7 +93,7 @@ def _mtime(path: Path) -> float | None:
 
 
 def _iso(ts: float | None) -> str | None:
-    return datetime.fromtimestamp(ts, timezone.utc).isoformat(timespec="seconds") if ts else None
+    return datetime.fromtimestamp(ts, UTC).isoformat(timespec="seconds") if ts else None
 
 
 def sync(platform: Platform, box: dict, infra_names: list[str]) -> dict:
@@ -235,7 +235,7 @@ def steps(log: str) -> list[dict]:
     return out
 
 
-def box_changes(platform: Platform, needs: Needs) -> dict:
+def box_changes(platform: Platform, needs: Needs) -> dict:  # noqa: C901 too complex; split into named steps in the refactor
     """Since the last upload: how many files are new in the box (by mtime). And what the box holds that no
     needs file asks for any more, so a stale box is visible before it is uploaded."""
     box = platform.box_dir
@@ -273,7 +273,7 @@ def box_changes(platform: Platform, needs: Needs) -> dict:
     if (box / "pypi").exists():
         for p in (box / "pypi").iterdir():
             if p.suffix in (".whl", ".gz", ".zip"):
-                name = _norm(re.split(r"-\d", p.name, 1)[0])
+                name = _norm(re.split(r"-\d", p.name, maxsplit=1)[0])
                 if (
                     wanted_pypi
                     and name not in wanted_pypi

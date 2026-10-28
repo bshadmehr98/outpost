@@ -108,7 +108,7 @@ td{padding:6px 8px;border-bottom:1px solid #eee;vertical-align:top}code{font-fam
 """
 
 
-def render(data: dict) -> str:
+def render(data: dict) -> str:  # noqa: C901 too complex; split into named steps in the refactor
     v = verdict(data)
     e = html.escape
     g = data["gitea"]

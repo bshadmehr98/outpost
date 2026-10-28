@@ -18,7 +18,7 @@ GitHub's 2 GB release limit. `outpost upload` accepts the folder or the tar file
 import json
 import tarfile
 import tempfile
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 from . import __version__
@@ -37,7 +37,7 @@ def write_manifest(box: Path) -> dict:
             items.append({"path": str(path.relative_to(box)), "size": path.stat().st_size, "sha256": sha256_file(path)})
     manifest = {
         "outpost": __version__,
-        "created": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        "created": datetime.now(UTC).isoformat(timespec="seconds"),
         "files": len(items),
         "bytes": sum(i["size"] for i in items),
         "items": items,

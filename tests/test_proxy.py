@@ -146,8 +146,9 @@ def test_conf_uses_documented_directives_only():
         and "FilterURLs Off" in lines
         and "FilterDefaultDeny Yes" in lines
     )
-    assert "FilterType ere" in lines and ["ConnectPort 443", "ConnectPort 80"] == [
-        x for x in lines if x.startswith("ConnectPort")
+    assert "FilterType ere" in lines and [x for x in lines if x.startswith("ConnectPort")] == [
+        "ConnectPort 443",
+        "ConnectPort 80",
     ]
     assert [x for x in lines if x.startswith("Allow")] == [
         "Allow 127.0.0.1",

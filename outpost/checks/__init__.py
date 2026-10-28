@@ -79,10 +79,11 @@ def load_checks(checks_dir: Path) -> list[Check]:
 
 
 def _tar_folder(folder: Path) -> Path:
-    tmp = tempfile.NamedTemporaryFile(prefix="outpost-check-", suffix=".tgz", delete=False)
-    with tarfile.open(tmp.name, "w:gz") as tar:
+    with tempfile.NamedTemporaryFile(prefix="outpost-check-", suffix=".tgz", delete=False) as tmp:
+        archive = Path(tmp.name)
+    with tarfile.open(archive, "w:gz") as tar:
         tar.add(folder, arcname=".")
-    return Path(tmp.name)
+    return archive
 
 
 def run_check(check: Check, host, env: dict[str, str], log=print, timeout: int = 900) -> dict:

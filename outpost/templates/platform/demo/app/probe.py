@@ -56,7 +56,7 @@ def probe(host: str, port: int, timeout: float = 2.0) -> dict:
     try:
         sock.connect(addr)
         result, detail = "REACHED", f"{addr[0]} accepted the connection"
-    except socket.timeout:
+    except TimeoutError:
         result, detail = (
             "timeout",
             f"{addr[0]} did not answer within {timeout}s (packets dropped by the firewall, or no route)",
