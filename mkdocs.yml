@@ -37,6 +37,7 @@ nav:
       - architecture/proxy.md
       - architecture/ci.md
       - architecture/security.md
+      - architecture/target.md
   - Reference:
       - reference/cli.md
       - reference/servers.md

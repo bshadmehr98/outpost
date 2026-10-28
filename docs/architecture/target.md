@@ -1,0 +1,446 @@
+# Target map for the cleanup
+
+This page is the plan the refactor agents follow. It says where every module and function of
+today's `outpost/` goes, what the new names are, and in which order the work happens. Only the code
+inside changes. The CLI commands, flags, output wording, the workspace layout on disk, file formats
+and the `servers.yml` schema stay the same. One exception: help text says "workspace" instead of
+"platform folder".
+
+Read first: [style guide](../development/style.md), [glossary](../glossary.md), `outpost/ssh/`
+(the model package).
+
+## 0. Rules every step follows
+
+| rule | what it means |
+|---|---|
+| **Layers** | A module imports only from its own layer or the layers below it. Layer 0: `ssh`, `versions`, `http`, `workspace`, `config`, `distros`. Layer 1: `system`, `endpoints`, `needs`, `box`, `pki`, `oci`, `fetch`, `hosts`, `egress`, `hostsfile`, `client_config`. Layer 2: `gitea`. Layer 3: `infra`, `checks`, `demo`. Layer 4: `report`, `ui`, `lab`, `rotate_ca`, `cli`. This removes today's lazy imports that work around cycles (`cli._proxy_info`, `verify.proxy_checks`, `proxy.host_checks`, ...). |
+| **`system` or plain values** | A function that takes `(platform, servers)` today takes `system: AirGappedSystem`. A function that takes plain values (`box: Path`, `mirrors: Mirrors`, `host`, `ctx`) keeps them. Lower-level code stays easy to test. |
+| **Only `report`, `ui` and `lab` take a `Workspace`** | They must work while `servers.yml` is missing or broken: the dashboard edits it, the report shows a half-built system, and `lab up` writes it. |
+| **Hosts come from the system** | Code gets a `Host` from `system.host(alias)`, `system.gitea_host`, `system.nodes(name)` or `system.proxy_host`. Nothing outside `system.py` calls `Host(...)`, except `ui` (its own connect timeout) and `lab`. Tests patch one name: `outpost.system.Host`. |
+| **Output** | Modules report progress through a `log=print` parameter, as today. Only `outpost/cli/` prints, through `cli/output.py`. |
+| **Splits** | Every `# noqa: C901` function, and every function over about 50 lines, becomes named steps. The noqa goes away. |
+| **Renames** | No aliases. A rename updates every caller and every test (unit and integration) in the same step. |
+
+## 1. Target tree
+
+`(new)` means a new file. `<-` shows where the code comes from today.
+
+```
+outpost/
+  __init__.py            __version__                                      <- same
+  __main__.py            python -m outpost -> cli.main                    <- same
+  workspace.py           Workspace and the layout's names                 <- paths.py
+  config/                what the user writes: servers.yml, mirrors.yml   <- config.py
+    __init__.py            overview, re-exports
+    errors.py              ConfigError
+    yaml_file.py           read_yaml_mapping()                            <- config._read_yaml
+    servers.py             GiteaConfig, InfraConfig, Servers, load_servers(), INFRA_TYPES
+    egress_proxy.py        ProxyConfig, load_egress_proxy(), proxy_allow_entry(), HOSTNAME
+    mirrors.py             Mirrors, load_mirrors()
+  system.py        (new) AirGappedSystem: the context object (section 2)
+  endpoints.py     (new) GiteaEndpoint, ProxyEndpoint, and how to work them out
+                         <- infra/clients.GiteaInfo, ProxyInfo; gitea/connect.gitea_info;
+                            infra/proxy.info; cli._proxy_info, _proxy_info_or_warn, _cached_facts
+  distros.py       (new) distro names and families, in one place
+                         <- fetch/apt DEBIAN/UBUNTU, fetch/rpm split/distro_for_host/OS_IDS,
+                            infra/common os_family/apk_branch_of, ui/projects kind_for_distro
+  versions.py            pinned versions and the CPU type                 <- same
+  http.py                Http, Response, HttpError, sha256_file           <- same
+  needs/                 what projects need, merged into one Needs
+    __init__.py            overview, re-exports
+    model.py         (new) FileNeed, NpmNeed, Needs                       <- needs/__init__
+    needs_file.py    (new) load_needs(), read_needs_file()                <- needs/__init__._parse_one, load_needs
+    pinned.py        (new) add_pinned_files(), add_proxy_package(), all_needs(system)
+                           <- needs.add_platform_files, infra/proxy.add_package/package_need, cli._add_proxy_package
+    python_lockfiles.py    requirements, poetry, uv, Pipfile               <- needs/parsers.py (Python half)
+    js_lockfiles.py        package-lock, pnpm, yarn                       <- needs/parsers.py (JS half)
+  box.py                 the box folder, its manifest, pack/unpack, signature check   <- same
+  pki.py                 CA, Gitea certificate, box signing key (openssl)  <- same
+  oci/                   container images over plain HTTP                  <- oci.py
+    __init__.py            overview, re-exports
+    refs.py                Ref, parse_ref, gitea_ref, original_ref, GITEA_IMAGE_NAME
+    registry.py            Registry (pull, push, token handling), media types
+    layout.py              build_layout, layout_ref, digest_of, write_index()
+  fetch/                 download the needs into the box                  <- same package
+    __init__.py            fetch_all(), fetch_into_box(system, ...), failures()
+    in_container.py  (new) run_in_container(): the shared `docker run` of apt/apk/rpm
+    apt.py apk.py rpm.py   one kind each (distro tables move to distros.py)
+    pypi.py npm.py images.py files.py
+  hosts/                 what each server runs: inspect, cache, roles, drift   <- hosts.py
+    __init__.py            overview, re-exports
+    inspect.py             FACTS_SCRIPT, INSTALLED, inspect_server()
+    cache.py               record_facts(), cached_facts(), inspect_and_record(), refresh_facts()
+    roles.py               server_roles()
+    drift.py               pinned_versions(), version_drift()
+  egress.py              the seal: script, unit, install/seal/open/status  <- infra/egress.py
+  hostsfile.py           keep the Gitea name in /etc/hosts                 <- infra/hostsfile.py
+  client_config/         files that point pip/npm/apt/apk/dnf/Docker at Gitea   <- infra/clients.py
+    __init__.py            overview, re-exports
+    paths.py               PATH_* constants, PRIVATE_NETS, RUNNER_HOME, STOCK_RPM_REPOS
+    package_sources.py     apt_source_line, apk_repository_line, rpm_repo_section, client_files,
+                           disabled_apt_sources, disabled_os_sources
+    proxy_settings.py      proxy_env, proxy_exports, docker_client_config, environment_script, NO_PROXY_ENV
+    node_files.py          corefile, profile_script, node_files            <- host_files
+    config_image.py        config_image_files
+  gitea/                 install Gitea, talk to it, fill its registries
+    __init__.py            overview, re-exports (setup, upload, backup, restore, connect, ...)
+    service.py             paths on the server, GITEA_CLI, wait_for_gitea, installed_version, token_works()
+    connect.py             connect(system), api_token(system)
+    client.py              GiteaClient: version, orgs, repos, tokens, secrets, runners, workflow runs
+    packages.py      (new) GiteaPackages: upload_* per registry, keys, has_*, push_image   <- client.py
+    upload_formats.py (new) multipart, pypi_name_version, npm_package_json, upload_outcome  <- client.py
+    setup/                 `outpost gitea setup`                          <- gitea/setup.py
+      __init__.py            setup(system, log): seven named steps
+      files.py               APP_INI, UNIT, TOKEN_SCOPES
+      binary.py              check_box_has_gitea, install_binary (backup before upgrade), ensure_git
+      service_config.py      write_app_ini, start_gitea
+      admin.py               ensure_admin_user, ensure_api_token
+      seal.py                seal_gitea_server
+    upload.py              upload(system, sources, log), upload_box, push_config_image, KIND_UPLOADERS
+    backup.py              backup(system, ...), restore(system, ...)
+  infra/                 set up, verify, upgrade the nodes of an infrastructure
+    __init__.py            overview, TYPES, re-exports
+    context.py       (new) NodeContext, node_context(system, infra), proxy_host_context(system)
+                           <- infra/common.NodeContext, cli._node_context, the ctx in cli.cmd_proxy
+    node/                  steps every node goes through                  <- infra/common.py
+      __init__.py            prepare_node(host, ctx, log): six named steps
+      checks.py              check_arch (shared with gitea setup and the proxy)
+      names.py               write_hosts_entries
+      trust.py               write_client_files, trust_ca, check_reaches_gitea
+      os_packages.py         configure_apt_sources, configure_apk_sources, configure_rpm_sources
+      proxy_settings.py      apply_proxy_settings, merge_proxy_settings
+      dns.py                 install_node_dns, DNS_UNIT
+      docker.py              install_docker, DOCKER_UNIT, registry_verification
+      shell.py               download_from_gitea (was curl)
+    compose.py swarm.py k3s.py   one infrastructure type each: setup(), verifications()
+    runner.py              Actions runner: labels_for, install, install_runner_for(system, ...)
+    verify.py              verifications on a node, the script and its parser
+    setup.py         (new) set_up_infra(system, infra, log), verify_infra(system, infra, log)  <- cli._infra_setup
+    upgrade.py       (new) UPGRADE_SCRIPT, upgrade_nodes(system, hosts, log)  <- cli.UPGRADE_SCRIPT, _infra_upgrade
+    proxy/                 the egress proxy (tinyproxy)                   <- infra/proxy.py
+      __init__.py            overview, re-exports
+      allow_list.py          allow_regex, allow_file, allowed_by, probe_name, refused_name
+      tinyproxy.py           paths, LOG_PREP, LOGROTATE, conf, filter_type_line, unit, INSTALL
+      setup.py               set_up_on_host(host, ctx, cfg, ...): six named steps
+      diagnose.py            diagnose_script, access_script, access_report
+      verify.py              host_verifications, verify_proxy_host
+      recipe.py              set_up_egress_proxy(system, log), verify_egress_proxy(system), update_set_up_nodes(system, log)
+                             <- cli.cmd_proxy
+  checks/                smoke checks                                     <- checks/__init__.py
+    __init__.py            overview, re-exports
+    check.py               Check, REQUIREMENTS
+    load.py                load_checks
+    run.py                 run_check, run_checks(system, infra, only, log), proxy_env(system)
+                           <- cli.cmd_check, cli._proxy_check_env
+  demo/                  the example project                              <- demo.py
+    __init__.py            overview, re-exports
+    workflow.py            FETCH_SOURCE, DEPLOY_STEPS, WAIT, PORTS, workflow()
+    project.py             ensure_local, project_files, git_blob_sha, NEEDS_YML
+    push.py                push(system, log), package_token(system, client)
+    status.py              status(system), demo_urls(system)
+  rotate_ca.py     (new) `pki rotate`: new CA, then Gitea, the config image and the nodes   <- cli.cmd_pki
+  report/                the proof report                                 <- report.py
+    __init__.py            overview, re-exports
+    data.py                report_data(workspace, servers)
+    verdict.py             verdict()
+    html.py                render_html(): one function per section
+    style.py               CSS
+    write.py               write_report(workspace, out)
+  ui/                    the dashboard
+    __init__.py            overview, re-exports serve
+    server.py              Handler with route tables, serve()              <- ui/server.py (HTTP part)
+    overview.py            overview(), needs_files, needs_detail, lab_status, ssh_aliases, list_backups
+    files.py               editable_file (was safe_file), save_lockfile
+    servers_form.py        write_servers, proxy_form
+    reach.py               reach_server (was ssh_check), server_status, choose_ssh_config, refresh_hosts
+    runs.py                ALLOWED_COMMANDS, start_run, run_status, live_runs
+    status/                was ui/status.py
+      __init__.py
+      box_status.py          box_status, box_changes, spec_parts
+      sync.py                sync
+      preflight.py           preflight
+      run_history.py         runs, steps
+      search.py              search
+    projects/              was ui/projects.py
+      __init__.py
+      lockfiles.py           describe_lockfile, lockfile name lists
+      dockerfiles.py         read_dockerfile, needed_image, distro_for_image, python_version
+      scan.py                scan
+      write_needs.py         write_needs
+    explain.py             FAILURES, explain, summarize (a table of per-command summarizers)
+    index.html             same
+  lab.py                 throwaway servers in Docker                       <- same, up() split
+  templates/
+    lab/Dockerfile         same
+    workspace/             what `outpost init` copies                     <- templates/platform/
+  cli/                   the command line (section 1.1)                    <- cli.py
+  ssh/                   same, the model package
+```
+
+Gone: `paths.py`, `config.py`, `cli.py`, `oci.py`, `hosts.py`, `demo.py`, `report.py`,
+`infra/common.py`, `infra/clients.py`, `infra/egress.py`, `infra/hostsfile.py`, `infra/proxy.py`,
+`needs/parsers.py`, `ui/status.py`, `ui/projects.py`, `gitea/setup.py`.
+
+### 1.1 `outpost/cli/`: the table of contents
+
+```
+cli/
+  __init__.py     the flow of the whole tool in the docstring, in the order you use it; re-exports main, build_parser
+  main.py         COMMANDS (ordered tuple of the modules below), build_parser(), main(): dispatch, errors -> exit codes
+  output.py       say() (was log), print_verifications() (was _print_results)
+  init.py  needs.py  fetch.py  pack.py  gitea.py  upload.py  infra.py  check.py  demo.py
+  egress.py  proxy.py  ui.py  lab.py  hosts.py  report.py  pki.py
+```
+
+Every command module has the same two functions, so `main.py` builds the parser by looping over
+`COMMANDS`:
+
+```python
+"""outpost upload: push the box into Gitea's registries."""
+
+def add_parser(commands) -> None:
+    parser = commands.add_parser("upload", help="push the box into Gitea")
+    parser.add_argument("source", nargs="*", help="box folder or tar.xz files (default: box/)")
+    parser.set_defaults(run=run)
+
+def run(args) -> int:
+    system = AirGappedSystem.load(args.dir)
+    gitea.upload(system, sources=[Path(s) for s in args.source], log=say)
+    say("Next: outpost infra setup <name>")
+    return 0
+```
+
+Each `run()` is a short recipe: load the system, call one or two module functions, print.
+`pyproject.toml` keeps `outpost = "outpost.cli:main"`, so `cli/__init__.py` re-exports `main`.
+
+| today in cli.py | goes to |
+|---|---|
+| module docstring | `cli/__init__.py` docstring (also `--help`'s description) |
+| `log` | `cli/output.say` |
+| `_platform`, `_servers` | `AirGappedSystem.load` (`Workspace.open` for `ui`, `lab`, `report`) |
+| `_ca_pem` | `AirGappedSystem.ca_pem()` |
+| `_cached_facts` | `hosts.cached_facts(workspace).get(alias)`, used inside `endpoints.proxy_endpoint` |
+| `_proxy_info` | `endpoints.proxy_endpoint(system, gitea=None)` |
+| `_proxy_info_or_warn` | `endpoints.proxy_endpoint_or_none(system, gitea, log)` |
+| `_add_proxy_package` | `needs.all_needs(system)` (loads needs, adds pinned files and tinyproxy) |
+| `_node_context` | `infra.context.node_context(system, infra)` |
+| `_print_results` | `cli/output.print_verifications` |
+| `cmd_init` | `cli/init.py` + `Workspace.create(target)` |
+| `cmd_needs` | `cli/needs.py` (prints) + `needs.all_needs(system)` |
+| `cmd_fetch` | `cli/fetch.py` + `fetch.fetch_into_box(system, needs, only, log)` (writes state) + `fetch.failures(results)` |
+| `cmd_pack` | `cli/pack.py` + `pki.ensure_box_signing_key(workspace)` + `box.pack` |
+| `cmd_gitea` | `cli/gitea.py`: `setup`, `info`, `backup`, `restore` -> `gitea.setup/backup/restore(system, ...)` |
+| `cmd_upload` | `cli/upload.py` + `gitea.upload(system, sources, log)` (open box, signature, endpoint, connect, upload_box, state) |
+| `cmd_infra`, `_infra_setup` | `cli/infra.py` + `infra.set_up_infra` / `infra.verify_infra` |
+| `UPGRADE_SCRIPT`, `_infra_upgrade` | `infra/upgrade.py: upgrade_nodes(system, hosts, log)` |
+| `_install_runner` | `infra/runner.py: install_runner_for(system, ctx, host, log)` |
+| `cmd_check`, `_proxy_check_env` | `cli/check.py` + `checks.run_checks(system, infra, only, log)` |
+| `cmd_demo` | `cli/demo.py` (prints the status table) + `demo.push/status(system)` |
+| `cmd_proxy` | `cli/proxy.py` + `infra.proxy.set_up_egress_proxy(system, log)` / `verify_egress_proxy(system)` |
+| `cmd_egress` | `cli/egress.py` + `egress.target_hosts(system, target)` + `egress.seal_host/open_host/seal_status` |
+| `cmd_lab` | `cli/lab.py` + `lab.up/down(workspace)` |
+| `cmd_ui` | `cli/ui.py` + `ui.serve(workspace, port)` |
+| `cmd_hosts` | `cli/hosts.py` + `hosts.refresh_facts / cached_facts / version_drift` |
+| `cmd_report` | `cli/report.py` + `report.write_report(workspace, out)` (loads servers.yml itself, tolerant) |
+| `cmd_pki` | `cli/pki.py` + `rotate_ca.rotate(system, log)` |
+| `build_parser` | `cli/main.py`, from each module's `add_parser` |
+| `main` | `cli/main.py`; the "infra needs a name" check (exit 2) moves to `cli/infra.py` |
+
+## 2. AirGappedSystem
+
+It lives in `outpost/system.py`. It is a single module of about 100 lines that imports only
+`workspace`, `config`, `ssh` and `versions`. It holds and reads things. It decides nothing.
+
+```python
+class AirGappedSystem:
+    """Everything Outpost knows about one air-gapped system. It holds and reads; it has no logic."""
+
+    workspace: Workspace     # the folder; every path comes from here
+    servers: Servers         # servers.yml, read once by load()
+    mirrors: Mirrors         # mirrors.yml (defaults when missing), read once by load()
+
+    @classmethod
+    def load(cls, root: str | Path) -> "AirGappedSystem": ...
+```
+
+| member | what it is | how it is loaded |
+|---|---|---|
+| `workspace` | `Workspace` | `Workspace.open(root)`: raises `ConfigError("No servers.yml in {root}. Run `outpost init` here, or pass --dir.")` (today's wording) |
+| `servers` | `Servers` | `config.load_servers(workspace.servers_file)`, once, in `load()` |
+| `mirrors` | `Mirrors` | `config.load_mirrors(workspace.mirrors_file)`, once, in `load()` |
+| side effects of `load()` | | `ssh.use_config(servers.ssh_config)` and `versions.use_arch(servers.arch)`, as `cli._servers` does today |
+| `state(name, default=None)` | one `state/<name>.json` | read from disk **on every call** (`workspace.read_state`) |
+| `write_state(name, data)` | | `workspace.write_state` |
+| `secret(name)` | one `secrets/<name>` | read from disk **on every call** |
+| `write_secret(name, value)` | | `workspace.write_secret` (mode 600) |
+| `ca_pem()` | text of `pki/ca.crt` | read on every call; raises `RuntimeError` with today's `_ca_pem` message when missing |
+| `host(alias)` | `Host` | made on first use with the module-level name `Host`, then kept in a dict, so a test double sees every call. Tests patch `outpost.system.Host`. |
+| `gitea_host` | `Host` | `host(servers.gitea.host)` |
+| `nodes(infra_name)` | `list[Host]` | `servers.infra(name).nodes` (raises `ConfigError` for an unknown name) |
+| `proxy_host` | `Host \| None` | `host(servers.egress_proxy.host)` when servers.yml has an egress proxy |
+| `infra(name)` | `InfraConfig` | `servers.infra(name)` |
+| `set_up_infras()` | `list[InfraConfig]` | the infrastructures that have a `state/infra-<name>.json` (used by proxy setup, pki rotate, demo push) |
+
+Things it does **not** hold: the Gitea and proxy endpoints (`endpoints.py` works them out, because
+that takes rules and maybe an ssh call), needs (`needs.all_needs(system)`), and anything cached
+from state.
+
+`Workspace` (in `outpost/workspace.py`):
+
+- Constants for each name in the layout: `SERVERS_FILE = "servers.yml"`, `MIRRORS_FILE`, `NEEDS_DIR`,
+  `CHECKS_DIR`, `BOX_DIR`, `PKI_DIR`, `SECRETS_DIR`, `STATE_DIR`, `BACKUPS_DIR = "backups"`,
+  `LAB_DIR`, `DEMO_DIR`, `HOSTS_STATE_DIR = "hosts"`, `RUNS_DIR = "runs"`, `REPORT_FILE`.
+- Constants for the pki and secret files: `CA_CERT`, `CA_KEY`, `GITEA_CERT`, `GITEA_KEY`,
+  `BOX_PUBLIC_KEY`, `BOX_SIGNING_KEY`, `GITEA_TOKEN`, `GITEA_ADMIN_PASSWORD`, `GITEA_PACKAGE_TOKEN`.
+- Constants for the state files: `STATE_FETCH`, `STATE_UPLOAD`, `STATE_GITEA`, `STATE_PROXY`,
+  `STATE_BACKUP`, `STATE_DEMO`, `STATE_DEMO_STATUS`, and the functions `infra_state(name)`,
+  `verify_state(name)` and `check_state(name)`.
+- A property for each folder and file, which joins the constant to `root`: `servers_file`,
+  `box_dir`, `backups_dir`, `hosts_state_dir`, `runs_dir`, `ca_cert`, ...
+- `exists()`, `Workspace.open(root)` (it must exist), `Workspace.create(target)` (copies
+  `templates/workspace`, today's `cmd_init`), `read_state`/`write_state`,
+  `read_secret`/`write_secret`, `state_names()` (for the report and the dashboard), and
+  `state_mtime(name)`.
+
+## 3. Renames
+
+| today | new | note |
+|---|---|---|
+| `outpost/paths.py`, `Platform` | `outpost/workspace.py`, `Workspace` | |
+| parameter `platform` (everywhere) | `system` (functions that read config or use servers), `workspace` (report, ui, lab, hosts cache, pki) | |
+| `platform.box_dir` etc. | `workspace.box_dir` / `system.workspace.box_dir` | |
+| `--dir` help "platform folder" | "workspace (default: current directory)" | help text only |
+| `templates/platform/` | `templates/workspace/` | update `pyproject.toml` package-data too |
+| `cli.py`, `cmd_<x>` | `cli/<x>.py`, `run(args)` | `args.func` -> `args.run` |
+| `cli.log` | `cli.output.say` | |
+| `config.py` | `config/` package | `config.__all__` no longer lists `versions` |
+| `infra.clients.GiteaInfo` | `endpoints.GiteaEndpoint` | it says how nodes reach Gitea; easy to confuse with `GiteaConfig` today |
+| `infra.clients.ProxyInfo` | `endpoints.ProxyEndpoint` | |
+| `gitea.connect.gitea_info(platform, servers)` | `endpoints.gitea_endpoint(system)` | |
+| `infra.proxy.info(cfg, gitea, gitea_host, ip)` | `endpoints.make_proxy_endpoint(...)` | the pure part |
+| `gitea.connect.token_for(platform)` | `gitea.connect.api_token(system)` | |
+| `gitea.connect.connect(platform, servers)` | `gitea.connect(system)` | |
+| `gitea.setup.GITEA` | removed; use `service.GITEA_CLI` | it was an alias |
+| `GiteaClient.upload_*`, `*_key`, `*_has_*`, `push_image`, `registry` | `GiteaPackages.*`, reached as `client.packages` | |
+| `client._outcome` | `upload_formats.upload_outcome` | |
+| `versions.platform_files` | `versions.pinned_files` | the pinned downloads (gitea, docker, k3s, ...) |
+| `versions.names()` | `versions.arch_names()` | |
+| `needs.add_platform_files` | `needs.add_pinned_files` | |
+| `needs._parse_one` | `needs.read_needs_file` (public; the dashboard uses it) | |
+| `needs.parsers` | `needs.python_lockfiles`, `needs.js_lockfiles` | |
+| `infra.proxy.package_need`, `add_package` | `needs.proxy_package_need`, `needs.add_proxy_package` | |
+| `infra.common.os_family`, `apk_branch_of` | `distros.os_family`, `distros.apk_branch_of` | |
+| `fetch.rpm.split`, `distro_for_host`, `OS_IDS`; `fetch.apt.DEBIAN`, `UBUNTU` | `distros.split_rpm_distro`, `rpm_distro_of_host`, `RPM_OS_IDS`, `DEBIAN`, `UBUNTU` | |
+| `ui.projects.kind_for_distro` | `distros.kind_for_distro` | |
+| `pki.ensure_ca(pki_dir, secrets_dir)` | `pki.ensure_ca(workspace)` | |
+| `pki.ensure_server_cert` | `pki.ensure_gitea_cert(workspace, name, ip)` | |
+| `pki.ensure_signing_key` | `pki.ensure_box_signing_key(workspace)` | |
+| `pki.sign`, `pki.verify` | `pki.sign_file`, `pki.signature_is_valid` | |
+| `infra/egress.py` | `outpost/egress.py` | it is used by gitea, infra, proxy, cli, ui |
+| `egress.install`, `seal`, `open_`, `status`, `script` | `install_seal`, `seal_host`, `open_host`, `seal_status`, `seal_script` | |
+| `egress.PRIVATE` | `client_config.PRIVATE_NETS` (one list) | it is a copy of the same list today |
+| `infra.common.PROXY_USER` | `egress.PROXY_USER` | the only owner the seal exempts |
+| `infra.common.RUNNER_HOME` | `client_config.RUNNER_HOME` (runner.py uses it too) | today it is a copy of `runner.HOME` |
+| `infra/hostsfile.py`: `script`, `rewrite`, `install` | `outpost/hostsfile.py`: `boot_script`, `rewrite_script`, `keep_names(host, entries)` | |
+| `infra/clients.py` | `outpost/client_config/` | `host_files` -> `node_files` |
+| `infra/common.py` | `infra/node/` | "common" says nothing |
+| `common.curl(ctx, url, out)` | `node.download_from_gitea(url, out)` | `ctx` was never used |
+| `common._configure_apt/_apk/_rpm` | `node.configure_apt_sources/...` (public) | the proxy setup calls them |
+| `common.install_dns` | `node.install_node_dns` | |
+| `common.registry_check` | `node.registry_verification` | glossary: one line of verify is a verification |
+| `verify.common_checks`, `proxy_checks`, `script`, `parse` | `node_verifications`, `proxy_verifications`, `verification_script`, `parse_verifications` | the `CHECK\|` marker on the wire stays (tests match it) |
+| `<type>.extra_checks(ctx)`, `runner.extra_checks()` | `<type>.verifications(ctx)`, `runner.verifications()` | the verification names (strings) stay |
+| `proxy.host_checks`, `proxy.verify` | `proxy.host_verifications`, `proxy.verify_proxy_host` | |
+| `hosts.inspect`, `record`, `cached`, `refresh`, `roles`, `drift`, `expected_versions`, `hosts_dir` | `inspect_server`, `record_facts`, `cached_facts`, `refresh_facts`, `server_roles`, `version_drift`, `pinned_versions`, `workspace.hosts_state_dir` | |
+| `report.build`, `render`, `write` | `report_data`, `render_html`, `write_report` | |
+| `ui.server.ssh_check` | `ui.reach.reach_server` | glossary: "check" means a smoke check; the URL `/api/ssh-check` stays |
+| `ui.server.safe_file` | `ui.files.editable_file` | |
+| `demo.urls` | `demo.demo_urls` | |
+| `demo._blob_sha` | `demo.git_blob_sha` | |
+
+## 4. Work packages
+
+Run them **in order, A then B then C then D**. Each one must leave everything green on its own
+(`CLAUDE.md`: format, ruff, pyright, pytest). D is the largest. If it gets too big, split it into
+D1 (infra, egress, hostsfile, client_config) and D2 (hosts, report, ui, lab).
+
+**Before A,** save the help output so you can compare it at the end of each step:
+`(python -m outpost --help; for c in init needs fetch pack gitea upload infra check demo egress proxy ui lab hosts report pki; do python -m outpost $c --help; done) > help-before.txt` (outside the repo).
+After each step, the diff may only show "platform folder" changing to "workspace".
+
+**Every step checks the integration tests too.** They need Docker to run. Without
+`OUTPOST_INTEGRATION=1` they are skipped, but their module-level imports still run. So run
+`python -m pytest -q tests/integration` and `grep -n "from outpost" tests/integration/*.py` (some
+imports sit inside functions). Fix every old name you find.
+
+### A. Foundation: workspace, config, system, endpoints, cli/
+
+| | |
+|---|---|
+| **New / moved** | `workspace.py` (from `paths.py`), `config/` package, `system.py`, `endpoints.py`, `cli/` package; `templates/platform` -> `templates/workspace` (+ `pyproject.toml` package-data) |
+| **Touched** | every module that imports `paths`/`Platform` or `config` (all of them); every test that uses `Platform` (about 120 places) or `outpost.cli` internals; `__main__.py` |
+| **Main splits** | `cli.py` into 16 command files and `main.py`/`output.py`. The cli helpers move to their final homes and **take `system` from the start**: `endpoints.gitea_endpoint/proxy_endpoint/proxy_endpoint_or_none`, `infra/context.node_context` (with `NodeContext` moved there), `infra/setup.set_up_infra/verify_infra`, `infra/upgrade.upgrade_nodes` (with `UPGRADE_SCRIPT`), `infra/runner.install_runner_for`, `checks.run_checks`, `needs.all_needs` (in `needs/__init__.py` for now; B moves it), the `cmd_proxy` body as `set_up_egress_proxy`/`verify_egress_proxy` at the bottom of `infra/proxy.py` (D moves it), `gitea/upload.upload(system, ...)`, `rotate_ca.rotate(system, log)`. `load_servers` becomes `_load_gitea`, `_load_infrastructures`, `_load_arch` and `load_egress_proxy`. |
+| **Signatures** | **Decision:** A renames `Platform` to `Workspace` everywhere (a mechanical change). Functions that already exist keep their parameters, so the cli passes `system.workspace, system.servers` to them for now. Each later package converts its own functions to `system` and updates the cli lines that call them. A stays reviewable, and B, C and D each own their own signature changes. |
+| **Risks** | Tests patch `outpost.cli.Host` (test_proxy: 668, 689, 802): change them to `outpost.system.Host`. That only works if every Host those commands use comes from `system`, so `node_context`, `run_checks` and the proxy recipe must use `system.host()`. Tests patch `cli.log` and call `cli._infra_upgrade(platform, servers, infra, [host])` (test_day_two): change them to `upgrade_nodes(system, hosts, log=...)`. `test_proxy` checks `args.func is cmd_proxy`: change it to `args.run is proxy_command.run`. Error output: `main` must still print `error: <message>` to stderr with exit 1 for `ConfigError, RuntimeError, SshError, HttpError, ValueError`, exit 2 for a missing infra name, and 130 on Ctrl-C. Tests read stderr ("no egress_proxy section"). `AirGappedSystem.load` reads mirrors.yml for every command, where today only needs and fetch do. Grep the tests for a broken mirrors.yml used with any other command. Import cycles: `infra/setup.py` imports `gitea.connect` while `gitea/setup.py` still imports `infra.egress`. Keep `infra/__init__.py` from importing `infra/setup.py` until D moves egress down a layer. The dashboard runs `python -m outpost --dir <root> ...`: that keeps working. Tests build paths to `templates/platform` (test_checks: 7, test_proxy: 818). |
+| **Verify** | the four checks in CLAUDE.md; the help diff; `python -m pytest -q tests/integration` (imports); `grep -rn "Platform\|outpost.paths\|platform_dir\b" outpost` is empty (the test fixture `platform_dir` may become `workspace_dir` in tests); `python -m outpost init /tmp/w && python -m outpost --dir /tmp/w needs` works |
+
+### B. Getting things in: needs, http, oci, box, fetch, versions, pki, distros
+
+| | |
+|---|---|
+| **Files** | `needs/` (model, needs_file, pinned, python_lockfiles, js_lockfiles), `distros.py` (new), `versions.py`, `http.py`, `oci/` (refs, registry, layout), `box.py`, `fetch/` (+ `in_container.py`), `pki.py`; the callers in `infra/common.py`, `infra/proxy.py`, `ui/projects.py`, `ui/status.py`, `ui/server.py`, `gitea/*`, `cli/needs.py`, `cli/fetch.py`, `cli/pack.py` |
+| **Main splits** | `needs._parse_one` (noqa C901) becomes `_read_images`, `_read_pypi`, `_read_npm`, `_read_os_packages`, `_read_files`. `versions.platform_files` (72 lines) becomes `_gitea_files`, `_node_files`, `_docker_files`, `_k3s_files`. `oci.Registry.pull` (57 lines) becomes `_get_manifest`, `_pick_arch`, `_fetch_blobs`, `write_index`, and `build_layout` shares `write_index`. apt/apk/rpm `fetch` share `run_in_container(image, shell, script, out_dir)`. `cli.cmd_fetch`'s state write and failure list become `fetch_into_box(system, needs, only, log)` and `failures(results)`. The signature check from `cmd_upload` becomes `box.check_signature(box_dir, box_pub) -> bool \| None`. `pki` functions take a `workspace`. `needs/parsers.py` imports `NpmNeed` lazily to dodge a cycle; `needs/model.py` removes the cycle. |
+| **Also** | `http` logs every request and download at DEBUG (style guide). Keep the retry line on stderr: tests and users see it. |
+| **Risks** | `test_fetch` patches `mod.fetch` for each kind in `fetch_all`'s plan: keep the plan's call shape `fetch(needs, box, mirrors, log=...)`. `versions.ARCH` stays a module global that `use_arch` sets: oci, fetch and infra read it at call time, so don't import the name `ARCH` by value. `test_infra` and `test_proxy` call `os_family`, `package_need` and `add_package` under their old names. The pip download writes `box/pypi/.requirements-py*.txt`: `upload` and `box_status` filter by suffix, so keep that. `test_real_gitea` imports `oci` and `fetch.apk`. |
+| **Verify** | CLAUDE.md checks; help diff; `outpost needs` output for the template workspace is identical before and after (save it in A) |
+
+### C. Gitea, checks, demo
+
+| | |
+|---|---|
+| **Files** | `gitea/` (service, connect, client, packages, upload_formats, setup/, upload, backup), `checks/` package, `demo/` package, `cli/gitea.py`, `cli/upload.py`, `cli/check.py`, `cli/demo.py`, `rotate_ca.py`, `ui/server.py` (demo calls) |
+| **Signatures** | `gitea.setup(system, log)`, `backup(system, out_dir=None, keep_on_server=False, log)`, `restore(system, archive, log)`, `connect(system)`, `demo.push(system, log)`, `demo.status(system)`, `demo_urls(system)`, `run_checks(system, ...)`. Hosts come from `system.gitea_host`. Drop the `host=` test hook from backup/restore: tests patch `outpost.system.Host`. |
+| **Main splits** | `gitea.setup` (noqa C901, 140 lines) becomes `setup/`: `check_box_has_gitea`, `connect_and_check_arch`, `ensure_certificates`, `install_binary` (with the backup first), `ensure_git`, `write_app_ini`, `start_gitea`, `ensure_admin_user`, `ensure_api_token`, `ensure_org`, `seal_gitea_server`. `upload_box` (noqa C901) becomes a `KIND_UPLOADERS = {kind: fn}` table plus `_upload_<kind>(box, packages, tally)`, with a small `Tally` class. `restore` (55 lines) becomes `_copy_archive_up`, `_swap_data`, `_put_back_laptop_certificate`, `_check_token`, `_record_restore`. The "does this token work" curl, duplicated in setup and restore, becomes `service.token_works(host, token)`. `client.py` (315 lines, two ideas) becomes `client.py` + `packages.py` + `upload_formats.py`. `checks/__init__.py` becomes check/load/run. `demo.py` becomes workflow/project/push/status. |
+| **Bug fixes here** | the backup folder (bug 1), the images tally (bug 7), the backup sha256 (bug 8) |
+| **Risks** | `test_gitea_setup` and `test_day_two` patch `setupmod.Host` and `setupmod.connect`: change them to `outpost.system.Host` and to patching `outpost.gitea.setup.<step module>.connect`, or pass a client. `test_demo` patches `demo.connect` with `lambda p, s: Conn()`: it now takes `system`. `test_proxy` patches `outpost.checks.run_check`, but `run_checks` calls it from inside `checks/run.py`, so tests must patch `outpost.checks.run.run_check`. `test_gitea_client` and `test_real_gitea` call `client.upload_*`: change them to `client.packages.upload_*`. The integration flow reads `rig/backups/` (test_full_flow: 120, 162): after the fix, the archive lands there. Keep the `==> [n/7]` step lines: the dashboard's progress panel and `explain.summarize` parse them ("Gitea X is up at", "backup done: ... (N MB)", "N uploaded, M already there", "committed N file"). |
+| **Verify** | CLAUDE.md checks; help diff; `grep -rn "noqa: C901" outpost/gitea` is empty |
+
+### D. Infrastructure, servers, report, dashboard, lab
+
+| | |
+|---|---|
+| **Files** | `egress.py`, `hostsfile.py`, `client_config/` (moved down a layer), `infra/` (context, node/, compose, swarm, k3s, runner, verify, setup, upgrade, proxy/), `hosts/`, `report/`, `ui/` split, `lab.py`, `cli/infra.py`, `cli/proxy.py`, `cli/egress.py`, `cli/hosts.py`, `cli/report.py`, `cli/ui.py`, `cli/lab.py`, `cli/pki.py` |
+| **Main splits** | `prepare_node` (55 lines) becomes `check_arch`, `write_hosts_entries`, `write_client_files`, `trust_ca`, `check_reaches_gitea`, `configure_os_packages`, `seal`, `install_node_dns`. `check_arch` is shared with gitea setup and the proxy setup, which copy it today. `proxy.setup` (110 lines) becomes six step functions (`connect_and_check_host`, `point_packages_at_gitea`, `install_tinyproxy`, `write_user_and_config`, `start_service`, `seal_with_exception`). `cmd_proxy`'s body becomes `proxy/recipe.py`. `report.render` (noqa C901) becomes one function per section. `ui.Handler.do_GET` (noqa C901) becomes route tables `{path: handler}` for GET/PUT/POST/DELETE. `status.box_status` and `box_changes` (noqa C901) become one function per kind. `explain.summarize` (noqa C901) becomes `SUMMARIZERS = {command: fn}`. `lab.up` (70 lines) becomes `_build_image`, `_start_servers`, `_write_lab_config`, `_forget_old_servers`, `_wait_for_ssh`. `hosts.py` becomes inspect/cache/roles/drift. |
+| **Signatures** | `hosts.refresh_facts(system, aliases, log)`, `inspect_and_record(system, host)`; `report.*(workspace, ...)`; `ui.serve(workspace, port)`; `lab.up(workspace, k3s, log)`; egress and verify functions keep `host`/`ctx`. |
+| **Bug fixes here** | bugs 2 to 6 and 9 |
+| **Risks** | `test_proxy` patches `common.prepare_node` (415, 449), which becomes `outpost.infra.node.prepare_node`: the proxy setup must call it through the name the test patches. Verification names and the `CHECK\|` marker are read by the tests, the report and the integration flow ("tests: full flow reads check results by name"), so keep every name string. The seal script text is checked by a verification (`grep -q 'build_chain $ipt security DROP'`): keep it byte for byte. Moving egress, hostsfile and client_config out of `infra/` breaks `test_real_gitea`'s `from outpost.infra import clients` and `from outpost.infra.clients import GiteaInfo`: update them. The dashboard's JSON keys (`/api/overview`) and URLs are read by `ui/index.html`: keep them. `test_full_flow` (387 to 393) calls `ui.server.overview(Platform(rig))` and `refresh_hosts`: point it to the new names. |
+| **Verify** | CLAUDE.md checks; help diff; `grep -rn "noqa: C901" outpost` is empty; `outpost ui` opens and every page loads against the template workspace; when Docker is around, `OUTPOST_INTEGRATION=1 python -m pytest -q tests/integration` |
+
+## 5. Known bugs to fix along the way
+
+Line numbers are for today's code (commit `aac067b`).
+
+| # | where | bug | fix in |
+|---|---|---|---|
+| 1 | `cli.py:727`, `cli.py:252` | `gitea backup --out` defaults to `"backups"`, relative to the **current directory**, not the workspace. `gitea setup` (`gitea/setup.py:151`) and the dashboard (`ui/server.py:221`) use `<workspace>/backups`. So backups land wherever outpost is run, and `tests/integration/test_full_flow.py:161-162` (`test_2b`) restores the newest archive in `rig/backups`, which is the older one from the upgrade in `test_2`. Fix: default `None` -> `system.workspace.backups_dir`; help "(default: backups/ in the workspace)". | C |
+| 2 | `infra/verify.py:21`, `cli.py:357` (`UPGRADE_SCRIPT`) | `case " $ID $ID_LIKE "` under `set -u`: `Host.run` puts `set -euo pipefail` at the top (`ssh/host.py:68`), and Debian and Alpine have no `ID_LIKE` in `/etc/os-release`. So on Debian and Alpine nodes, the verifications "package sources are gitea only" and "package index updates offline" fail ("ID_LIKE: unbound variable"), so does the proxy's "tinyproxy installed from gitea" (`infra/proxy.py:495`), and `infra upgrade` stops. The lab is Ubuntu, so the integration tests never see it. Fix: `${ID:-} ${ID_LIKE:-}` in both, plus a unit test whose script runs under `bash -u` with `ID_LIKE` unset. | D |
+| 3 | `infra/k3s.py:75` | `INSTALL_K3S_EXEC={exec_args!r}` uses Python's `repr()` as shell quoting. An `args:` with a `'` makes repr use double quotes, and then the shell expands `$` and backticks inside them. Fix: `shlex.quote`. | D |
+| 4 | `lab.py:125-130` | `lab up` forgets the old state (`state/*.json`, token, password) but keeps `state/hosts/*.json`. The dashboard's Machines page and the report then show the removed servers' versions and "sealed" for brand-new open ones until `hosts --refresh`. Fix: also clear `workspace.hosts_state_dir`. | D |
+| 5 | `ui/server.py:173` | `load_mirrors` runs outside the `try` that guards the same call at line 167 (through `needs_detail`). A broken `mirrors.yml` turns all of `/api/overview` into a 400, so the dashboard shows nothing instead of the error. Fix: read mirrors once, inside the guarded block. | D |
+| 6 | `ui/status.py:254-256` | One needs image that does not parse empties `wanted_images`, so every image in the box is listed as unneeded. Fix: parse each reference on its own and skip the bad ones. | D |
+| 7 | `gitea/upload.py:84` | Images are always counted as "uploaded", even when Gitea already had every blob. The upload summary, the dashboard's history line ("Uploaded N new files") and the report's totals overcount. Fix: `push` returns whether anything was new. | C |
+| 8 | `gitea/backup.py:57` | `hashlib.sha256(local.read_bytes())` reads the whole archive into memory (up to 2 GB) and skips the hash above that. Fix: `http.sha256_file(local)`, always. | C |
+| 9 | `ui/status.py:274-282` | Dead code: the pypi loop in `box_changes` ends in `pass` and never adds anything. Remove it (the comment says why it must not flag dependencies). | D |
+
+Worth a decision, but not bugs:
+
+- `cli.py:286`: `upload` skips the signature check without a word when the box has `manifest.sig`
+  but `pki/box.pub` is missing, or when the box is unsigned. Consider printing "not signed" /
+  "cannot check the signature: pki/box.pub is missing".
+- `gitea/setup.py:216` and `gitea/backup.py:107`: the API token goes into a `curl` command line
+  on the Gitea server, where `ps` can see it. `service.token_works` (package C) can pass it on
+  stdin (`curl -H @-`).
+- `pack --out dist` is relative to the current directory too. That looks deliberate, since the
+  output is for releases, but say so in the help.
+- `versions.ARCH` and `ssh.use_config` are process-wide globals that `AirGappedSystem.load` sets.
+  That is fine for the CLI. A later step can turn them into attributes of the system.
