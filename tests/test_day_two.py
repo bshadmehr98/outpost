@@ -18,7 +18,7 @@ from outpost.ssh import Result
 from outpost.system import AirGappedSystem
 from outpost.ui import explain, status
 from outpost.workspace import Workspace
-from tests.conftest import FakeHost
+from tests.conftest import FakeHost, explained
 
 HOST_FACTS = """id=ubuntu
 codename=noble
@@ -251,17 +251,17 @@ def test_inspect_reports_an_unreachable_host_and_refresh_caches(workspace_dir):
 
 
 def test_explain_knows_the_common_failures():
-    assert explain.explain("x\nssh: connect to host dev-1 port 22: Connection timed out\nerror: boom")[
-        "title"
-    ].startswith("The server did not answer")
-    assert "passwordless sudo" in explain.explain("sudo: a password is required")["fix"]
+    assert explained("x\nssh: connect to host dev-1 port 22: Connection timed out\nerror: boom")["title"].startswith(
+        "The server did not answer"
+    )
+    assert "passwordless sudo" in explained("sudo: a password is required")["fix"]
     assert (
-        explain.explain("error: [dev-1] cannot reach https://gitea.internal: curl: (7)")["title"]
+        explained("error: [dev-1] cannot reach https://gitea.internal: curl: (7)")["title"]
         == "A node cannot reach Gitea."
     )
-    assert explain.explain("pip: No matching distribution found for flassk==1")["title"].startswith("A Python package")
+    assert explained("pip: No matching distribution found for flassk==1")["title"].startswith("A Python package")
     assert explain.explain("everything fine") is None
-    assert explain.explain("error: something odd")["title"] == "The command stopped with an error."
+    assert explained("error: something odd")["title"] == "The command stopped with an error."
 
 
 def test_summaries_read_like_history():

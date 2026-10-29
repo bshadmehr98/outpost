@@ -15,7 +15,7 @@ Before a commit, run these four; CI runs them too:
 ```
 scripts/format.sh             # ruff format + import sort (--check only checks)
 ruff check outpost tests      # lint; the rules are in pyproject.toml
-pyright                       # types, outpost/ only
+pyright                       # types, outpost/ and tests/
 python -m pytest -q           # unit tests
 ```
 

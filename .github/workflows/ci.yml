@@ -18,7 +18,7 @@ jobs:
       - run: pip install -e '.[dev]'
       - run: ruff check outpost tests   # rules in pyproject.toml
       - run: scripts/format.sh --check
-      - run: pyright                    # outpost/, settings in pyproject.toml
+      - run: pyright                    # outpost/ and tests/, settings in pyproject.toml
       - run: pytest -q
   package:
     runs-on: ubuntu-latest

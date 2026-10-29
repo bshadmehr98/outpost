@@ -8,7 +8,7 @@ The tools check the easy parts for you:
 ```
 scripts/format.sh            format the code and sort the imports (ruff)
 ruff check outpost tests     lint
-pyright                      types (outpost/ only)
+pyright                      types (outpost/ and tests/)
 python -m pytest -q          unit tests
 ```
 
@@ -191,5 +191,7 @@ An error message says which server or file, what went wrong, and what to do if t
 ## Types
 
 Use type hints on every public function. Use the modern forms: `str | None`, `list[str]`,
-`dict[str, int]`. pyright (basic mode) checks `outpost/`; the tests are not checked yet.
+`dict[str, int]`. pyright (basic mode) checks `outpost/` and `tests/`. In a test, narrow an Optional
+with `assert x is not None` rather than an ignore; test doubles subclass what they replace
+(`FakeHost` is a `Host`).
 An ignore names its rule and says why: `# pyright: ignore[reportOptionalMemberAccess]  set in __enter__`.

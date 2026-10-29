@@ -21,7 +21,7 @@ from outpost.infra.context import NodeContext
 from outpost.needs import Needs, add_proxy_package
 from outpost.ssh import Result
 from outpost.workspace import Workspace
-from tests.conftest import FakeHost
+from tests.conftest import FakeHost, explained
 
 G = GiteaEndpoint(name="gitea.internal", ip="10.0.0.5", org="pkgs")
 CFG = ProxyConfig(host="gitea-1", allow=["api.twilio.com", "*.sendgrid.net"])
@@ -47,11 +47,13 @@ def test_config_parses_and_defaults_to_the_gitea_host(tmp_path):
         servers_yml(tmp_path, "egress_proxy:\n  allow: [API.Twilio.com, '*.sendgrid.net', api.twilio.com]\n")
     )
     p = servers.egress_proxy
+    assert p is not None
     assert p.host == "gitea-1" and p.port == 3128 and p.name == "proxy.internal" and p.distro is None
     assert p.allow == ["api.twilio.com", "*.sendgrid.net"]  # lower-cased, duplicates dropped
     other = load_servers(
         servers_yml(tmp_path, "egress_proxy: {host: proxy-1, port: 8888, allow: api.twilio.com, distro: Rocky9}\n")
     ).egress_proxy
+    assert other is not None
     assert (other.host, other.port, other.allow, other.distro) == ("proxy-1", 8888, ["api.twilio.com"], "rocky9")
     assert load_servers(servers_yml(tmp_path, "")).egress_proxy is None
 
@@ -303,9 +305,15 @@ def test_client_files_with_and_without_a_proxy():
     assert image[client_config.PATH_PROFILE][0].decode().startswith("export HTTPS_PROXY=http://10.0.0.5:3128\n")
 
 
+def _changed(config: str | None) -> str:
+    """The new Docker client config, failing the test when docker_client_config says nothing changed."""
+    assert config is not None
+    return config
+
+
 def test_docker_client_config_is_merged_and_only_ours_is_removed():
     existing = json.dumps({"auths": {"gitea.internal": {"auth": "eA=="}}})
-    merged = json.loads(client_config.docker_client_config(existing, ON_GITEA, G.name))
+    merged = json.loads(_changed(client_config.docker_client_config(existing, ON_GITEA, G.name)))
     assert merged["auths"] == {"gitea.internal": {"auth": "eA=="}}
     assert merged["proxies"] == {
         "default": {"httpProxy": "http://10.0.0.5:3128", "httpsProxy": "http://10.0.0.5:3128", "noProxy": NO_PROXY}
@@ -313,7 +321,7 @@ def test_docker_client_config_is_merged_and_only_ours_is_removed():
     assert client_config.docker_client_config(json.dumps(merged), ON_GITEA, G.name) is None  # nothing to change
     assert client_config.docker_client_config("", None, G.name) is None  # no proxy, no file: nothing written
     assert client_config.docker_client_config("not json", ON_GITEA, G.name) is None  # never clobber what we cannot read
-    removed = json.loads(client_config.docker_client_config(json.dumps(merged), None, G.name))
+    removed = json.loads(_changed(client_config.docker_client_config(json.dumps(merged), None, G.name)))
     assert removed == {"auths": {"gitea.internal": {"auth": "eA=="}}}
     theirs = json.dumps({"proxies": {"default": {"httpsProxy": "http://corp:8080", "noProxy": "corp.local"}}})
     assert client_config.docker_client_config(theirs, None, G.name) is None
@@ -775,19 +783,17 @@ def test_report_has_a_named_exceptions_section(workspace_dir):
 def test_explain_knows_the_proxy_failures():
     from outpost.ui import explain
 
-    assert explain.explain("error: Gitea's Debian registry has no tinyproxy for noble. Run ...")["title"].startswith(
+    assert explained("error: Gitea's Debian registry has no tinyproxy for noble. Run ...")["title"].startswith(
         "Gitea does not have tinyproxy"
     )
     assert (
         "distro"
-        in explain.explain("error: Outpost does not know which system the egress proxy host gitea-1 runs, so ...")[
-            "title"
-        ]
+        in explained("error: Outpost does not know which system the egress proxy host gitea-1 runs, so ...")["title"]
     )
-    assert explain.explain("error: egress_proxy.allow: 'https://x' must be a host name")["title"].startswith(
+    assert explained("error: egress_proxy.allow: 'https://x' must be a host name")["title"].startswith(
         "The egress_proxy section"
     )
-    assert explain.explain("    FAIL proxy refuses unknown names  (CONNECT example.com -> 200)")["title"].startswith(
+    assert explained("    FAIL proxy refuses unknown names  (CONNECT example.com -> 200)")["title"].startswith(
         "The proxy let through"
     )
     assert explain.summarize(["proxy", "setup"], "", 0) == "Set up and verified the egress proxy"
@@ -839,6 +845,7 @@ def test_demo_probes_the_proxy_and_still_deploys_without_one(monkeypatch):
     import importlib.util
 
     spec = importlib.util.spec_from_file_location("demo_probe", DEMO / "app" / "probe.py")
+    assert spec is not None and spec.loader is not None
     probe = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(probe)
     for var in ("HTTPS_PROXY", "https_proxy", "OUTPOST_PROXY_ALLOWED"):

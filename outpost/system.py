@@ -18,6 +18,7 @@ Tests replace `outpost.system.Host` to give every command a FakeHost.
 
 from functools import cached_property
 from pathlib import Path
+from typing import Any
 
 from outpost.config import InfraConfig, Mirrors, Servers, load_mirrors, load_servers
 from outpost.ssh import Host, choose_config_file
@@ -66,8 +67,8 @@ class AirGappedSystem:
         return load_mirrors(self.workspace.mirrors_file)
 
     # -- state and secrets, read from disk on every call ------------------------------
-    def state(self, name: str, default=None):
-        """The content of state/<name>.json, or default."""
+    def state(self, name: str, default: Any = None) -> Any:
+        """The content of state/<name>.json (parsed JSON), or default."""
         return self.workspace.read_state(name, default)
 
     def write_state(self, name: str, data) -> Path:

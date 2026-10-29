@@ -169,7 +169,7 @@ def test_fetch_all_runs_every_kind(tmp_path, monkeypatch):
 
 
 class _NpmHandler(BaseHTTPRequestHandler):
-    tgz = None
+    tgz = b""  # the tarball to serve; each test sets it
 
     def log_message(self, *_):
         pass

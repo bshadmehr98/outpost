@@ -30,6 +30,7 @@ import json
 import os
 import shutil
 from pathlib import Path
+from typing import Any
 
 from outpost.config import ConfigError
 
@@ -204,8 +205,8 @@ class Workspace:
         return self.secrets_dir / BOX_SIGNING_KEY
 
     # -- state: small JSON files about what happened last ----------------------------
-    def read_state(self, name: str, default=None):
-        """The content of state/<name>.json, or default when the file is missing."""
+    def read_state(self, name: str, default: Any = None) -> Any:
+        """The content of state/<name>.json (parsed JSON, so of any type), or default when the file is missing."""
         path = self._state_file(name)
         if not path.exists():
             return default

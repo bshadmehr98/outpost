@@ -4,6 +4,7 @@ import hashlib
 import json
 import re
 import threading
+from email.message import EmailMessage
 from email.parser import BytesParser
 from email.policy import default as email_default
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -11,18 +12,20 @@ from pathlib import Path
 
 import pytest
 
-from outpost.ssh import CommandFailed, Result
+from outpost.ssh import CommandFailed, Host, Result
 
 # Gitea's image name rule below the owner, from go-gitea/gitea v28.2.0 routers/api/packages/container/container.go
 GITEA_IMAGE_NAME = re.compile(r"\A[a-z0-9]+([._-][a-z0-9]+)*(/[a-z0-9]+([._-][a-z0-9]+)*)*\Z")
 
 
-class FakeHost:
+class FakeHost(Host):
     """Records every script and file instead of touching a server. Answers come from `responses`:
-    a list of (regex, stdout) pairs matched against the script, first match wins."""
+    a list of (regex, stdout) pairs matched against the script, first match wins.
 
-    def __init__(self, alias="node-1", facts=None, responses=None):
-        self.alias = alias
+    It is a Host, so it goes wherever a Host does; every method that would start ssh or scp is replaced."""
+
+    def __init__(self, alias: str = "node-1", facts: dict | None = None, responses: list | None = None):
+        super().__init__(alias)
         self._facts = facts or {
             "id": "ubuntu",
             "codename": "noble",
@@ -36,7 +39,7 @@ class FakeHost:
         self.puts: list[tuple[str, str]] = []
         self.gets: list[tuple[str, str]] = []
 
-    def run(self, script, raise_on_failure=False, timeout=0):
+    def run(self, script: str, raise_on_failure: bool = False, timeout: int = 0) -> Result:
         self.scripts.append(script)
         for pattern, stdout in self.responses:
             if re.search(pattern, script, re.S):
@@ -50,26 +53,35 @@ class FakeHost:
                 return Result(0, stdout, "")
         return Result(0, "", "")
 
-    def write(self, path, content, mode="0644"):
+    def write(self, path: str, content: str | bytes, mode: str = "0644") -> None:
         self.files[path] = content if isinstance(content, str) else content.decode()
 
-    def put(self, local, remote, mode="0644", via="/tmp"):
+    def put(self, local: Path, remote: str, mode: str = "0644", via: str = "/tmp") -> None:
         self.puts.append((str(local), remote))
 
-    def get(self, remote, local):
+    def get(self, remote: str, local: Path) -> Path:
         self.gets.append((remote, str(local)))
         Path(local).parent.mkdir(parents=True, exist_ok=True)
         Path(local).write_bytes(b"archive-bytes")
         return local
 
-    def ip(self):
+    def ip(self) -> str:
         return self._facts["ip"]
 
-    def facts(self):
+    def facts(self) -> dict:
         return dict(self._facts)
 
     def ran(self, text: str) -> bool:
         return any(text in s for s in self.scripts)
+
+
+def explained(log: str) -> dict:
+    """ui.explain.explain(log), failing the test when it knows no failure in the log."""
+    from outpost.ui.explain import explain
+
+    found = explain(log)
+    assert found is not None, f"no known failure in: {log!r}"
+    return found
 
 
 class FakeGitea:
@@ -89,7 +101,7 @@ class FakeGitea:
         self.manifests: dict[tuple[str, str], tuple[bytes, str]] = {}
         self.uploads: dict[str, str] = {}
         self.requests: list[tuple[str, str]] = []
-        self.server = None
+        self.server: ThreadingHTTPServer | None = None
         self.url = ""
 
     # registry helpers used by tests to pre-load images for pulling
@@ -127,7 +139,7 @@ class FakeGitea:
 
 
 class _Handler(BaseHTTPRequestHandler):
-    gitea: FakeGitea = None
+    gitea: FakeGitea  # set on the subclass the fake_gitea fixture makes
 
     def log_message(self, *_):
         pass
@@ -199,13 +211,13 @@ class _Handler(BaseHTTPRequestHandler):
         return self._send(201, b"")
 
     def _pypi_upload(self, g, body):
-        msg = BytesParser(policy=email_default).parsebytes(
+        msg = BytesParser(EmailMessage, policy=email_default).parsebytes(
             b"Content-Type: " + self.headers["Content-Type"].encode() + b"\r\n\r\n" + body
         )
         fields = {}
         for part in msg.iter_parts():
             name = part.get_param("name", header="content-disposition")
-            fields[name] = part.get_filename() if part.get_filename() else part.get_payload(decode=True).decode()
+            fields[name] = part.get_filename() or part.get_content()
         if any(
             p["name"] == fields["name"] and p["version"] == fields["version"] and p["content"] == fields["content"]
             for p in g.pypi

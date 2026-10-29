@@ -21,6 +21,7 @@ def test_load_template_checks():
     assert hello.steps[1]["expect"] == "Hello from Outpost"
     assert names["hello-k3s"].context is None
     alpine = names["hello-alpine"]
+    assert alpine.context is not None
     assert (
         alpine.context == TEMPLATE_CHECKS / "hello-alpine"
         and alpine.applies_to("swarm")

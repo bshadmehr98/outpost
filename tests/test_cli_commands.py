@@ -17,7 +17,10 @@ def test_every_command_module_declares_its_parser_and_run():
     for command in COMMANDS:
         assert callable(command.add_parser) and callable(command.run) and command.__doc__
         names.append(command.__name__.rsplit(".", 1)[1])
-    choices = build_parser()._subparsers._group_actions[0].choices  # pyright: ignore[reportOptionalMemberAccess]
+    subparsers = build_parser()._subparsers  # argparse keeps the commands here; there is no public name for it
+    assert subparsers is not None
+    choices = subparsers._group_actions[0].choices
+    assert choices is not None
     assert list(choices) == names  # the parser lists the commands in COMMANDS' order
     for name in names:
         assert build_parser().parse_args(_smallest_command_line(name)).run.__module__ == f"outpost.cli.{name}"

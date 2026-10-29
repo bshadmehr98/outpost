@@ -56,7 +56,7 @@ known-first-party = ["outpost", "tests"]
 [tool.pyright]
 pythonVersion = "3.11"
 typeCheckingMode = "basic"
-include = ["outpost"]  # tests are not type-checked yet: about 50 Optional findings there
+include = ["outpost", "tests"]
 exclude = ["**/__pycache__", "outpost/templates"]  # templates are copied into the workspace, not imported
 
 [tool.pytest.ini_options]

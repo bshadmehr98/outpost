@@ -2,6 +2,7 @@ import json
 import re
 import threading
 import time
+import urllib.error
 import urllib.request
 from http.server import ThreadingHTTPServer
 from pathlib import Path
@@ -250,6 +251,7 @@ def test_servers_form_round_trips_the_egress_proxy(ui, workspace_dir):
     }
     assert call(ui + "/api/servers", "POST", form)[0] == 200
     proxy = load_servers(workspace_dir / "servers.yml").egress_proxy
+    assert proxy is not None
     assert (
         proxy.host == "g1"
         and proxy.port == 3128
@@ -261,7 +263,8 @@ def test_servers_form_round_trips_the_egress_proxy(ui, workspace_dir):
     assert data["allow"] == ["api.twilio.com", "*.sendgrid.net"] and data["host"] == "g1"
     # a form without the card keeps the section; an empty allow list removes it; a bad entry is refused
     assert call(ui + "/api/servers", "POST", {k: v for k, v in form.items() if k != "egress_proxy"})[0] == 200
-    assert load_servers(workspace_dir / "servers.yml").egress_proxy.allow == ["api.twilio.com", "*.sendgrid.net"]
+    proxy = load_servers(workspace_dir / "servers.yml").egress_proxy
+    assert proxy is not None and proxy.allow == ["api.twilio.com", "*.sendgrid.net"]
     status, body = call(
         ui + "/api/servers", "POST", {**form, "egress_proxy": {"allow": "https://api.twilio.com", "port": "3128"}}
     )
@@ -269,7 +272,7 @@ def test_servers_form_round_trips_the_egress_proxy(ui, workspace_dir):
     other = {**form, "egress_proxy": {"allow": "api.twilio.com", "host": "p1", "port": "8888"}}
     assert call(ui + "/api/servers", "POST", other)[0] == 200
     proxy = load_servers(workspace_dir / "servers.yml").egress_proxy
-    assert (proxy.host, proxy.port) == ("p1", 8888)
+    assert proxy is not None and (proxy.host, proxy.port) == ("p1", 8888)
     assert call(ui + "/api/servers", "POST", {**form, "egress_proxy": {"allow": ""}})[0] == 200
     assert load_servers(workspace_dir / "servers.yml").egress_proxy is None
 

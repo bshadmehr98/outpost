@@ -68,6 +68,7 @@ def test_signing(tmp_path):
     assert boxmod.check_signature(box, pub) == boxmod.UNSIGNED
     made = boxmod.pack(box, tmp_path / "dist", signer=lambda m: pki.sign_file(m, key))
     opened, keep = boxmod.open_box(made)
+    assert keep is not None  # tar files are unpacked into a temporary folder
     assert pki.signature_is_valid(opened / "manifest.json", opened / "manifest.sig", pub)
     assert boxmod.check_signature(opened, pub) == boxmod.SIGNATURE_VALID
     assert boxmod.check_signature(opened, tmp_path / "missing.pub") == boxmod.NO_PUBLIC_KEY
