@@ -42,12 +42,14 @@ FIRST_ADDRESS = "hostname -I 2>/dev/null | awk '{print $1}'"
 
 # For systems without `hostname -I` (some small Linux images).
 # `ip -4 route get 1` asks "how would a packet to 1.0.0.0 leave?", and prints for example
-#     1.0.0.0 via 10.0.0.1 dev eth0 src 10.0.0.5 uid 0
-#     1       2   3        4   5    6   7
-# Word 7 is the address after `src`: the one this server sends from. `exit` stops after one line.
-# Known flaw: with no gateway, there is no "via 10.0.0.1", so word 7 is the wrong word.
-ADDRESS_ON_DEFAULT_ROUTE = "ip -4 route get 1 | awk '{print $7; exit}'"
-
+#     1.0.0.0 via 10.0.0.1 dev eth0 src 10.0.0.5 uid 0      (through a gateway)
+#     1.0.0.0 dev eth0 src 10.0.0.5 uid 0                   (no gateway: the network is directly attached)
+# The address after `src` is the one this server sends from. Its place on the line differs, so awk
+# looks at each word ($i, for i from 1 to NF, the number of words) and prints the one after `src`.
+# `exit` stops after the first line.
+ADDRESS_ON_DEFAULT_ROUTE = (
+    "ip -4 route get 1 | awk '{for (i = 1; i < NF; i++) if ($i == \"src\") {print $(i + 1); exit}}'"
+)
 
 # -- facts about the server -------------------------------------------------------------
 

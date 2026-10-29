@@ -57,6 +57,7 @@ All notable changes to Outpost. The format follows Keep a Changelog; versions fo
 - One needs image reference that does not parse no longer flags every image in the box as unneeded.
 - `outpost hosts` works on servers without `PRETTY_NAME` in `/etc/os-release`, or without the file at all.
 - `outpost report` no longer fails when the ssh config file named in `servers.yml` is missing.
+- `Host.ip()` on a server without `hostname -I` read a fixed word of `ip route get`, which is wrong when the default route has no gateway (`1.0.0.0 dev eth0 src ...`); it now takes the word after `src`.
 - The ssh config file is chosen once, when `servers.yml` is read, and that fails at once on a missing file, or when `ssh_config:` in `servers.yml` and `OUTPOST_SSH_CONFIG` name two different files, instead of every ssh call failing later with exit 255 as if the server were down. The dashboard shows such a file as a message.
 
 - `outpost upload` failed at the first image with `NAME_INVALID`: the first version of the one-organisation layout joined owner and image as `library--python`, which the OCI spec allows but Gitea's own name rule (one `.`, `_` or `-` between alphanumerics) rejects. Images now use the nested path `pkgs/library/python`, checked against a real Gitea in the integration suite.
