@@ -16,7 +16,7 @@ gitea`), so tests replace one name to fake the API: `outpost.gitea.connect`.
     connect.py        connect(), api_token(): the API through an ssh tunnel
     client.py         GiteaClient: version, organisations, repositories, tokens, secrets, runners, workflow runs
     packages.py       GiteaPackages (client.packages): upload_* per registry, signing keys, has_*, push_image
-    upload_formats.py the shape of each upload (multipart, npm's package.json) and upload_outcome()
+    upload_formats.py the shape of each upload (multipart, npm's package.json and publish body) and upload_outcome()
     service.py        paths on the server, GITEA_CLI, wait_for_gitea(), installed_version(), token_works()
 
 Code outside this folder uses only the names below.

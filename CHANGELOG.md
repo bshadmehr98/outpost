@@ -42,7 +42,7 @@ All notable changes to Outpost. The format follows Keep a Changelog; versions fo
 - `outpost upload` prints a warning when it cannot check the box's signature (no `manifest.sig`, or `pki/box.pub` missing), instead of skipping the check without a word.
 - `outpost fetch`: one image or file that fails no longer stops the rest of its kind; it is listed at the end and the exit code is still 1.
 - HTTP PUT and POST are no longer retried after a server error, since the request may have landed; GET and HEAD still are.
-- Image layers and generic, Debian, Alpine and RPM package uploads stream from disk instead of reading the whole file into memory.
+- Image layers and every package upload (generic, PyPI, npm, Debian, Alpine and RPM) stream from disk instead of reading the whole file into memory. A PyPI upload sends its multipart form, and an npm upload its JSON document with the tarball in base64, as an `http.StreamedBody`.
 - Gitea's certificate is reissued when `gitea.name` or `gitea.ip` changes; the check was a substring match on the name and ignored the IP.
 - `fetch` after `pack` left a stale `manifest.sig`, which made `upload` refuse the box. A new manifest now drops the old signature.
 - An unquoted `python: 3.10` in a needs file is a clear error that says to quote it (YAML reads it as 3.1).

@@ -218,6 +218,8 @@ class _Handler(BaseHTTPRequestHandler):
         for part in msg.iter_parts():
             name = part.get_param("name", header="content-disposition")
             fields[name] = part.get_filename() or part.get_content()
+            if part.get_filename():
+                fields["file_bytes"] = part.get_content()  # what was sent as the file
         if any(
             p["name"] == fields["name"] and p["version"] == fields["version"] and p["content"] == fields["content"]
             for p in g.pypi

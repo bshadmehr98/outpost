@@ -3,6 +3,7 @@
     http = Http("https://gitea.internal", ca_file="pki/ca.crt", basic=("outpost", token))
     http.get("/api/v1/version", ok=(200,)).json()      # HttpError on any other status
     http.request("PUT", "/api/packages/...", data=Path("box/files/x"))   # a file body is streamed from disk
+    http.request("POST", "/api/packages/...", data=StreamedBody([b"head", Path("x.whl"), b"tail"]))  # so is this
     http.download("https://example.com/tool.tgz", Path("box/files/tool.tgz"), sha256="...")
 
 It supports a private CA, a fixed Host header (for talking to Gitea through an ssh tunnel), Basic
@@ -25,6 +26,7 @@ import sys
 import time
 import urllib.error
 import urllib.request
+from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -35,6 +37,7 @@ RETRY_STATUS = {429, 500, 502, 503, 504}
 RETRIED_METHODS = ("GET", "HEAD")  # reads only: a write that failed may still have landed
 NETWORK_ERRORS = (urllib.error.URLError, ConnectionError, socket.timeout, TimeoutError, ssl.SSLError)
 CHUNK = 1 << 20  # 1 MB
+BASE64_CHUNK = 3 * (1 << 18)  # 768 KB: a multiple of 3 bytes, so each chunk encodes without padding in the middle
 
 
 @dataclass
@@ -52,6 +55,64 @@ class Response:
     @property
     def text(self) -> str:
         return self.body.decode("utf-8", "replace")
+
+
+@dataclass(frozen=True)
+class Base64File:
+    """A file in a StreamedBody that is sent base64-encoded (npm wants the tarball inside a JSON document)."""
+
+    path: Path
+
+    @property
+    def size(self) -> int:
+        """The length of the base64 text: 4 characters for every 3 bytes, the last group padded."""
+        return 4 * -(-self.path.stat().st_size // 3)  # -(-a // b) rounds the division up
+
+    def chunks(self) -> Iterator[bytes]:
+        with open(self.path, "rb") as file:
+            while chunk := file.read(BASE64_CHUNK):
+                yield base64.b64encode(chunk)
+
+
+class StreamedBody:
+    """A request body sent piece by piece: byte strings and files, each file read in chunks as it is sent,
+    so a big file is never held in memory whole.
+
+        body = StreamedBody([b"--boundary ...", Path("box/pypi/x.whl"), b"--boundary--"])
+        http.request("POST", url, data=body)     # Content-Length is body.size
+    """
+
+    def __init__(self, pieces: list[bytes | Path | Base64File]):
+        self.pieces = pieces
+
+    @property
+    def size(self) -> int:
+        """The number of bytes the body sends."""
+        return sum(_piece_size(piece) for piece in self.pieces)
+
+    def __iter__(self) -> Iterator[bytes]:
+        """The body, chunk by chunk (urllib sends an iterable body this way)."""
+        for piece in self.pieces:
+            if isinstance(piece, bytes):
+                yield piece
+            elif isinstance(piece, Base64File):
+                yield from piece.chunks()
+            else:
+                yield from _file_chunks(piece)
+
+
+def _piece_size(piece: bytes | Path | Base64File) -> int:
+    if isinstance(piece, bytes):
+        return len(piece)
+    if isinstance(piece, Base64File):
+        return piece.size
+    return piece.stat().st_size
+
+
+def _file_chunks(path: Path) -> Iterator[bytes]:
+    with open(path, "rb") as file:
+        while chunk := file.read(CHUNK):
+            yield chunk
 
 
 class HttpError(Exception):
@@ -105,7 +166,7 @@ class Http:
         self,
         method: str,
         path: str,
-        data: bytes | Path | None = None,
+        data: bytes | Path | StreamedBody | None = None,
         headers: dict | None = None,
         ok: tuple[int, ...] | None = None,
     ) -> Response:
@@ -113,7 +174,7 @@ class Http:
 
         Args:
             path: a path below base, or a full URL.
-            data: the body: bytes, or a file that is streamed from disk.
+            data: the body: bytes, or a file or a StreamedBody, which are streamed from disk.
             ok: the statuses to accept; any other raises HttpError. None accepts every status.
 
         Raises:
@@ -197,8 +258,11 @@ class Http:
     def _url(self, path: str) -> str:
         return path if path.startswith("http") else self.base + path
 
-    def _send(self, method: str, url: str, data: bytes | Path | None, headers: dict | None) -> Response:
+    def _send(self, method: str, url: str, data: bytes | Path | StreamedBody | None, headers: dict | None) -> Response:
         """One try: a status the server sent is a Response, whatever it is."""
+        if isinstance(data, StreamedBody):
+            size = {"Content-Length": str(data.size)}  # urllib sends an iterable body only with a known length
+            return self._open(self._build_request(method, url, data, {**(headers or {}), **size}))
         if isinstance(data, Path):
             with open(data, "rb") as body:
                 size = {"Content-Length": str(data.stat().st_size)}

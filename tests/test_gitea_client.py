@@ -1,11 +1,15 @@
+import base64
+import hashlib
 import io
 import json
 import tarfile
+from pathlib import Path
 
 import pytest
 
+from outpost import http as httpmod
 from outpost.gitea import GiteaClient, npm_package_json, pypi_name_version
-from outpost.http import Http, HttpError
+from outpost.http import Base64File, Http, HttpError, StreamedBody
 
 
 def make_npm_tgz(path, name="chalk", version="5.3.0"):
@@ -53,6 +57,35 @@ def test_pypi_upload_fields(client, fake_gitea, tmp_path):
     sdist.write_bytes(b"sdist")
     client.packages.upload_pypi(sdist)
     assert fake_gitea.pypi[1]["filetype"] == "sdist"
+
+
+def test_pypi_and_npm_uploads_stream_the_file_and_send_it_whole(client, fake_gitea, tmp_path, monkeypatch):
+    """The wheel and the tarball are read in chunks as they are sent, never whole into memory."""
+    whl = tmp_path / "big-1.0-py3-none-any.whl"
+    whl.write_bytes(bytes(range(256)) * 5000)
+    tgz = make_npm_tgz(tmp_path / "chalk-5.3.0.tgz")
+    wheel_bytes, tarball_bytes = whl.read_bytes(), tgz.read_bytes()
+    monkeypatch.setattr(Path, "read_bytes", lambda self: pytest.fail(f"{self.name} must not be read whole"))
+    assert client.packages.upload_pypi(whl) == "uploaded"
+    assert client.packages.upload_npm(tgz) == "uploaded"
+    sent = fake_gitea.pypi[0]
+    assert sent["file_bytes"] == wheel_bytes and sent["sha256_digest"] == hashlib.sha256(wheel_bytes).hexdigest()
+    doc = fake_gitea.npm["chalk@5.3.0"]
+    assert base64.b64decode(doc["_attachments"]["chalk-5.3.0.tgz"]["data"]) == tarball_bytes
+    dist = doc["versions"]["5.3.0"]["dist"]
+    assert dist["integrity"] == "sha512-" + base64.b64encode(hashlib.sha512(tarball_bytes).digest()).decode()
+    assert dist["shasum"] == hashlib.sha1(tarball_bytes).hexdigest()
+
+
+@pytest.mark.parametrize("length", range(8))
+def test_streamed_body_sends_its_size_and_base64_in_chunks(tmp_path, monkeypatch, length):
+    monkeypatch.setattr(httpmod, "BASE64_CHUNK", 3)  # many chunks for a few bytes
+    monkeypatch.setattr(httpmod, "CHUNK", 2)
+    data = bytes(range(length))
+    (tmp_path / "f").write_bytes(data)
+    body = StreamedBody([b"head:", tmp_path / "f", b":", Base64File(tmp_path / "f"), b":tail"])
+    expected = b"head:" + data + b":" + base64.b64encode(data) + b":tail"
+    assert b"".join(body) == expected and body.size == len(expected)
 
 
 def test_npm_upload_document(client, fake_gitea, tmp_path):

@@ -14,21 +14,24 @@ https://docs.gitea.com/usage/packages/rpm): PUT /api/packages/{owner}/alpine/{br
 PUT /api/packages/{owner}/rpm/{group}/upload (or /rpm/upload without a group), 201 when stored and
 409 when the same file is already there; the signing keys are GET /alpine/key and GET /rpm/repository.key.
 
-A generic, Debian, Alpine or RPM upload is the file itself, streamed from disk. A PyPI upload is a
-multipart form and an npm upload a JSON document with the tarball in base64, so those two are read
-into memory; wheels and npm tarballs are small.
+Every upload streams its file from disk. A generic, Debian, Alpine or RPM upload is the file itself;
+a PyPI upload is a multipart form around it, and an npm upload a JSON document with the tarball in
+base64 (upload_formats.py builds both as a StreamedBody).
 """
 
-import base64
-import hashlib
-import json
 import re
 from pathlib import Path
 from typing import NamedTuple
 from urllib.parse import quote
 
 from outpost import oci
-from outpost.gitea.upload_formats import multipart, npm_package_json, pypi_name_version, upload_outcome
+from outpost.gitea.upload_formats import (
+    multipart,
+    npm_package_json,
+    npm_publish_body,
+    pypi_name_version,
+    upload_outcome,
+)
 from outpost.http import Http, sha256_file
 
 ALPINE_KEY_DEFAULT_NAME = "{owner}.rsa.pub"  # only if Gitea sends no Content-Disposition; apk would then need a rename
@@ -77,7 +80,7 @@ class GiteaPackages:
             "sha256_digest": sha256_file(path),
             "filetype": "bdist_wheel" if path.suffix == ".whl" else "sdist",
         }
-        body, content_type = multipart(fields, "content", path.name, path.read_bytes())
+        body, content_type = multipart(fields, "content", path)
         response = self.http.request(
             "POST", f"/api/packages/{owner or self.org}/pypi", data=body, headers={"Content-Type": content_type}
         )
@@ -86,36 +89,13 @@ class GiteaPackages:
     # -- npm ----------------------------------------------------------------------
     def upload_npm(self, path: Path, owner: str | None = None) -> str:
         """Upload an npm tarball, the way `npm publish` does."""
-        data = path.read_bytes()
         package = npm_package_json(path)
         name, version = package["name"], package["version"]
         owner = owner or self.org
-        version_meta = {
-            **package,
-            "dist": {
-                "integrity": "sha512-" + base64.b64encode(hashlib.sha512(data).digest()).decode(),
-                "shasum": hashlib.sha1(data).hexdigest(),
-                "tarball": f"{self.public_url}/api/packages/{owner}/npm/{quote(name, safe='@')}/-/{version}/{path.name}",
-            },
-        }
-        document = {
-            "_id": name,
-            "name": name,
-            "description": package.get("description", ""),
-            "dist-tags": {"latest": version},
-            "versions": {version: version_meta},
-            "_attachments": {
-                path.name: {
-                    "content_type": "application/octet-stream",
-                    "data": base64.b64encode(data).decode(),
-                    "length": len(data),
-                }
-            },
-        }
         url = f"/api/packages/{owner}/npm/{quote(name, safe='@')}"
-        response = self.http.request(
-            "PUT", url, data=json.dumps(document).encode(), headers={"Content-Type": "application/json"}
-        )
+        tarball_url = f"{self.public_url}{url}/-/{version}/{path.name}"
+        body = npm_publish_body(package, path, tarball_url)
+        response = self.http.request("PUT", url, data=body, headers={"Content-Type": "application/json"})
         return upload_outcome(response, "npm", f"{name}@{version}")
 
     # -- debian -------------------------------------------------------------------
