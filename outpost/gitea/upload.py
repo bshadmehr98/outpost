@@ -53,7 +53,7 @@ def upload(system: AirGappedSystem, sources: list[Path], log=print) -> dict:
         endpoint = gitea_endpoint(system)
         proxy = proxy_endpoint_or_none(system, endpoint, log)
         with gitea.connect(system) as client:
-            stats = upload_box(box, client, endpoint, system.ca_pem(), log=log, proxy=proxy)
+            stats = upload_box(box, client, endpoint, system.ca_pem(), system.arch, log=log, proxy=proxy)
     finally:
         if unpacked:
             unpacked.cleanup()
@@ -62,9 +62,15 @@ def upload(system: AirGappedSystem, sources: list[Path], log=print) -> dict:
 
 
 def upload_box(
-    box: Path, client: GiteaClient, gitea: GiteaEndpoint, ca_pem: str, log=print, proxy: ProxyEndpoint | None = None
+    box: Path,
+    client: GiteaClient,
+    gitea: GiteaEndpoint,
+    ca_pem: str,
+    arch: str,
+    log=print,
+    proxy: ProxyEndpoint | None = None,
 ) -> dict:
-    """Upload every kind in an open box folder, then build and push the config image.
+    """Upload every kind in an open box folder, then build and push the config image for the CPU type arch.
 
     Returns:
         {kind: {"uploaded": n, "exists": m}} for each kind in the box, and "config_image".
@@ -85,6 +91,7 @@ def upload_box(
         client,
         gitea,
         ca_pem,
+        arch,
         boxmod.distros_in(box),
         apk_branches=boxmod.distros_in(box, "apk"),
         rpm_distros=boxmod.distros_in(box, "rpm"),
@@ -100,6 +107,7 @@ def push_config_image(
     client: GiteaClient,
     gitea: GiteaEndpoint,
     ca_pem: str,
+    arch: str,
     distros: list[str],
     apk_branches: list[str] | None = None,
     rpm_distros: list[str] | None = None,
@@ -115,6 +123,7 @@ def push_config_image(
     client config.
 
     Args:
+        arch: the box's CPU type; the image is built for it.
         distros: the apt suites in Gitea.
         apk_branches: the Alpine branches in Gitea.
         rpm_distros: the RPM groups in Gitea.
@@ -139,7 +148,7 @@ def push_config_image(
         ca_hash=pki.subject_hash(ca_pem),
     )
     with tempfile.TemporaryDirectory(prefix="outpost-config-image-") as tmp:
-        layout = oci.build_layout(files, Path(tmp), gitea.config_image)
+        layout = oci.build_layout(files, Path(tmp), gitea.config_image, arch)
         client.ensure_org(gitea.org)
         packages.push_image(layout, gitea.org, "config", "latest")
     log(

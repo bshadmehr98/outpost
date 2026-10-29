@@ -50,12 +50,6 @@ pods=0
 """
 
 
-@pytest.fixture
-def amd64():
-    yield
-    versions.use_arch("amd64")
-
-
 # -- backup and restore -----------------------------------------------------------
 
 
@@ -68,7 +62,7 @@ def test_backup_pauses_gitea_archives_and_copies_home(workspace_dir, monkeypatch
             (r"curl -sk", ""),
         ],
     )
-    monkeypatch.setattr(outpost.system, "Host", lambda alias: host)
+    monkeypatch.setattr(outpost.system, "Host", lambda alias, config_file=None: host)
     system = AirGappedSystem.load(workspace_dir)
     workspace = system.workspace
     local = gitea.backup(system, log=lambda *_: None)
@@ -94,7 +88,7 @@ def test_backup_hashes_the_archive_in_chunks_whatever_its_size(workspace_dir, mo
     host = FakeHost(
         "gitea-1", responses=[(r"gitea --version", "gitea version 28.2.0 built with go"), (r"stat -c %s", "3000000000")]
     )
-    monkeypatch.setattr(outpost.system, "Host", lambda alias: host)
+    monkeypatch.setattr(outpost.system, "Host", lambda alias, config_file=None: host)
     monkeypatch.setattr(Path, "read_bytes", lambda self: pytest.fail("the archive must not be read whole"))
     system = AirGappedSystem.load(workspace_dir)
     gitea.backup(system, log=lambda *_: None)
@@ -102,7 +96,7 @@ def test_backup_hashes_the_archive_in_chunks_whatever_its_size(workspace_dir, mo
 
 
 def test_backup_needs_an_installed_gitea(workspace_dir, monkeypatch):
-    monkeypatch.setattr(outpost.system, "Host", lambda alias: FakeHost(alias))
+    monkeypatch.setattr(outpost.system, "Host", lambda alias, config_file=None: FakeHost(alias))
     with pytest.raises(RuntimeError, match="not installed"):
         gitea.backup(AirGappedSystem.load(workspace_dir), log=lambda *_: None)
 
@@ -116,7 +110,7 @@ def test_restore_moves_current_data_aside_and_checks_the_token(workspace_dir, tm
     host = FakeHost(
         "gitea-1", responses=[(r"gitea --version", "gitea version 28.2.0 built with go"), (r"api/v1/user", "401")]
     )
-    monkeypatch.setattr(outpost.system, "Host", lambda alias: host)
+    monkeypatch.setattr(outpost.system, "Host", lambda alias, config_file=None: host)
     messages = []
     gitea.restore(system, archive, log=messages.append)
     joined = "\n".join(host.scripts)
@@ -152,7 +146,7 @@ def test_gitea_setup_backs_up_before_upgrading(workspace_dir, monkeypatch):
             (r"test -s /etc/gitea/app.ini", Result(1, "", "")),
         ],
     )
-    monkeypatch.setattr(outpost.system, "Host", lambda alias: host)
+    monkeypatch.setattr(outpost.system, "Host", lambda alias, config_file=None: host)
 
     class Client:
         def ensure_org(self, name):
@@ -219,7 +213,7 @@ def test_docker_install_restarts_the_daemon_on_a_version_change():
     from outpost.infra import node
     from outpost.infra.context import NodeContext
 
-    ctx = NodeContext(gitea=GiteaEndpoint("gitea.internal", "10.0.0.5", "pkgs"), ca_pem="CA")
+    ctx = NodeContext(gitea=GiteaEndpoint("gitea.internal", "10.0.0.5", "pkgs"), ca_pem="CA", arch="amd64")
     host = FakeHost(responses=[(r"docker --version", "Docker version 29.0.0, build x")])
     node.install_docker(host, ctx, log=lambda *_: None)
     assert any("systemctl restart docker" in s for s in host.scripts) and not any(
@@ -339,9 +333,9 @@ def test_report_says_what_is_proven(workspace_dir):
 # -- architectures ----------------------------------------------------------------
 
 
-def test_arm64_changes_every_download_name(amd64):
-    versions.use_arch("aarch64")
-    urls = {f["name"]: f["url"] for f in versions.pinned_files(Mirrors(), {"compose", "k3s"})}
+def test_arm64_changes_every_download_name():
+    arch = versions.normalize_arch("aarch64")
+    urls = {f["name"]: f["url"] for f in versions.pinned_files(Mirrors(), {"compose", "k3s"}, arch)}
     assert (
         urls["gitea"].endswith("linux-arm64")
         and urls["coredns"].endswith("linux_arm64.tgz")
@@ -352,14 +346,13 @@ def test_arm64_changes_every_download_name(amd64):
         "linux-arm64"
     )
     assert urls["k3s"].endswith("/k3s-arm64") and urls["k3s-airgap-images"].endswith("k3s-airgap-images-arm64.tar.gz")
-    assert "manylinux2014_aarch64" in versions.arch_names()["pip"]
-    versions.use_arch("amd64")
-    assert versions.pinned_files(Mirrors(), set())[0]["url"].endswith("linux-amd64")
+    assert "manylinux2014_aarch64" in versions.arch_names(arch)["pip"]
+    assert versions.pinned_files(Mirrors(), set(), "amd64")[0]["url"].endswith("linux-amd64")
     with pytest.raises(ValueError):
-        versions.use_arch("mips")
+        versions.normalize_arch("mips")
 
 
-def test_servers_yml_arch_key(workspace_dir, amd64):
+def test_servers_yml_arch_key(workspace_dir):
     f = workspace_dir / "servers.yml"
     f.write_text(f.read_text() + "\narch: aarch64\n")
     assert load_servers(f).arch == "arm64"
@@ -373,7 +366,7 @@ def test_setup_refuses_a_node_of_the_wrong_architecture():
     from outpost.infra import compose
     from outpost.infra.context import NodeContext
 
-    ctx = NodeContext(gitea=GiteaEndpoint("gitea.internal", "10.0.0.5", "pkgs"), ca_pem="CA")
+    ctx = NodeContext(gitea=GiteaEndpoint("gitea.internal", "10.0.0.5", "pkgs"), ca_pem="CA", arch="amd64")
     with pytest.raises(RuntimeError, match="aarch64 but this workspace is built for x86_64"):
         compose.setup(ctx, [FakeHost(facts={"ip": "10.0.0.11", "arch": "aarch64"})], log=lambda *_: None)
 

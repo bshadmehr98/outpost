@@ -80,7 +80,7 @@ def test_errors(tmp_path, text, message):
 
 
 def test_pinned_files():
-    files = versions.pinned_files(Mirrors(), {"compose", "k3s"})
+    files = versions.pinned_files(Mirrors(), {"compose", "k3s"}, "amd64")
     names = [f["name"] for f in files]
     assert names == [
         "gitea",
@@ -94,10 +94,10 @@ def test_pinned_files():
         "k3s-install",
     ]
     assert "%2B" in next(f["url"] for f in files if f["name"] == "k3s")
-    assert versions.pinned_files(Mirrors(github="https://gh.mirror.ir"), {"swarm"})[4]["url"].startswith(
+    assert versions.pinned_files(Mirrors(github="https://gh.mirror.ir"), {"swarm"}, "amd64")[4]["url"].startswith(
         "https://gh.mirror.ir/docker/compose"
     )
-    assert [f["name"] for f in versions.pinned_files(Mirrors(), set())] == ["gitea"]
+    assert [f["name"] for f in versions.pinned_files(Mirrors(), set(), "amd64")] == ["gitea"]
     needs = add_pinned_files(load_needs(__import__("pathlib").Path("/nonexistent")), files)
     assert [f.name for f in needs.files] == names
 
@@ -129,5 +129,5 @@ def test_all_needs_adds_the_pinned_files_and_tinyproxy(workspace_dir):
         f.write("egress_proxy:\n  host: gitea-1\n  distro: bookworm\n  allow: [api.example.com]\n")
     needs = all_needs(AirGappedSystem.load(workspace_dir))
     assert "tinyproxy" in needs.apt["bookworm"] and needs.files[-1].name in {
-        f["name"] for f in versions.pinned_files(Mirrors(), {"compose"})
+        f["name"] for f in versions.pinned_files(Mirrors(), {"compose"}, "amd64")
     }

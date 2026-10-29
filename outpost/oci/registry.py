@@ -12,7 +12,6 @@ from pathlib import Path
 from typing import NamedTuple
 from urllib.parse import quote, urlencode
 
-from outpost import versions
 from outpost.http import Http, HttpError, Response
 from outpost.oci.layout import blob_path, blobs_dir, digest_of, write_index
 from outpost.oci.media_types import ACCEPT, INDEX_TYPES, MANIFEST_TYPES
@@ -50,8 +49,8 @@ class Registry:
         return resp
 
     # -- pull ---------------------------------------------------------------------
-    def pull(self, ref: Ref, dest: Path, arch: str | None = None) -> Path:
-        """Pull ref for linux/arch (default: the box's CPU type) into an OCI layout at dest.
+    def pull(self, ref: Ref, dest: Path, arch: str) -> Path:
+        """Pull ref for linux/arch (the box's CPU type) into an OCI layout at dest.
 
         Blobs already in dest at the right size are not fetched again.
 
@@ -59,7 +58,6 @@ class Registry:
             HttpError: the registry refused the manifest or a blob.
             ValueError: a multi-arch image has no linux/arch image.
         """
-        arch = arch or versions.ARCH
         blobs_dir(dest).mkdir(parents=True, exist_ok=True)
         manifest_bytes, media_type = self._get_manifest(ref, ref.tag)
         manifest = json.loads(manifest_bytes)

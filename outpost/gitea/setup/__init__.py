@@ -61,7 +61,7 @@ def setup(system: AirGappedSystem, log=print) -> dict:
     binary = check_box_has_gitea(system)
 
     log(f"==> [1/7] connecting to {gitea_config.host}")
-    ip = connect_and_check_arch(host, gitea_config, log)
+    ip = connect_and_check_arch(host, gitea_config, system.arch, log)
 
     log("==> [2/7] certificates")
     cert, key = ensure_certificates(system, ip)

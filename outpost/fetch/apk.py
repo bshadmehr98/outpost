@@ -18,7 +18,7 @@ from outpost.fetch.in_container import OUT, OsPackageRecipe, fetch_os_packages
 ARCHES = {"amd64": "x86_64", "arm64": "aarch64"}
 
 
-def fetch(apk: dict[str, list[str]], box: Path, mirrors: Mirrors, log=print, run=subprocess.run) -> dict:
+def fetch(apk: dict[str, list[str]], box: Path, mirrors: Mirrors, arch: str, log=print, run=subprocess.run) -> dict:
     """Fetch each branch's packages and their whole dependency tree into box/apk/<branch>.
 
     Returns:
@@ -30,7 +30,7 @@ def fetch(apk: dict[str, list[str]], box: Path, mirrors: Mirrors, log=print, run
         shell="sh",  # alpine has no bash
         file_suffix=".apk",
     )
-    return fetch_os_packages("apk", apk, box, recipe, log=log, run=run)
+    return fetch_os_packages("apk", apk, box, recipe, arch, log=log, run=run)
 
 
 def image_for(branch: str) -> str:

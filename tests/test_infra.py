@@ -9,7 +9,12 @@ from tests.conftest import FakeHost
 
 G = GiteaEndpoint(name="gitea.internal", ip="10.0.0.5", org="pkgs")
 CTX = NodeContext(
-    gitea=G, ca_pem="-----BEGIN CERTIFICATE-----\nca\n", distros=["bookworm"], allow=["203.0.113.9"], infra_name="dev"
+    gitea=G,
+    ca_pem="-----BEGIN CERTIFICATE-----\nca\n",
+    arch="amd64",
+    distros=["bookworm"],
+    allow=["203.0.113.9"],
+    infra_name="dev",
 )
 
 
@@ -136,7 +141,9 @@ def test_config_image_blanks_stock_os_sources_and_stays_text_only():
 
 
 def test_prepare_node_on_alpine_configures_apk_and_parks_the_stock_repositories():
-    ctx = NodeContext(gitea=G, ca_pem="CA", distros=["bookworm"], apk_branches=["v3.19"], infra_name="dev")
+    ctx = NodeContext(
+        gitea=G, ca_pem="CA", arch="amd64", distros=["bookworm"], apk_branches=["v3.19"], infra_name="dev"
+    )
     host = FakeHost(
         "alp-1",
         facts={
@@ -175,7 +182,9 @@ def test_prepare_node_on_alpine_configures_apk_and_parks_the_stock_repositories(
 
 
 def test_prepare_node_on_rocky_configures_dnf_and_parks_the_stock_repo_files():
-    ctx = NodeContext(gitea=G, ca_pem="CA", distros=["bookworm"], rpm_distros=["fedora40"], infra_name="dev")
+    ctx = NodeContext(
+        gitea=G, ca_pem="CA", arch="amd64", distros=["bookworm"], rpm_distros=["fedora40"], infra_name="dev"
+    )
     host = FakeHost(
         "rocky-1",
         facts={
@@ -339,7 +348,7 @@ def test_k3s_server_and_agent():
     assert server.ran(
         "INSTALL_K3S_SKIP_DOWNLOAD=true INSTALL_K3S_EXEC='server --node-ip 10.0.0.31 --resolv-conf /etc/outpost/resolv.conf'"
     )
-    custom = NodeContext(gitea=G, ca_pem="CA", args="--disable traefik")
+    custom = NodeContext(gitea=G, ca_pem="CA", arch="amd64", args="--disable traefik")
     s2 = FakeHost("k9", facts={"ip": "10.0.0.39"}, responses=[(r"api/v1/version", "ok"), (r"node-token", "T")])
     k3s.setup(custom, [s2])
     assert s2.ran("--resolv-conf /etc/outpost/resolv.conf --disable traefik'")
@@ -548,7 +557,7 @@ def test_k3s_args_reach_the_installer_exactly(tmp_path):
 
     args = "--node-label note='a b' --kubelet-arg=x=$(touch " + str(tmp_path / "ran") + ")"
     host = FakeHost("k1", facts={"ip": "10.0.0.11", "arch": "x86_64"}, responses=[(r"api/v1/version", "ok")])
-    k3s.setup(NodeContext(gitea=G, ca_pem="CA", args=args), [host], log=lambda *_: None)
+    k3s.setup(NodeContext(gitea=G, ca_pem="CA", arch="amd64", args=args), [host], log=lambda *_: None)
     install = next(s for s in host.scripts if "sh /tmp/k3s-install.sh" in s)
     line = next(line for line in install.splitlines() if "INSTALL_K3S_EXEC=" in line)
     print_exec = line.replace("sh /tmp/k3s-install.sh", "sh -c 'printf %s \"$INSTALL_K3S_EXEC\"'")

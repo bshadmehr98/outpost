@@ -94,10 +94,12 @@ def test_info_on_the_gitea_host_and_elsewhere():
     assert ELSEWHERE.no_proxy == NO_PROXY + ",proxy.internal,10.0.0.40"
     with pytest.raises(RuntimeError, match="no known address"):
         make_proxy_endpoint(ProxyConfig(host="proxy-1", allow=["a.example.com"]), G, "gitea-1")
-    ctx = NodeContext(gitea=G, ca_pem="CA", proxy=ELSEWHERE)
+    ctx = NodeContext(gitea=G, ca_pem="CA", arch="amd64", proxy=ELSEWHERE)
     assert ctx.hosts_entries() == [("10.0.0.5", "gitea.internal"), ("10.0.0.40", "proxy.internal")]
     assert ctx.proxy_user_for("proxy-1") == "outpost-proxy" and ctx.proxy_user_for("dev-1") is None
-    assert NodeContext(gitea=G, ca_pem="CA", proxy=ON_GITEA).hosts_entries() == [("10.0.0.5", "gitea.internal")]
+    assert NodeContext(gitea=G, ca_pem="CA", arch="amd64", proxy=ON_GITEA).hosts_entries() == [
+        ("10.0.0.5", "gitea.internal")
+    ]
 
 
 # -- tinyproxy's files ----------------------------------------------------------------
@@ -328,7 +330,7 @@ def test_environment_lines_are_replaced_in_place():
 
 def test_prepare_node_without_a_proxy_writes_no_proxy_settings():
     host = FakeHost("dev-1")
-    node.prepare_node(host, NodeContext(gitea=G, ca_pem="CA", infra_name="dev"), log=lambda *_: None)
+    node.prepare_node(host, NodeContext(gitea=G, ca_pem="CA", arch="amd64", infra_name="dev"), log=lambda *_: None)
     assert (
         host.files[client_config.PATH_PROXY_ENV] == client_config.NO_PROXY_ENV
         and "PROXY" not in host.files[client_config.PATH_PROFILE]
@@ -340,7 +342,7 @@ def test_prepare_node_without_a_proxy_writes_no_proxy_settings():
 
 def test_prepare_node_with_a_proxy_elsewhere():
     host = FakeHost("dev-1")
-    ctx = NodeContext(gitea=G, ca_pem="CA", allow=["10.0.0.40"], infra_name="dev", proxy=ELSEWHERE)
+    ctx = NodeContext(gitea=G, ca_pem="CA", arch="amd64", allow=["10.0.0.40"], infra_name="dev", proxy=ELSEWHERE)
     node.prepare_node(host, ctx, log=lambda *_: None)
     assert (
         host.ran("echo '10.0.0.40 proxy.internal'")
@@ -374,8 +376,8 @@ def test_configmap_and_verify_lines():
     assert server.ran("k3s kubectl apply -f -") and server.ran("name: outpost-proxy")
     k3s.apply_configmap(server, None, log=lambda *_: None)
     assert server.ran("delete configmap outpost-proxy --ignore-not-found")
-    assert proxy.proxy_verifications(NodeContext(gitea=G, ca_pem="CA")) == []
-    checks = dict(proxy.proxy_verifications(NodeContext(gitea=G, ca_pem="CA", proxy=ON_GITEA)))
+    assert proxy.proxy_verifications(NodeContext(gitea=G, ca_pem="CA", arch="amd64")) == []
+    checks = dict(proxy.proxy_verifications(NodeContext(gitea=G, ca_pem="CA", arch="amd64", proxy=ON_GITEA)))
     assert set(checks) == {"proxy settings for programs that opt in", "proxy reachable", "proxy refuses unknown names"}
     assert (
         "curl -x http://10.0.0.5:3128" in checks["proxy reachable"]
@@ -389,7 +391,7 @@ def test_configmap_and_verify_lines():
     # the direct path is tested without the proxy variables a node's ssh session may carry
     assert (
         "--noproxy '*'"
-        in dict(verify.node_verifications(NodeContext(gitea=G, ca_pem="CA")))["public internet rejected"]
+        in dict(verify.node_verifications(NodeContext(gitea=G, ca_pem="CA", arch="amd64")))["public internet rejected"]
     )
 
 
@@ -423,7 +425,7 @@ def test_setup_on_the_gitea_host_order(monkeypatch):
     host = OrderedHost(
         "gitea-1", facts={"id": "ubuntu", "codename": "noble", "arch": "x86_64", "ip": "10.0.0.5"}, responses=INSTALLED
     )
-    ctx = NodeContext(gitea=G, ca_pem="CA", distros=["bookworm", "noble"], proxy=ON_GITEA)
+    ctx = NodeContext(gitea=G, ca_pem="CA", arch="amd64", distros=["bookworm", "noble"], proxy=ON_GITEA)
     result = proxy.set_up_on_host(host, ctx, CFG, egress_allow=[], client_allow=["203.0.113.9"], log=lambda *_: None)
     assert (
         result["tinyproxy"] == "1.11.1"
@@ -466,7 +468,7 @@ def test_setup_on_another_host_prepares_it_first(monkeypatch):
         responses=INSTALLED,
     )
     cfg = ProxyConfig(host="proxy-1", allow=["api.twilio.com"])
-    ctx = NodeContext(gitea=G, ca_pem="CA", proxy=ELSEWHERE)
+    ctx = NodeContext(gitea=G, ca_pem="CA", arch="amd64", proxy=ELSEWHERE)
     result = proxy.set_up_on_host(host, ctx, cfg, egress_allow=[], client_allow=[], log=lambda *_: None)
     assert seen and seen[0] <= host.first("dnf install -y -q tinyproxy")
     assert result["family"] == "rpm" and result["distro"] == "rocky9" and not result["on_gitea"]
@@ -484,7 +486,7 @@ def test_setup_explains_a_missing_package_and_refuses_alpine():
     ):
         proxy.set_up_on_host(
             host,
-            NodeContext(gitea=G, ca_pem="CA", proxy=ON_GITEA),
+            NodeContext(gitea=G, ca_pem="CA", arch="amd64", proxy=ON_GITEA),
             CFG,
             egress_allow=[],
             client_allow=[],
@@ -494,7 +496,7 @@ def test_setup_explains_a_missing_package_and_refuses_alpine():
     with pytest.raises(RuntimeError, match="Alpine"):
         proxy.set_up_on_host(
             alpine,
-            NodeContext(gitea=G, ca_pem="CA", proxy=ON_GITEA),
+            NodeContext(gitea=G, ca_pem="CA", arch="amd64", proxy=ON_GITEA),
             CFG,
             egress_allow=[],
             client_allow=[],
@@ -516,7 +518,7 @@ def test_missing_package_error_shows_what_the_package_manager_saw():
     with pytest.raises(RuntimeError) as err:
         proxy.set_up_on_host(
             host,
-            NodeContext(gitea=G, ca_pem="CA", proxy=ON_GITEA),
+            NodeContext(gitea=G, ca_pem="CA", arch="amd64", proxy=ON_GITEA),
             CFG,
             egress_allow=[],
             client_allow=[],
@@ -554,7 +556,7 @@ def test_unreadable_configuration_and_failed_start_say_why():
     ):
         proxy.set_up_on_host(
             host,
-            NodeContext(gitea=G, ca_pem="CA", proxy=ON_GITEA),
+            NodeContext(gitea=G, ca_pem="CA", arch="amd64", proxy=ON_GITEA),
             CFG,
             egress_allow=[],
             client_allow=[],
@@ -579,7 +581,7 @@ def test_unreadable_configuration_and_failed_start_say_why():
     with pytest.raises(RuntimeError, match=r"did not start:(.|\n)*exit 124"):
         proxy.set_up_on_host(
             host,
-            NodeContext(gitea=G, ca_pem="CA", proxy=ON_GITEA),
+            NodeContext(gitea=G, ca_pem="CA", arch="amd64", proxy=ON_GITEA),
             CFG,
             egress_allow=[],
             client_allow=[],
@@ -593,7 +595,9 @@ def test_unreadable_configuration_and_failed_start_say_why():
 
 
 def test_host_checks_cover_the_exception_and_the_log():
-    names = [n for n, _ in proxy.host_verifications(NodeContext(gitea=G, ca_pem="CA", proxy=ON_GITEA), CFG)]
+    names = [
+        n for n, _ in proxy.host_verifications(NodeContext(gitea=G, ca_pem="CA", arch="amd64", proxy=ON_GITEA), CFG)
+    ]
     assert names[:3] == [
         "proxy service active",
         "tinyproxy installed from gitea",
@@ -601,7 +605,7 @@ def test_host_checks_cover_the_exception_and_the_log():
     ]
     assert "proxy exception only for its own user" in names and "public internet rejected for other users" in names
     host = FakeHost("gitea-1", responses=[(r"CHECK\|", "CHECK|proxy service active|OK|active\n")])
-    assert proxy.verify_proxy_host(host, NodeContext(gitea=G, ca_pem="CA", proxy=ON_GITEA), CFG) == [
+    assert proxy.verify_proxy_host(host, NodeContext(gitea=G, ca_pem="CA", arch="amd64", proxy=ON_GITEA), CFG) == [
         {"name": "proxy service active", "ok": True, "detail": "active"}
     ]
     # proxy.env is written on nodes, and on a proxy host of its own (prepared like a node), not on the Gitea host
@@ -612,7 +616,7 @@ def test_host_checks_cover_the_exception_and_the_log():
     elsewhere = FakeHost("proxy-1", responses=[(r"CHECK\|", "CHECK|proxy service active|OK|active\n")])
     proxy.verify_proxy_host(
         elsewhere,
-        NodeContext(gitea=G, ca_pem="CA", proxy=ELSEWHERE),
+        NodeContext(gitea=G, ca_pem="CA", arch="amd64", proxy=ELSEWHERE),
         ProxyConfig(host="proxy-1", allow=["api.twilio.com"]),
     )
     assert "CHECK|proxy settings for programs that opt in|" in elsewhere.scripts[-1]
@@ -672,7 +676,7 @@ def test_check_needing_the_proxy_is_skipped_without_one(workspace_dir, monkeypat
     from outpost.checks import run as checksmod
 
     Workspace(workspace_dir).write_state("gitea", {"ip": "10.0.0.5"})
-    monkeypatch.setattr(systemmod, "Host", lambda alias: FakeHost(alias))
+    monkeypatch.setattr(systemmod, "Host", lambda alias, config_file=None: FakeHost(alias))
     monkeypatch.setattr(checksmod, "run_check", lambda *a, **k: pytest.fail("must not run"))
     assert main(["--dir", str(workspace_dir), "check", "hello-proxy", "--infra", "dev"]) == 0
     assert "check hello-proxy: skipped, it needs the egress proxy" in capsys.readouterr().out
@@ -693,7 +697,7 @@ def test_check_env_comes_from_the_proxy_state(workspace_dir, monkeypatch):
         "proxy", {"url": "http://10.0.0.5:3128", "allow": ["*.sendgrid.net", "example.org"], "host": "gitea-1"}
     )
     seen = []
-    monkeypatch.setattr(systemmod, "Host", lambda alias: FakeHost(alias))
+    monkeypatch.setattr(systemmod, "Host", lambda alias, config_file=None: FakeHost(alias))
     monkeypatch.setattr(
         checksmod,
         "run_check",
@@ -802,7 +806,7 @@ def test_proxy_setup_command_records_state_and_updates_set_up_nodes(workspace_di
     made = {}
     checks = "CHECK|proxy service active|OK|active\nCHECK|proxy reachable|OK|api.twilio.com through the proxy -> 200\n"
 
-    def make(alias):
+    def make(alias, config_file=None):
         made[alias] = made.get(alias) or FakeHost(
             alias,
             facts={"id": "ubuntu", "codename": "noble", "arch": "x86_64", "ip": "10.0.0.5"},

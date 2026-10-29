@@ -13,7 +13,6 @@ import json
 import tarfile
 from pathlib import Path
 
-from outpost import versions
 from outpost.oci.media_types import OCI_CONFIG, OCI_INDEX, OCI_LAYER_GZIP, OCI_MANIFEST, REF_ANNOTATION
 
 LAYOUT_VERSION = '{"imageLayoutVersion": "1.0.0"}\n'
@@ -58,11 +57,11 @@ def layout_ref(layout: Path) -> str:
     return index["manifests"][0].get("annotations", {}).get(REF_ANNOTATION, layout.name)
 
 
-def build_layout(files: dict[str, tuple[bytes, int]], dest: Path, ref_name: str) -> Path:
-    """Create a one-layer image from {path: (content, mode)}, for the box's CPU type. Used for the config image."""
+def build_layout(files: dict[str, tuple[bytes, int]], dest: Path, ref_name: str, arch: str) -> Path:
+    """Create a one-layer image from {path: (content, mode)}, for the CPU type arch. Used for the config image."""
     layer_tar = _tar_of(files)
     layer_gz = gzip.compress(layer_tar, mtime=0)
-    config = json.dumps(_image_config(digest_of(layer_tar)), sort_keys=True).encode()
+    config = json.dumps(_image_config(digest_of(layer_tar), arch), sort_keys=True).encode()
     manifest = json.dumps(
         {
             "schemaVersion": 2,
@@ -93,9 +92,9 @@ def _tar_of(files: dict[str, tuple[bytes, int]]) -> bytes:
     return layer.getvalue()
 
 
-def _image_config(layer_diff_id: str) -> dict:
+def _image_config(layer_diff_id: str, arch: str) -> dict:
     return {
-        "architecture": versions.ARCH,
+        "architecture": arch,
         "os": "linux",
         "config": {"Env": ["PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"]},
         "rootfs": {"type": "layers", "diff_ids": [layer_diff_id]},

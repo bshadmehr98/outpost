@@ -37,7 +37,7 @@ START_DNS = (
 
 def install_node_dns(host: Host, ctx: NodeContext, log=print) -> None:
     """Install CoreDNS at the pinned version (unless it is there already), and start its unit."""
-    url = ctx.gitea.generic("coredns", versions.COREDNS, f"coredns_{versions.COREDNS}_linux_{versions.ARCH}.tgz")
+    url = ctx.gitea.generic("coredns", versions.COREDNS, f"coredns_{versions.COREDNS}_linux_{ctx.arch}.tgz")
     installed = host.run(f"{COREDNS} -version 2>/dev/null || true", raise_on_failure=True).stdout
     if versions.COREDNS not in installed:
         host.run(

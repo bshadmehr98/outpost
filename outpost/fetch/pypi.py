@@ -19,8 +19,10 @@ logger = logging.getLogger(__name__)
 PACKAGE_SUFFIXES = (".whl", ".gz", ".zip")  # wheels and sdists
 
 
-def fetch(pypi: dict[str, list[str]], box: Path, mirrors: Mirrors, log=print, run=subprocess.run) -> dict:
+def fetch(pypi: dict[str, list[str]], box: Path, mirrors: Mirrors, arch: str, log=print, run=subprocess.run) -> dict:
     """Download wheels (or sdists) for each Python version's specs, and their dependencies, into box/pypi.
+
+    Wheels are for Linux on the CPU type arch.
 
     Args:
         run: subprocess.run, or a test double (then pip is called as plain `pip`).
@@ -37,11 +39,11 @@ def fetch(pypi: dict[str, list[str]], box: Path, mirrors: Mirrors, log=print, ru
         requirements = out / f".requirements-py{python}.txt"
         requirements.write_text("\n".join(specs) + "\n")
         log(f"    python {python}: {len(specs)} spec(s)")
-        if _pip(run, download + ["-r", str(requirements)] + wheel_flags(python)).returncode == 0:
+        if _pip(run, download + ["-r", str(requirements)] + wheel_flags(python, arch)).returncode == 0:
             continue
         log("    some packages have no wheel; retrying one by one with sdist fallback")
         for spec in specs:
-            why = _download_one(run, download, spec, python)
+            why = _download_one(run, download, spec, python, arch)
             if why:
                 failed.append(f"{spec} (py{python}): {why}")
                 log(f"    FAILED {spec}")
@@ -62,8 +64,8 @@ def pip_command() -> list[str]:
     raise RuntimeError("pip not found. Install it with: python3 -m ensurepip --upgrade")
 
 
-def wheel_flags(python: str) -> list[str]:
-    """pip flags that ask for binary wheels for CPython <python> on Linux, for the box's CPU type."""
+def wheel_flags(python: str, arch: str) -> list[str]:
+    """pip flags that ask for binary wheels for CPython <python> on Linux, for the CPU type arch."""
     abi = "cp" + python.replace(".", "")
     flags = [
         "--python-version",
@@ -78,14 +80,14 @@ def wheel_flags(python: str) -> list[str]:
         "none",
         "--only-binary=:all:",
     ]
-    for platform in versions.arch_names()["pip"]:
+    for platform in versions.arch_names(arch)["pip"]:
         flags += ["--platform", platform]
     return flags
 
 
-def _download_one(run, download: list[str], spec: str, python: str) -> str | None:
+def _download_one(run, download: list[str], spec: str, python: str, arch: str) -> str | None:
     """One spec: its wheel and dependencies, else its sdist alone. Returns why it failed, or None."""
-    if _pip(run, download + [spec] + wheel_flags(python)).returncode == 0:
+    if _pip(run, download + [spec] + wheel_flags(python, arch)).returncode == 0:
         return None
     sdist = _pip(run, download + [spec, "--no-deps", "--no-binary=:all:"])
     if sdist.returncode == 0:

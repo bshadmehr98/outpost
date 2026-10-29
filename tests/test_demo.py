@@ -191,7 +191,10 @@ def test_runner_labels_and_install(tmp_path):
     assert runner.labels_for(servers, "n2") == []
 
     ctx = NodeContext(
-        gitea=GiteaEndpoint(name="gitea.internal", ip="10.0.0.5", org="pkgs"), ca_pem="CA", infra_name="dev"
+        gitea=GiteaEndpoint(name="gitea.internal", ip="10.0.0.5", org="pkgs"),
+        ca_pem="CA",
+        arch="amd64",
+        infra_name="dev",
     )
     host = FakeHost("n1", responses=[(r"gitea-runner --version", "")])
     out = runner.install(host, ctx, ["dev:host", "docker:host"], "REGTOKEN", registered=set())

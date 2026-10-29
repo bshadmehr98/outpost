@@ -45,7 +45,7 @@ def report_data(workspace: Workspace, servers: Servers | None) -> dict:
         "hosts": cached_facts(workspace),
         "roles": server_roles(servers) if servers else {},
         "pinned": pinned_versions(),
-        "arch": servers.arch if servers else versions.ARCH,
+        "arch": servers.arch if servers else versions.DEFAULT_ARCH,
         "serving": demo.get("serving") or {},
         "demo_at": _when_written(workspace, STATE_DEMO_STATUS),
         "proxy": {

@@ -4,11 +4,13 @@
     system.servers.gitea.name                     # the config
     system.state("upload")                        # state/upload.json, read now
     system.secret("gitea-token")                  # secrets/gitea-token, read now
-    system.gitea_host.run("uptime")               # a Host, made once per alias
+    system.gitea_host.run("uptime")               # a Host, made once per alias, with system.ssh_config
+    system.arch                                   # amd64 or arm64: the CPU type of the box and every server
     for host in system.nodes("dev"): ...
 
 Commands load one and pass it on, instead of passing the workspace, the config and the secrets one
-by one. It holds and reads things; it decides nothing. How nodes reach Gitea and the egress proxy
+by one. The CPU type and the ssh config file are not globals either: code reads them from here, or
+gets them passed in by a caller that has the system. It holds and reads things; it decides nothing. How nodes reach Gitea and the egress proxy
 takes rules, so endpoints.py works that out.
 
 Tests replace `outpost.system.Host` to give every command a FakeHost.
@@ -17,34 +19,45 @@ Tests replace `outpost.system.Host` to give every command a FakeHost.
 from functools import cached_property
 from pathlib import Path
 
-from outpost import ssh, versions
 from outpost.config import InfraConfig, Mirrors, Servers, load_mirrors, load_servers
-from outpost.ssh import Host
+from outpost.ssh import Host, choose_config_file
 from outpost.workspace import STATE_GITEA, Workspace, infra_state
 
 
 class AirGappedSystem:
     """Everything Outpost knows about one air-gapped system: its workspace, config, state and secrets."""
 
-    def __init__(self, workspace: Workspace, servers: Servers):
+    def __init__(self, workspace: Workspace, servers: Servers, ssh_config: Path | None = None):
+        """
+        Args:
+            workspace: the workspace folder.
+            servers: its servers.yml.
+            ssh_config: the ssh config file every Host uses; None means ~/.ssh/config. load() chooses
+                it from servers.yml and OUTPOST_SSH_CONFIG.
+        """
         self.workspace = workspace
         self.servers = servers
+        self.ssh_config = ssh_config
         self._hosts: dict[str, Host] = {}
 
     @classmethod
     def load(cls, root: str | Path) -> "AirGappedSystem":
         """Open the workspace at root and read its servers.yml.
 
-        It also points every ssh call at servers.yml's ssh_config and every download at its arch.
+        It also chooses the ssh config file: servers.yml's ssh_config, else OUTPOST_SSH_CONFIG.
 
         Raises:
             ConfigError: root has no servers.yml, or servers.yml is wrong.
+            SshError: the ssh config file does not exist, or two different ones are named.
         """
         workspace = Workspace.open(root)
         servers = load_servers(workspace.servers_file)
-        ssh.use_config(servers.ssh_config)
-        versions.use_arch(servers.arch)
-        return cls(workspace, servers)
+        return cls(workspace, servers, ssh_config=choose_config_file(servers.ssh_config))
+
+    @property
+    def arch(self) -> str:
+        """The CPU type of the box and every server: amd64 or arm64 (`arch:` in servers.yml)."""
+        return self.servers.arch
 
     @cached_property
     def mirrors(self) -> Mirrors:
@@ -82,9 +95,9 @@ class AirGappedSystem:
 
     # -- servers ---------------------------------------------------------------------
     def host(self, alias: str) -> Host:
-        """The Host for an ssh alias, made on first use and then kept."""
+        """The Host for an ssh alias, made on first use and then kept. It uses the system's ssh config file."""
         if alias not in self._hosts:
-            self._hosts[alias] = Host(alias)
+            self._hosts[alias] = Host(alias, config_file=self.ssh_config)
         return self._hosts[alias]
 
     @property

@@ -45,7 +45,7 @@ class Servers:
     gitea: GiteaConfig
     infrastructures: dict[str, InfraConfig]
     ssh_config: Path | None = None  # alternative ssh config file, relative to the workspace
-    arch: str = "amd64"  # CPU architecture of every server: amd64 or arm64
+    arch: str = versions.DEFAULT_ARCH  # CPU architecture of every server: amd64 or arm64
     egress_proxy: ProxyConfig | None = None  # the named exceptions, when servers.yml has an egress_proxy section
 
     def infra(self, name: str) -> InfraConfig:
@@ -120,6 +120,6 @@ def _load_infra(name: str, spec) -> InfraConfig:
 
 def _load_arch(value) -> str:
     try:
-        return versions.normalize_arch(value or "amd64")
+        return versions.normalize_arch(value or versions.DEFAULT_ARCH)
     except ValueError as e:
         raise ConfigError(f"servers.yml: {e}") from e

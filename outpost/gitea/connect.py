@@ -27,7 +27,7 @@ def connect(system: AirGappedSystem) -> Iterator[GiteaClient]:
     """
     gitea = system.servers.gitea
     token = api_token(system)
-    with Tunnel(gitea.host, 443) as tunnel:
+    with Tunnel(gitea.host, 443, config_file=system.ssh_config) as tunnel:
         http = Http(
             f"https://127.0.0.1:{tunnel.port}",
             ca_file=system.workspace.ca_cert,

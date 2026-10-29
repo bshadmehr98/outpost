@@ -4,7 +4,7 @@ A package manager resolves dependencies against its own distro's index, so the r
 dnf of the real distro runs in `docker run --rm`, with the box folder mounted at /out. This is the
 one part of `outpost fetch` that needs Docker on the laptop.
 
-    fetch_os_packages("apt", {"bookworm": ["curl"]}, box, OsPackageRecipe(...), log=print)
+    fetch_os_packages("apt", {"bookworm": ["curl"]}, box, OsPackageRecipe(...), "amd64", log=print)
 """
 
 import logging
@@ -13,8 +13,6 @@ import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-
-from outpost import versions
 
 logger = logging.getLogger(__name__)
 
@@ -36,10 +34,11 @@ def fetch_os_packages(
     packages_by_distro: dict[str, list[str]],
     box: Path,
     recipe: OsPackageRecipe,
+    arch: str,
     log=print,
     run=subprocess.run,
 ) -> dict:
-    """Fetch each distro's packages into box/<kind>/<distro>, in a container of that distro.
+    """Fetch each distro's packages into box/<kind>/<distro>, in a container of that distro for the CPU type arch.
 
     Returns:
         {distro: number of files in its folder}.
@@ -59,6 +58,7 @@ def fetch_os_packages(
             recipe.script_for(distro, packages),
             out_dir,
             label=f"{kind} download for {distro}",
+            arch=arch,
             run=run,
         )
         count = len(list(out_dir.glob(f"*{recipe.file_suffix}")))
@@ -67,11 +67,14 @@ def fetch_os_packages(
     return result
 
 
-def run_in_container(image: str, shell: str, script: str, out_dir: Path, label: str, run=subprocess.run) -> None:
-    """Run a script in a throwaway container of image, for the box's CPU type, with out_dir mounted at /out.
+def run_in_container(
+    image: str, shell: str, script: str, out_dir: Path, label: str, arch: str, run=subprocess.run
+) -> None:
+    """Run a script in a throwaway container of image, for the CPU type arch, with out_dir mounted at /out.
 
     Args:
         label: what the script does, for the error message ("apt download for bookworm").
+        arch: the box's CPU type, amd64 or arm64.
         run: subprocess.run, or a test double.
 
     Raises:
@@ -82,7 +85,7 @@ def run_in_container(image: str, shell: str, script: str, out_dir: Path, label: 
         "run",
         "--rm",
         "--platform",
-        f"linux/{versions.ARCH}",
+        f"linux/{arch}",
         "-v",
         f"{out_dir.resolve()}:{OUT}",
         image,

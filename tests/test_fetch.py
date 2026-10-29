@@ -31,6 +31,7 @@ def test_pypi_command_flags(tmp_path):
         {"3.12": ["flask==3.0.0", "httpx"]},
         tmp_path,
         Mirrors(pypi="https://pypi.mirror.ir/simple"),
+        "amd64",
         log=lambda *_: None,
         run=run,
     )
@@ -38,14 +39,14 @@ def test_pypi_command_flags(tmp_path):
     assert cmd[:3] == ["pip", "download", "-q"]
     assert "--index-url" in cmd and "https://pypi.mirror.ir/simple" in cmd
     assert cmd[cmd.index("--python-version") + 1] == "3.12" and "cp312" in cmd and "--only-binary=:all:" in cmd
-    assert cmd.count("--platform") == len(versions.arch_names()["pip"]) and "manylinux2014_x86_64" in cmd
+    assert cmd.count("--platform") == len(versions.arch_names("amd64")["pip"]) and "manylinux2014_x86_64" in cmd
     assert (tmp_path / "pypi" / ".requirements-py3.12.txt").read_text() == "flask==3.0.0\nhttpx\n"
     assert result["failed"] == []
 
 
 def test_pypi_falls_back_per_package(tmp_path):
     run = Recorder(fail_first=True)
-    pypi.fetch({"3.11": ["a", "b"]}, tmp_path, Mirrors(), log=lambda *_: None, run=run)
+    pypi.fetch({"3.11": ["a", "b"]}, tmp_path, Mirrors(), "amd64", log=lambda *_: None, run=run)
     assert len(run.calls) == 3  # one batch attempt, then one wheel attempt per package (both succeed)
     assert "a" in run.calls[1] and "--only-binary=:all:" in run.calls[1] and "b" in run.calls[2]
 
@@ -70,7 +71,7 @@ def test_apt_script_and_image():
         and "apt-get download" in script
     )
     run = Recorder()
-    apt.fetch({"noble": ["htop"]}, Path("/tmp/box-test"), Mirrors(), log=lambda *_: None, run=run)
+    apt.fetch({"noble": ["htop"]}, Path("/tmp/box-test"), Mirrors(), "amd64", log=lambda *_: None, run=run)
     cmd = run.calls[0]
     assert cmd[:4] == ["docker", "run", "--rm", "--platform"] and "ubuntu:noble" in cmd
 
@@ -86,14 +87,19 @@ def test_apk_script_and_image():
     assert "> /etc/apk/repositories" in script and "apk update" in script
     assert "apk fetch --recursive -o /out curl jq" in script
     run = Recorder()
-    result = apk.fetch({"v3.20": ["curl"]}, Path("/tmp/box-test"), Mirrors(), log=lambda *_: None, run=run)
+    result = apk.fetch({"v3.20": ["curl"]}, Path("/tmp/box-test"), Mirrors(), "arm64", log=lambda *_: None, run=run)
     cmd = run.calls[0]
-    assert cmd[:5] == ["docker", "run", "--rm", "--platform", f"linux/{versions.ARCH}"] and "alpine:3.20" in cmd
+    assert cmd[:5] == ["docker", "run", "--rm", "--platform", "linux/arm64"] and "alpine:3.20" in cmd
     assert cmd[-2] == "-c" and cmd[cmd.index("alpine:3.20") + 1] == "sh" and "/tmp/box-test/apk/v3.20:/out" in cmd
     assert result == {"v3.20": 0}
     with pytest.raises(RuntimeError, match="apk download for v3.20 failed"):
         apk.fetch(
-            {"v3.20": ["curl"]}, Path("/tmp/box-test"), Mirrors(), log=lambda *_: None, run=Recorder(fail_first=True)
+            {"v3.20": ["curl"]},
+            Path("/tmp/box-test"),
+            Mirrors(),
+            "amd64",
+            log=lambda *_: None,
+            run=Recorder(fail_first=True),
         )
 
 
@@ -102,28 +108,24 @@ def test_rpm_script_and_image():
     assert rpm.image_for("fedora40") == "fedora:40" and rpm.image_for("stream9") == "quay.io/centos/centos:stream9"
     with pytest.raises(ValueError):
         rpm.image_for("rhel9")
-    script = rpm.script_for("rocky9", ["curl", "git"], Mirrors(rocky="https://rocky.mirror.ir/rocky"))
+    script = rpm.script_for("rocky9", ["curl", "git"], Mirrors(rocky="https://rocky.mirror.ir/rocky"), "amd64")
     assert (
         "rm -f /etc/yum.repos.d/*.repo" in script
         and "baseurl=https://rocky.mirror.ir/rocky/9/BaseOS/x86_64/os" in script
     )
     assert "baseurl=https://rocky.mirror.ir/rocky/9/AppStream/x86_64/os" in script and "gpgcheck=0" in script
     assert "dnf-plugins-core" in script and "dnf -q -y download --resolve --alldeps --destdir /out curl git" in script
-    fedora = rpm.script_for("fedora40", ["curl"], Mirrors())
+    fedora = rpm.script_for("fedora40", ["curl"], Mirrors(), "amd64")
     assert (
         "https://dl.fedoraproject.org/pub/fedora/linux/releases/40/Everything/x86_64/os" in fedora
         and "updates/40/Everything/x86_64" in fedora
     )
     assert "https://mirror.stream.centos.org/9-stream/BaseOS/x86_64/os" in rpm.script_for(
-        "stream9", ["curl"], Mirrors()
+        "stream9", ["curl"], Mirrors(), "amd64"
     )
-    versions.use_arch("arm64")
-    try:
-        assert "/9/BaseOS/aarch64/os" in rpm.script_for("alma9", ["curl"], Mirrors())
-    finally:
-        versions.use_arch("amd64")
+    assert "/9/BaseOS/aarch64/os" in rpm.script_for("alma9", ["curl"], Mirrors(), "arm64")
     run = Recorder()
-    rpm.fetch({"rocky9": ["curl"]}, Path("/tmp/box-test"), Mirrors(), log=lambda *_: None, run=run)
+    rpm.fetch({"rocky9": ["curl"]}, Path("/tmp/box-test"), Mirrors(), "amd64", log=lambda *_: None, run=run)
     cmd = run.calls[0]
     assert (
         cmd[:4] == ["docker", "run", "--rm", "--platform"]
@@ -133,7 +135,12 @@ def test_rpm_script_and_image():
     )
     with pytest.raises(RuntimeError, match="rpm download for rocky9 failed"):
         rpm.fetch(
-            {"rocky9": ["curl"]}, Path("/tmp/box-test"), Mirrors(), log=lambda *_: None, run=Recorder(fail_first=True)
+            {"rocky9": ["curl"]},
+            Path("/tmp/box-test"),
+            Mirrors(),
+            "amd64",
+            log=lambda *_: None,
+            run=Recorder(fail_first=True),
         )
 
 
@@ -143,11 +150,14 @@ def test_fetch_all_runs_every_kind(tmp_path, monkeypatch):
 
     calls = []
     for mod, name in ((apk, "apk"), (rpm, "rpm"), (apt, "apt")):
-        monkeypatch.setattr(mod, "fetch", lambda needs, box, mirrors, log, _n=name: calls.append((_n, needs)) or {})
+        monkeypatch.setattr(
+            mod, "fetch", lambda needs, box, mirrors, arch, log, _n=name: calls.append((_n, needs)) or {}
+        )
     results = fetch_all(
         Needs(apk={"v3.20": ["curl"]}, rpm={"rocky9": ["git"]}),
         tmp_path,
         Mirrors(),
+        "amd64",
         only={"apk", "rpm"},
         log=lambda *_: None,
     )
@@ -214,13 +224,17 @@ def test_npm_fetch_from_metadata_and_lockfile_url(tmp_path, npm_server):
 
 
 def test_images_fetch_uses_docker_mirror(tmp_path, fake_gitea):
-    src = oci.build_layout({"/a": (b"a", 0o644)}, tmp_path / "src", "alpine:3.20")
+    src = oci.build_layout({"/a": (b"a", 0o644)}, tmp_path / "src", "alpine:3.20", "amd64")
     fake_gitea.add_layout(src, "library/alpine", "3.20")
-    result = images.fetch(["alpine:3.20"], tmp_path / "box", Mirrors(docker=fake_gitea.url), log=lambda *_: None)
+    result = images.fetch(
+        ["alpine:3.20"], tmp_path / "box", Mirrors(docker=fake_gitea.url), "amd64", log=lambda *_: None
+    )
     assert result["pulled"] == 1
     assert oci.layout_ref(tmp_path / "box" / "images" / "alpine_3.20") == "alpine:3.20"
     assert (
-        images.fetch(["alpine:3.20"], tmp_path / "box", Mirrors(docker=fake_gitea.url), log=lambda *_: None)["skipped"]
+        images.fetch(["alpine:3.20"], tmp_path / "box", Mirrors(docker=fake_gitea.url), "amd64", log=lambda *_: None)[
+            "skipped"
+        ]
         == 1
     )
 
@@ -239,10 +253,10 @@ def test_files_fetch_skips_existing(tmp_path):
 def test_one_file_or_image_that_fails_does_not_stop_the_others(tmp_path, fake_gitea, monkeypatch):
     """A file or an image that failed used to end its whole kind, so the ones after it were never fetched."""
     monkeypatch.setattr(Http, "_sleep", staticmethod(lambda s: None))
-    src = oci.build_layout({"/a": (b"a", 0o644)}, tmp_path / "src", "alpine:3.20")
+    src = oci.build_layout({"/a": (b"a", 0o644)}, tmp_path / "src", "alpine:3.20", "amd64")
     fake_gitea.add_layout(src, "library/alpine", "3.20")
     mirrors = Mirrors(docker=fake_gitea.url)
-    result = images.fetch(["missing:1", "alpine:3.20"], tmp_path / "box", mirrors, log=lambda *_: None)
+    result = images.fetch(["missing:1", "alpine:3.20"], tmp_path / "box", mirrors, "amd64", log=lambda *_: None)
     assert result["pulled"] == 1 and len(result["failed"]) == 1 and result["failed"][0].startswith("missing:1: ")
     broken = FileNeed("broken", "1.0", "http://127.0.0.1:9/never", "broken")
     good = FileNeed("tool", "1.0", f"{fake_gitea.url}/api/v1/version", "tool")

@@ -97,7 +97,7 @@ def test_giteas_rule_rejects_what_real_gitea_rejected():
 
 
 def test_build_layout_is_consistent(tmp_path):
-    layout = oci.build_layout({"/etc/pip.conf": (b"[global]\n", 0o644)}, tmp_path / "img", "x/config:latest")
+    layout = oci.build_layout({"/etc/pip.conf": (b"[global]\n", 0o644)}, tmp_path / "img", "x/config:latest", "amd64")
     index = json.loads((layout / "index.json").read_text())
     entry = index["manifests"][0]
     manifest_bytes = (layout / "blobs/sha256" / entry["digest"][7:]).read_bytes()
@@ -112,11 +112,11 @@ def test_build_layout_is_consistent(tmp_path):
 
 
 def test_pull_with_token_and_multiarch_index(tmp_path, fake_gitea):
-    source = oci.build_layout({"/hello": (b"hi", 0o644)}, tmp_path / "src", "library/alpine:3.20")
+    source = oci.build_layout({"/hello": (b"hi", 0o644)}, tmp_path / "src", "library/alpine:3.20", "amd64")
     fake_gitea.add_layout(source, "library/alpine", "3.20", add_index=True)
 
     registry = oci.Registry(Http(fake_gitea.url))
-    pulled = registry.pull(oci.parse_ref("alpine:3.20"), tmp_path / "pulled")
+    pulled = registry.pull(oci.parse_ref("alpine:3.20"), tmp_path / "pulled", "amd64")
     assert oci.layout_ref(pulled) == "alpine:3.20"
     src_blobs = sorted(p.name for p in (source / "blobs/sha256").iterdir())
     assert sorted(p.name for p in (pulled / "blobs/sha256").iterdir()) == src_blobs
@@ -124,7 +124,7 @@ def test_pull_with_token_and_multiarch_index(tmp_path, fake_gitea):
 
 
 def test_push_then_pull_roundtrip(tmp_path, fake_gitea):
-    source = oci.build_layout({"/etc/x": (b"y", 0o644)}, tmp_path / "src", "pkgs/config:latest")
+    source = oci.build_layout({"/etc/x": (b"y", 0o644)}, tmp_path / "src", "pkgs/config:latest", "amd64")
     registry = oci.Registry(Http(fake_gitea.url), token_url=f"{fake_gitea.url}/v2/token")
     digest, uploaded = registry.push(source, "pkgs/config", "latest")
     assert uploaded and ("pkgs/config", "latest") in fake_gitea.manifests
@@ -135,5 +135,7 @@ def test_push_then_pull_roundtrip(tmp_path, fake_gitea):
     assert len([r for r in fake_gitea.requests if r[0] in ("POST", "PUT")]) == before
     # the same blobs under a new tag are new: the tag moved
     assert registry.push(source, "pkgs/config", "other").uploaded
-    pulled = oci.Registry(Http(fake_gitea.url)).pull(oci.parse_ref("example.com/pkgs/config:latest"), tmp_path / "back")
+    pulled = oci.Registry(Http(fake_gitea.url)).pull(
+        oci.parse_ref("example.com/pkgs/config:latest"), tmp_path / "back", "amd64"
+    )
     assert json.loads((pulled / "index.json").read_text())["manifests"][0]["digest"] == digest

@@ -1,9 +1,9 @@
 """Pull and push container images with nothing but HTTP. A tiny, readable skopeo.
 
     ref = parse_ref("python:3.12-slim")                      # docker.io/library/python:3.12-slim
-    Registry(Http("https://registry-1.docker.io")).pull(ref, Path("box/images") / ref.safe_name)
+    Registry(Http("https://registry-1.docker.io")).pull(ref, Path("box/images") / ref.safe_name, "amd64")
     Registry(gitea_http, token_url=...).push(layout, "pkgs/library/python", "3.12-slim")
-    build_layout({"/etc/pip.conf": (b"...", 0o644)}, Path("config"), "pkgs/config:latest")
+    build_layout({"/etc/pip.conf": (b"...", 0o644)}, Path("config"), "pkgs/config:latest", "amd64")
 
 Images are stored on disk in the standard OCI layout, which Docker and skopeo also understand
 (see layout.py).

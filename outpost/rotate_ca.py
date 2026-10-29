@@ -68,6 +68,7 @@ def _push_config_image(system: AirGappedSystem, log) -> None:
             client,
             endpoint,
             system.ca_pem(),
+            system.arch,
             uploaded.get("distros", []),
             apk_branches=uploaded.get("apk_branches", []),
             rpm_distros=uploaded.get("rpm_distros", []),

@@ -219,27 +219,20 @@ def test_server_status_rejects_odd_aliases(ui):
 
 
 def test_ssh_config_problems_are_messages_and_the_environment_still_counts(workspace_dir, monkeypatch, tmp_path):
-    from outpost import ssh
     from outpost.ui import reach_server, server_status
+    from outpost.ui.reach import choose_ssh_config
 
     workspace = Workspace(workspace_dir)
     monkeypatch.setenv("OUTPOST_SSH_CONFIG", str(tmp_path / "missing"))
-    try:
-        for check in (reach_server, server_status):
-            result = check(workspace, "node-1")
-            assert result["ok"] is False and "does not exist" in result["message"]
-        # servers.yml that does not load: OUTPOST_SSH_CONFIG is still the choice
-        config = tmp_path / "ssh_config"
-        config.write_text("Host x\n")
-        monkeypatch.setenv("OUTPOST_SSH_CONFIG", str(config))
-        workspace.servers_file.write_text("gitea: [not, a, mapping]\n")
-        from outpost.ui.reach import choose_ssh_config
-
-        assert choose_ssh_config(workspace) is None
-        assert ["-F", str(config)] == ssh.options.ssh_options(5)[-2:]
-    finally:
-        monkeypatch.delenv("OUTPOST_SSH_CONFIG")
-        ssh.use_config(None)
+    for check in (reach_server, server_status):
+        result = check(workspace, "node-1")
+        assert result["ok"] is False and "does not exist" in result["message"]
+    # servers.yml that does not load: OUTPOST_SSH_CONFIG is still the choice
+    config = tmp_path / "ssh_config"
+    config.write_text("Host x\n")
+    monkeypatch.setenv("OUTPOST_SSH_CONFIG", str(config))
+    workspace.servers_file.write_text("gitea: [not, a, mapping]\n")
+    assert choose_ssh_config(workspace) == (config, None)
 
 
 def test_servers_form_round_trips_the_egress_proxy(ui, workspace_dir):

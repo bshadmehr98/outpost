@@ -132,8 +132,8 @@ def _install_script(ctx: NodeContext, exec_args: str, env: dict[str, str]) -> st
     Each value is quoted with shlex.quote: `args:` in servers.yml may hold quotes, `$` or backticks.
     """
     g = ctx.gitea
-    binary = g.generic("k3s", versions.K3S, versions.arch_names()["k3s"])
-    images = g.generic("k3s-airgap-images", versions.K3S, f"k3s-airgap-images-{versions.ARCH}.tar.gz")
+    binary = g.generic("k3s", versions.K3S, versions.arch_names(ctx.arch)["k3s"])
+    images = g.generic("k3s-airgap-images", versions.K3S, f"k3s-airgap-images-{ctx.arch}.tar.gz")
     installer = g.generic("k3s-install", versions.K3S, "install.sh")
     installer_env = " ".join(
         [

@@ -4,7 +4,7 @@ import os
 
 import pytest
 
-from outpost import hosts, ssh, versions
+from outpost import hosts, ssh
 from outpost.config import ConfigError, GiteaConfig
 from outpost.endpoints import gitea_endpoint, make_gitea_endpoint, proxy_endpoint, proxy_endpoint_or_none
 from outpost.system import AirGappedSystem
@@ -17,13 +17,6 @@ from outpost.workspace import (
     infra_state,
 )
 from tests.conftest import FakeHost
-
-
-@pytest.fixture(autouse=True)
-def _reset_globals():
-    yield
-    ssh.use_config(None)
-    versions.use_arch("amd64")
 
 
 def add_to_servers_yml(workspace_dir, text: str) -> None:
@@ -72,13 +65,23 @@ def test_state_and_secrets(tmp_path):
 # -- AirGappedSystem ----------------------------------------------------------------------
 
 
-def test_load_reads_servers_and_sets_ssh_and_arch(workspace_dir, monkeypatch):
+def test_load_reads_servers_and_holds_the_ssh_config_and_arch(workspace_dir, monkeypatch):
+    monkeypatch.delenv("OUTPOST_SSH_CONFIG", raising=False)
     add_to_servers_yml(workspace_dir, "arch: arm64\nssh_config: lab/ssh_config\n")
-    seen = []
-    monkeypatch.setattr(ssh, "use_config", seen.append)
+    ssh_config = workspace_dir / "lab" / "ssh_config"
+    ssh_config.parent.mkdir()
+    ssh_config.write_text("Host x\n")
     system = AirGappedSystem.load(workspace_dir)
     assert system.servers.gitea.host == "gitea-1" and system.workspace.root == workspace_dir.resolve()
-    assert seen == [(workspace_dir / "lab" / "ssh_config").resolve()] and versions.ARCH == "arm64"
+    assert system.ssh_config == ssh_config.resolve() and system.arch == "arm64"
+    assert system.host("dev-1").config_file == ssh_config.resolve()
+
+
+def test_load_stops_at_an_ssh_config_that_does_not_exist(workspace_dir, monkeypatch):
+    monkeypatch.delenv("OUTPOST_SSH_CONFIG", raising=False)
+    add_to_servers_yml(workspace_dir, "ssh_config: lab/missing\n")
+    with pytest.raises(ssh.SshError, match="does not exist"):
+        AirGappedSystem.load(workspace_dir)
 
 
 def test_load_explains_a_missing_workspace(tmp_path):
@@ -97,7 +100,7 @@ def test_hosts_are_made_once_and_come_from_one_name(workspace_dir, monkeypatch):
     import outpost.system as systemmod
 
     made = []
-    monkeypatch.setattr(systemmod, "Host", lambda alias: made.append(alias) or FakeHost(alias))
+    monkeypatch.setattr(systemmod, "Host", lambda alias, config_file=None: made.append(alias) or FakeHost(alias))
     add_to_servers_yml(workspace_dir, "egress_proxy: {host: proxy-1, allow: [api.twilio.com]}\n")
     system = AirGappedSystem.load(workspace_dir)
     assert system.host("dev-1") is system.nodes("dev")[0] and system.gitea_host.alias == "gitea-1"
@@ -139,7 +142,7 @@ def test_gitea_endpoint_needs_an_address(workspace_dir):
 def test_proxy_endpoint_prefers_recorded_then_cached_then_asked(workspace_dir, monkeypatch):
     import outpost.system as systemmod
 
-    monkeypatch.setattr(systemmod, "Host", lambda alias: FakeHost(alias, facts={"ip": "10.0.0.99"}))
+    monkeypatch.setattr(systemmod, "Host", lambda alias, config_file=None: FakeHost(alias, facts={"ip": "10.0.0.99"}))
     system = AirGappedSystem.load(workspace_dir)
     system.write_state(STATE_GITEA, {"ip": "10.0.0.5"})
     assert proxy_endpoint(system) is None
@@ -157,7 +160,7 @@ def test_proxy_endpoint_or_none_notes_an_unknown_address(workspace_dir, monkeypa
     import outpost.system as systemmod
     from outpost.ssh import Unreachable
 
-    def unreachable(alias):
+    def unreachable(alias, config_file=None):
         host = FakeHost(alias)
         host.ip = lambda: (_ for _ in ()).throw(Unreachable("[proxy-1] ssh failed"))
         return host

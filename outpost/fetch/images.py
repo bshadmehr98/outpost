@@ -2,20 +2,19 @@
 
 from pathlib import Path
 
-from outpost import oci, versions
+from outpost import oci
 from outpost.config import Mirrors
 from outpost.http import Http
 
 
-def fetch(refs: list[str], box: Path, mirrors: Mirrors, log=print, arch: str | None = None) -> dict:
-    """Pull each image for linux/arch (default: the box's CPU type). Images already in the box are skipped.
+def fetch(refs: list[str], box: Path, mirrors: Mirrors, arch: str, log=print) -> dict:
+    """Pull each image for linux/arch, the box's CPU type. Images already in the box are skipped.
 
     One image that fails does not stop the others.
 
     Returns:
         {"pulled": n, "skipped": n, "failed": ["<image>: <why>", ...]}.
     """
-    arch = arch or versions.ARCH
     done, skipped, failed = 0, 0, []
     for raw in refs:
         try:

@@ -3,13 +3,12 @@
 These are the only things Outpost needs that are not in your own needs files. Bump a version
 here, run `outpost fetch`, `outpost upload`, and re-run the setup.
 
-    use_arch("arm64")                          # once, after reading servers.yml (AirGappedSystem.load does it)
-    arch_names()["docker"]                     # aarch64: the CPU type as Docker's downloads name it
-    check_server_arch("dev-1", host.facts())   # RuntimeError when the server is of another CPU type
-    pinned_files(mirrors, {"compose", "k3s"})  # [{"name": "gitea", "version": ..., "url": ..., "filename": ...}, ...]
+    arch_names("arm64")["docker"]                       # aarch64: the CPU type as Docker's downloads name it
+    check_server_arch("dev-1", host.facts(), "arm64")   # RuntimeError when the server is of another CPU type
+    pinned_files(mirrors, {"compose", "k3s"}, "amd64")  # [{"name": "gitea", "version": ..., "url": ..., ...}, ...]
 
-ARCH is a module global that use_arch() sets: read it as `versions.ARCH` at call time, never import
-the name by value.
+The CPU type is never a global: `arch:` in servers.yml is read into Servers.arch, and the system
+(AirGappedSystem.arch) passes it to every function that needs it.
 """
 
 from typing import TYPE_CHECKING
@@ -37,7 +36,7 @@ ARCHES = {
     },
 }
 ALIASES = {"x86_64": "amd64", "amd64": "amd64", "aarch64": "arm64", "arm64": "arm64"}
-ARCH = "amd64"
+DEFAULT_ARCH = "amd64"  # when servers.yml has no `arch:`
 
 GITEA = "28.2.0"
 DOCKER = "29.9.2"
@@ -60,91 +59,86 @@ def normalize_arch(arch: str) -> str:
     return key
 
 
-def use_arch(arch: str) -> str:
-    """Make arch the CPU type every download and check uses from now on. Returns its normal name."""
-    global ARCH
-    ARCH = normalize_arch(arch)
-    return ARCH
+def arch_names(arch: str) -> dict:
+    """How each download and tool names the CPU type arch (amd64 or arm64): uname, docker, compose,
+    k3s, and pip's platform tags."""
+    return ARCHES[arch]
 
 
-def arch_names(arch: str | None = None) -> dict:
-    """How each download and tool names the CPU type: uname, docker, compose, k3s, and pip's platform tags."""
-    return ARCHES[arch or ARCH]
-
-
-def check_server_arch(alias: str, facts: dict) -> None:
-    """Stop when a server's CPU type (facts["arch"], from uname) is not the one the box is built for.
+def check_server_arch(alias: str, facts: dict, arch: str) -> None:
+    """Stop when a server's CPU type (facts["arch"], from uname) is not arch, the one the box is built for.
 
     Raises:
         RuntimeError: the server is of another CPU type. Facts without an arch pass.
     """
-    wanted = arch_names()["uname"]
+    wanted = arch_names(arch)["uname"]
     if facts.get("arch") and facts["arch"] != wanted:
         raise RuntimeError(
-            f"[{alias}] is {facts['arch']} but this workspace is built for {wanted} (arch: {ARCH} in servers.yml)."
+            f"[{alias}] is {facts['arch']} but this workspace is built for {wanted} (arch: {arch} in servers.yml)."
         )
 
 
-def pinned_files(mirrors: "Mirrors", infra_types: set[str]) -> list[dict]:
-    """The pinned downloads the system needs, as dicts with name, version, url and filename.
+def pinned_files(mirrors: "Mirrors", infra_types: set[str], arch: str) -> list[dict]:
+    """The pinned downloads the system needs, for the CPU type arch, as dicts with name, version, url
+    and filename.
 
     Gitea always; coredns and the Actions runner for any infrastructure; Docker, compose and buildx
     for compose and swarm; k3s, its images and its installer for k3s.
     """
-    files = _gitea_files(mirrors)
+    files = _gitea_files(mirrors, arch)
     if infra_types:
-        files += _node_files(mirrors)
+        files += _node_files(mirrors, arch)
     if infra_types & {"compose", "swarm"}:
-        files += _docker_files(mirrors)
+        files += _docker_files(mirrors, arch)
     if "k3s" in infra_types:
-        files += _k3s_files(mirrors)
+        files += _k3s_files(mirrors, arch)
     return files
 
 
-def _gitea_files(mirrors: "Mirrors") -> list[dict]:
-    return [_file("gitea", GITEA, f"{mirrors.gitea_dl}/{GITEA}/gitea-{GITEA}-linux-{ARCH}", "gitea")]
+def _gitea_files(mirrors: "Mirrors", arch: str) -> list[dict]:
+    return [_file("gitea", GITEA, f"{mirrors.gitea_dl}/{GITEA}/gitea-{GITEA}-linux-{arch}", "gitea")]
 
 
-def _node_files(mirrors: "Mirrors") -> list[dict]:
-    coredns = f"coredns_{COREDNS}_linux_{ARCH}.tgz"
+def _node_files(mirrors: "Mirrors", arch: str) -> list[dict]:
+    coredns = f"coredns_{COREDNS}_linux_{arch}.tgz"
     return [
         _file("coredns", COREDNS, f"{mirrors.github}/coredns/coredns/releases/download/v{COREDNS}/{coredns}", coredns),
         _file(
             "gitea-runner",
             RUNNER,
-            f"{mirrors.gitea_runner_dl}/v{RUNNER}/gitea-runner-{RUNNER}-linux-{ARCH}",
+            f"{mirrors.gitea_runner_dl}/v{RUNNER}/gitea-runner-{RUNNER}-linux-{arch}",
             "gitea-runner",
         ),
     ]
 
 
-def _docker_files(mirrors: "Mirrors") -> list[dict]:
+def _docker_files(mirrors: "Mirrors", arch: str) -> list[dict]:
     docker_static = mirrors.docker_static
     if not docker_static.endswith(("/x86_64", "/aarch64")):  # older mirrors.yml files name the arch themselves
-        docker_static = f"{docker_static}/{arch_names()['docker']}"
+        docker_static = f"{docker_static}/{arch_names(arch)['docker']}"
     releases = f"{mirrors.github}/docker"
     return [
         _file("docker", DOCKER, f"{docker_static}/docker-{DOCKER}.tgz", f"docker-{DOCKER}.tgz"),
         _file(
             "docker-compose",
             COMPOSE,
-            f"{releases}/compose/releases/download/v{COMPOSE}/docker-compose-linux-{arch_names()['compose']}",
+            f"{releases}/compose/releases/download/v{COMPOSE}/docker-compose-linux-{arch_names(arch)['compose']}",
             "docker-compose",
         ),
         _file(
             "docker-buildx",
             BUILDX,
-            f"{releases}/buildx/releases/download/v{BUILDX}/buildx-v{BUILDX}.linux-{ARCH}",
+            f"{releases}/buildx/releases/download/v{BUILDX}/buildx-v{BUILDX}.linux-{arch}",
             "docker-buildx",
         ),
     ]
 
 
-def _k3s_files(mirrors: "Mirrors") -> list[dict]:
+def _k3s_files(mirrors: "Mirrors", arch: str) -> list[dict]:
     release = f"{mirrors.github}/k3s-io/k3s/releases/download/{quote(K3S, safe='')}"
-    images = f"k3s-airgap-images-{ARCH}.tar.gz"
+    images = f"k3s-airgap-images-{arch}.tar.gz"
     return [
-        _file("k3s", K3S, f"{release}/{arch_names()['k3s']}", "k3s"),
+        _file("k3s", K3S, f"{release}/{arch_names(arch)['k3s']}", "k3s"),
         _file("k3s-airgap-images", K3S, f"{release}/{images}", images),
         _file("k3s-install", K3S, mirrors.k3s_install, "install.sh"),
     ]

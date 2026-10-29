@@ -87,7 +87,7 @@ def prepare_node(host: Host, ctx: NodeContext, log=print) -> dict:
     log(
         f"  [{host.alias}] {facts.get('id', '?')} {facts.get('codename', '')} {facts.get('arch', '')} ip={facts.get('ip', '?')}"
     )
-    versions.check_server_arch(host.alias, facts)
+    versions.check_server_arch(host.alias, facts, ctx.arch)
 
     write_hosts_entries(host, ctx)
     write_client_files(host, ctx, node_ip=facts.get("ip") or host.ip())

@@ -1,6 +1,7 @@
 """Run commands and copy files on a server, over ssh and scp.
 
     host = Host("gitea-1")                                  # a name from your ssh config
+    host = Host("gitea-1", config_file=Path("lab/ssh_config"))   # ... from another ssh config file
     host.run("apt-get update")                              # run a bash script as root
     host.write("/etc/motd", "hello\\n")                      # create a file from a string
     host.put(Path("box/gitea"), "/usr/local/bin/gitea")     # upload a file
@@ -17,7 +18,7 @@ Tests use FakeHost (tests/conftest.py) instead of Host.
     errors.py       Result, and the errors: SshError, Unreachable, CommandFailed
     host.py         Host
     tunnel.py       Tunnel
-    options.py      use_config(), and the options every ssh and scp call gets
+    options.py      choose_config_file(), and the options every ssh and scp call gets
     markers.py      telling "ssh failed" from "the command failed"
     commands.py     the shell commands Host sends
     permissions.py  a file's owner and permissions, in words, for the logs
@@ -27,7 +28,7 @@ Code outside this folder uses only the names below.
 
 from outpost.ssh.errors import CommandFailed, Result, SshError, Unreachable
 from outpost.ssh.host import Host
-from outpost.ssh.options import use_config
+from outpost.ssh.options import choose_config_file
 from outpost.ssh.tunnel import Tunnel
 
-__all__ = ["CommandFailed", "Host", "Result", "SshError", "Tunnel", "Unreachable", "use_config"]
+__all__ = ["CommandFailed", "Host", "Result", "SshError", "Tunnel", "Unreachable", "choose_config_file"]

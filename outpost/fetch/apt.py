@@ -14,7 +14,7 @@ from outpost.distros import DEBIAN, UBUNTU
 from outpost.fetch.in_container import OUT, OsPackageRecipe, fetch_os_packages
 
 
-def fetch(apt: dict[str, list[str]], box: Path, mirrors: Mirrors, log=print, run=subprocess.run) -> dict:
+def fetch(apt: dict[str, list[str]], box: Path, mirrors: Mirrors, arch: str, log=print, run=subprocess.run) -> dict:
     """Fetch each distro's packages and their whole dependency tree into box/apt/<distro>.
 
     Returns:
@@ -26,7 +26,7 @@ def fetch(apt: dict[str, list[str]], box: Path, mirrors: Mirrors, log=print, run
         shell="bash",
         file_suffix=".deb",
     )
-    return fetch_os_packages("apt", apt, box, recipe, log=log, run=run)
+    return fetch_os_packages("apt", apt, box, recipe, arch, log=log, run=run)
 
 
 def image_for(distro: str) -> str:

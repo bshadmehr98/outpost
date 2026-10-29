@@ -31,7 +31,7 @@ def all_needs(system: AirGappedSystem, skip_unknown_proxy_distro: bool = False) 
     Raises:
         ConfigError: a needs file or mirrors.yml is wrong, or the proxy host's distro is unknown.
     """
-    needs = needs_and_pinned_files(system.workspace.needs_dir, system.mirrors, system.servers.infra_types)
+    needs = needs_and_pinned_files(system.workspace.needs_dir, system.mirrors, system.servers.infra_types, system.arch)
     proxy = system.servers.egress_proxy
     if proxy:
         facts = None if proxy.distro else cached_facts(system.workspace).get(proxy.host)
@@ -43,14 +43,14 @@ def all_needs(system: AirGappedSystem, skip_unknown_proxy_distro: bool = False) 
     return needs
 
 
-def needs_and_pinned_files(needs_dir: Path, mirrors: Mirrors, infra_types: set[str]) -> Needs:
-    """The needs files and the pinned downloads, without tinyproxy. all_needs() starts from this; the
+def needs_and_pinned_files(needs_dir: Path, mirrors: Mirrors, infra_types: set[str], arch: str) -> Needs:
+    """The needs files and the pinned downloads for the CPU type arch, without tinyproxy. all_needs() starts from this; the
     dashboard uses it alone while servers.yml does not load.
 
     Raises:
         ConfigError: a needs file is wrong.
     """
-    return add_pinned_files(load_needs(needs_dir), versions.pinned_files(mirrors, infra_types))
+    return add_pinned_files(load_needs(needs_dir), versions.pinned_files(mirrors, infra_types, arch))
 
 
 def add_pinned_files(needs: Needs, pinned_files: list[dict]) -> Needs:

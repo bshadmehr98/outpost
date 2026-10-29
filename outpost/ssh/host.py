@@ -31,14 +31,16 @@ class Host:
     """One server, reached by its name in your ssh config. Nothing connects until you call a method;
     each call opens its own ssh connection."""
 
-    def __init__(self, alias: str, connect_timeout: int = 20):
+    def __init__(self, alias: str, connect_timeout: int = 20, config_file: Path | None = None):
         """
         Args:
             alias: the server's name in your ssh config, such as "gitea-1".
             connect_timeout: seconds to wait for the server to answer before giving up.
+            config_file: the ssh config file to use (see choose_config_file); None means ~/.ssh/config.
         """
         self.alias = alias
         self.connect_timeout = connect_timeout
+        self.config_file = config_file
 
     def __repr__(self) -> str:
         return f"Host({self.alias})"
@@ -203,7 +205,7 @@ class Host:
         """
         started = time.monotonic()
         completed = subprocess.run(
-            ["ssh", *ssh_options(self.connect_timeout), self.alias, wrap_with_markers(command)],
+            ["ssh", *ssh_options(self.connect_timeout, self.config_file), self.alias, wrap_with_markers(command)],
             input=stdin,
             capture_output=True,
             timeout=timeout,
@@ -244,7 +246,7 @@ class Host:
         """
         started = time.monotonic()
         completed = subprocess.run(
-            ["scp", *ssh_options(self.connect_timeout), "-q", source, target],  # -q: no progress bar
+            ["scp", *ssh_options(self.connect_timeout, self.config_file), "-q", source, target],  # -q: no progress bar
             capture_output=True,
         )
         logger.debug(

@@ -48,7 +48,7 @@ def test_gitea_backup_goes_to_the_workspace_backups_by_default(workspace_dir, tm
     import outpost.system
 
     gitea_server = FakeHost("gitea-1", responses=[(r"gitea --version", "gitea version 28.2.0 built with go")])
-    monkeypatch.setattr(outpost.system, "Host", lambda alias: gitea_server)
+    monkeypatch.setattr(outpost.system, "Host", lambda alias, config_file=None: gitea_server)
     monkeypatch.chdir(tmp_path)  # not the workspace: the default must not depend on where outpost runs
     argv = ["--dir", str(workspace_dir), "gitea", "backup"] + (["--out", out] if out else [])
     assert main(argv) == 0

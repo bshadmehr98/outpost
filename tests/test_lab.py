@@ -25,41 +25,47 @@ def test_ssh_config_text_has_every_alias():
     assert "lab-k3s" not in text and "IdentityFile /x/id_ed25519" in text
 
 
-def test_ssh_use_config_adds_dash_f(tmp_path, monkeypatch):
-    monkeypatch.delenv("OUTPOST_SSH_CONFIG", raising=False)
+def test_ssh_options_add_dash_f_only_for_a_config_file(tmp_path):
     config = tmp_path / "ssh_config"
-    config.write_text("Host x\n")
-    ssh.use_config(config)
-    try:
-        assert ["-F", str(config)] == ssh_options(5)[-2:]
-    finally:
-        ssh.use_config(None)
-    assert "-F" not in ssh_options(5)
+    assert ["-F", str(config)] == ssh_options(5, config)[-2:]
+    assert "-F" not in ssh_options(5, None)
 
 
 def test_ssh_config_that_does_not_exist_fails_at_once(tmp_path, monkeypatch):
     monkeypatch.delenv("OUTPOST_SSH_CONFIG", raising=False)
     with pytest.raises(ssh.SshError, match="does not exist.*servers.yml"):
-        ssh.use_config(tmp_path / "missing")
+        ssh.choose_config_file(tmp_path / "missing")
     monkeypatch.setenv("OUTPOST_SSH_CONFIG", str(tmp_path / "missing"))
     with pytest.raises(ssh.SshError, match="does not exist.*OUTPOST_SSH_CONFIG"):
-        ssh.use_config(None)
+        ssh.choose_config_file(None)
 
 
 def test_ssh_config_from_the_environment_or_servers_yml_but_not_two_different(tmp_path, monkeypatch):
     one, two = tmp_path / "one", tmp_path / "two"
     one.write_text("Host x\n")
     two.write_text("Host y\n")
+    monkeypatch.delenv("OUTPOST_SSH_CONFIG", raising=False)
+    assert ssh.choose_config_file(None) is None
     monkeypatch.setenv("OUTPOST_SSH_CONFIG", str(one))
-    try:
-        ssh.use_config(None)
-        assert ["-F", str(one)] == ssh_options(5)[-2:]
-        ssh.use_config(one)  # the same file twice is fine
-        with pytest.raises(ssh.SshError, match="two ssh config files"):
-            ssh.use_config(two)
-    finally:
-        monkeypatch.delenv("OUTPOST_SSH_CONFIG")
-        ssh.use_config(None)
+    assert ssh.choose_config_file(None) == one
+    assert ssh.choose_config_file(one) == one  # the same file twice is fine
+    with pytest.raises(ssh.SshError, match="two ssh config files"):
+        ssh.choose_config_file(two)
+
+
+def test_host_and_tunnel_pass_their_config_file_to_ssh(tmp_path, monkeypatch):
+    config = tmp_path / "ssh_config"
+    seen = []
+
+    def fake_run(command, **_):
+        seen.append(command)
+        return subprocess.CompletedProcess(command, 0, b"", b"")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    with pytest.raises(ssh.Unreachable):  # the fake prints no markers
+        ssh.Host("lab-gitea", config_file=config).run("true")
+    assert seen[0][:2] == ["ssh", "-o"] and ["-F", str(config)] == seen[0][7:9]
+    assert ssh.Tunnel("lab-gitea", config_file=config).config_file == config
 
 
 def test_lab_command_exists_and_needs_docker(tmp_path, monkeypatch, capsys):

@@ -34,7 +34,7 @@ REPOSITORIES = {
 }
 
 
-def fetch(rpm: dict[str, list[str]], box: Path, mirrors: Mirrors, log=print, run=subprocess.run) -> dict:
+def fetch(rpm: dict[str, list[str]], box: Path, mirrors: Mirrors, arch: str, log=print, run=subprocess.run) -> dict:
     """Fetch each distro's packages and their whole dependency tree into box/rpm/<distro>.
 
     Returns:
@@ -42,11 +42,11 @@ def fetch(rpm: dict[str, list[str]], box: Path, mirrors: Mirrors, log=print, run
     """
     recipe = OsPackageRecipe(
         image_for=image_for,
-        script_for=lambda distro, packages: script_for(distro, packages, mirrors),
+        script_for=lambda distro, packages: script_for(distro, packages, mirrors, arch),
         shell="bash",
         file_suffix=".rpm",
     )
-    return fetch_os_packages("rpm", rpm, box, recipe, log=log, run=run)
+    return fetch_os_packages("rpm", rpm, box, recipe, arch, log=log, run=run)
 
 
 def image_for(distro: str) -> str:
@@ -60,13 +60,13 @@ def image_for(distro: str) -> str:
     return f"{image}:stream{major}" if family == "stream" else f"{image}:{major}"
 
 
-def script_for(distro: str, packages: list[str], mirrors: Mirrors) -> str:
+def script_for(distro: str, packages: list[str], mirrors: Mirrors, arch: str) -> str:
     """The script that points dnf at the mirror and downloads the packages' whole tree into /out."""
     wanted = " ".join(shlex.quote(p) for p in packages)
     return (
         "set -e\n"
         "rm -f /etc/yum.repos.d/*.repo\n"
-        f"printf %s {shlex.quote(repos_for(distro, mirrors))} > /etc/yum.repos.d/outpost-fetch.repo\n"
+        f"printf %s {shlex.quote(repos_for(distro, mirrors, arch))} > /etc/yum.repos.d/outpost-fetch.repo\n"
         # `dnf download` is a plugin on dnf 4 and built in on dnf 5 (Fedora 41+): install it where it is one
         "dnf -q -y install dnf-plugins-core >/dev/null 2>&1 || true\n"
         # the whole tree, whether or not this container already has a package
@@ -74,16 +74,16 @@ def script_for(distro: str, packages: list[str], mirrors: Mirrors) -> str:
     )
 
 
-def repos_for(distro: str, mirrors: Mirrors) -> str:
-    """A yum.repos.d file naming the mirror's repositories for this distro.
+def repos_for(distro: str, mirrors: Mirrors, arch: str) -> str:
+    """A yum.repos.d file naming the mirror's repositories for this distro and the CPU type arch.
 
     gpgcheck is off: dnf only downloads here and installs nothing, and Gitea re-signs what it serves.
     """
     family, major = split_rpm_distro(distro)
     mirror_key, paths = REPOSITORIES[family]
     base = getattr(mirrors, mirror_key)
-    arch = versions.arch_names()["uname"]
+    uname = versions.arch_names(arch)["uname"]
     out = ""
     for i, path in enumerate(paths):
-        out += f"[outpost-{i}]\nname=outpost-{i}\nbaseurl={base}/{path.format(major=major, arch=arch)}\nenabled=1\ngpgcheck=0\n\n"
+        out += f"[outpost-{i}]\nname=outpost-{i}\nbaseurl={base}/{path.format(major=major, arch=uname)}\nenabled=1\ngpgcheck=0\n\n"
     return out

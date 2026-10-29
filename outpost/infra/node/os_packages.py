@@ -62,7 +62,7 @@ def configure_apk_sources(host: Host, ctx: NodeContext, facts: dict) -> None:
     /etc/apk/repositories is parked as repositories.disabled.
     """
     g = ctx.gitea
-    arch = versions.arch_names()["uname"]
+    arch = versions.arch_names(ctx.arch)["uname"]
     own = apk_branch_of(facts)
     branches = list(dict.fromkeys(ctx.apk_branches + ([own] if own else [])))
     print_line_if_gitea_has_it = "\n".join(

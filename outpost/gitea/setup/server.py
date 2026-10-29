@@ -7,17 +7,17 @@ from outpost.config import GiteaConfig
 from outpost.system import AirGappedSystem
 
 
-def connect_and_check_arch(host, gitea_config: GiteaConfig, log=print) -> str:
+def connect_and_check_arch(host, gitea_config: GiteaConfig, arch: str, log=print) -> str:
     """Ask the server what it is. Returns its IP: gitea.ip from servers.yml, else the one it reports.
 
     Raises:
-        RuntimeError: the IP is unknown, or the server's CPU type is not the one the box is built for.
+        RuntimeError: the IP is unknown, or the server's CPU type is not arch, the one the box is built for.
     """
     facts = host.facts()
     ip = gitea_config.ip or facts.get("ip")
     if not ip:
         raise RuntimeError("Could not detect the Gitea host's IP. Set gitea.ip in servers.yml.")
-    versions.check_server_arch(host.alias, facts)
+    versions.check_server_arch(host.alias, facts, arch)
     log(
         f"[{host.alias}] {facts.get('id', '?')} {facts.get('codename', '')}, Gitea will be https://{gitea_config.name} ({ip})"
     )

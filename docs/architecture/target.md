@@ -46,7 +46,7 @@ outpost/
                          split_rpm_distro, is_apt_distro, is_apk_branch, apk_branch_version
                          <- fetch/apt DEBIAN/UBUNTU, fetch/rpm split/distro_for_host/OS_IDS,
                             infra/common os_family/apk_branch_of, ui/projects kind_for_distro
-  versions.py            pinned versions, pinned_files() in named steps, arch_names(), use_arch()  <- same
+  versions.py            pinned versions, pinned_files(mirrors, types, arch) in named steps, arch_names(arch)  <- same
   http.py                Http, Response, HttpError, sha256_file; retries only GET and HEAD;
                          a Path body is streamed from disk                <- same
   needs/                 what projects need, merged into one Needs
@@ -279,7 +279,8 @@ class AirGappedSystem:
 | `workspace` | `Workspace` | `Workspace.open(root)`: raises `ConfigError("No servers.yml in {root}. Run `outpost init` here, or pass --dir.")` (today's wording) |
 | `servers` | `Servers` | `config.load_servers(workspace.servers_file)`, once, in `load()` |
 | `mirrors` | `Mirrors` | `config.load_mirrors(workspace.mirrors_file)`, on first use (a `cached_property`), so a broken mirrors.yml stops only needs and fetch, as before |
-| side effects of `load()` | | `ssh.use_config(servers.ssh_config)` and `versions.use_arch(servers.arch)`, as `cli._servers` does today |
+| `ssh_config` | `Path \| None` | `ssh.choose_config_file(servers.ssh_config)` in `load()` (servers.yml's `ssh_config`, else `OUTPOST_SSH_CONFIG`); every `Host` it makes, and the Gitea tunnel, get it as `config_file` |
+| `arch` | `str` | `servers.arch`; passed to every function that names a download or checks a server's CPU type (no global) |
 | `state(name, default=None)` | one `state/<name>.json` | read from disk **on every call** (`workspace.read_state`) |
 | `write_state(name, data)` | | `workspace.write_state` |
 | `secret(name)` | one `secrets/<name>` | read from disk **on every call** |
@@ -366,7 +367,7 @@ from state.
 | `verify.common_checks`, `proxy_checks`, `script`, `parse` | `node_verifications`, `proxy.proxy_verifications`, `verification_script`, `parse_verifications` | the `CHECK\|` marker on the wire stays (tests match it). `proxy_verifications` lives in `infra/proxy/verify.py`, and `infra/setup.verifications_for` adds it to the list, so `verify` and `proxy` no longer import each other |
 | `verify.verify_node(host, ctx, extra)` | `verify.run_verifications(host, verifications)` | the caller passes the whole list (`verifications_for`) |
 | `verify.source_commands` | `verify.gitea_only_sources_by_family` | |
-| the arch check, copied in `prepare_node`, `gitea/setup` and `proxy.setup` | `versions.check_server_arch(alias, facts)` | not `infra/node/checks.py`: gitea (layer 2) uses it too, and "check" means a smoke check |
+| the arch check, copied in `prepare_node`, `gitea/setup` and `proxy.setup` | `versions.check_server_arch(alias, facts, arch)` | not `infra/node/checks.py`: gitea (layer 2) uses it too, and "check" means a smoke check |
 | `<type>.extra_checks(ctx)`, `runner.extra_checks()` | `<type>.verifications(ctx)`, `runner.verifications()` | the verification names (strings) stay |
 | `proxy.host_checks`, `proxy.verify` | `proxy.host_verifications`, `proxy.verify_proxy_host` | |
 | `hosts.inspect`, `record`, `cached`, `refresh`, `roles`, `drift`, `expected_versions`, `hosts_dir` | `inspect_server`, `record_facts`, `cached_facts`, `refresh_facts`, `server_roles`, `version_drift`, `pinned_versions`, `workspace.hosts_state_dir` | |
@@ -444,7 +445,8 @@ imports sit inside functions). Fix every old name you find.
 | | |
 |---|---|
 | **Done (as built)** | The user docs and the README say workspace (`docs/reference/platform-folder.md` is `workspace.md`), and their counts, module map and commands match the code. One CHANGELOG entry for the whole cleanup. The admin password is off the command line: `gitea admin user create --random-password` makes it and prints it; a password already in `secrets/gitea-admin-password` is set back with `PATCH /api/v1/admin/users/<user>`, from a `curl -K -` that reads the request on stdin (`gitea/setup/admin.py`). `egress.seal_script`, `gitea/upload.push_config_image` and `infra/proxy/setup.set_up_on_host` stay as they are: they are script text, or named steps under a long docstring. `vulture outpost --min-confidence 80` finds nothing; at 60 it lists public helpers the tests use (`debian_has_distro`, `alpine_has_branch`, `rpm_has_group`, `Needs.is_empty`, `system.proxy_host`) and framework hooks, which stay. |
-| **Still open** | `pack --out dist` is relative to the current directory (deliberate: the output is for releases; the help says `default: dist`). `versions.ARCH` and `ssh.use_config` are process-wide globals that `AirGappedSystem.load` sets. pyright does not check `tests/` yet. |
+| **Done after the final pass** | No process-wide globals: `versions.ARCH`/`use_arch` and `ssh.use_config` are gone. `AirGappedSystem` holds `arch` (from servers.yml) and `ssh_config` (`ssh.choose_config_file`, same rules and messages as before); `Host`, `Tunnel` and `ssh_options` take `config_file`, and the CPU type is passed down explicitly (`NodeContext.arch`, `fetch_all(..., arch)`, `pinned_files(..., arch)`, `build_layout(..., arch)`, `Registry.pull(..., arch)`, `check_server_arch(alias, facts, arch)`, `push_config_image`, `upload_box`). The dashboard picks its ssh config per request with `ui.reach.choose_ssh_config`. |
+| **Still open** | `pack --out dist` is relative to the current directory (deliberate: the output is for releases; the help says `default: dist`). pyright does not check `tests/` yet. |
 
 ## 5. Known bugs to fix along the way
 
@@ -472,5 +474,5 @@ Worth a decision, but not bugs:
   stdin (`curl -H @-`).
 - `pack --out dist` is relative to the current directory too. That looks deliberate, since the
   output is for releases, but say so in the help.
-- `versions.ARCH` and `ssh.use_config` are process-wide globals that `AirGappedSystem.load` sets.
-  That is fine for the CLI. A later step can turn them into attributes of the system.
+- Done after the final pass: `versions.ARCH` and `ssh.use_config` were process-wide globals that
+  `AirGappedSystem.load` set. They are now `system.arch` and `system.ssh_config`, passed explicitly.

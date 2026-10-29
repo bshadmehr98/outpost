@@ -15,10 +15,11 @@ from outpost.workspace import STATE_UPLOAD
 
 @dataclass
 class NodeContext:
-    """What a node's setup needs: how to reach Gitea and the proxy, the CA, and what Gitea has."""
+    """What a node's setup needs: how to reach Gitea and the proxy, the CA, the CPU type, and what Gitea has."""
 
     gitea: GiteaEndpoint
     ca_pem: str
+    arch: str  # the box's CPU type, amd64 or arm64: every node must be of it
     distros: list[str] = field(default_factory=list)  # apt distros that exist in Gitea
     apk_branches: list[str] = field(default_factory=list)  # Alpine branches that exist in Gitea
     rpm_distros: list[str] = field(default_factory=list)  # rpm distros (Gitea groups) that exist in Gitea
@@ -56,6 +57,7 @@ def node_context(system: AirGappedSystem, infra) -> NodeContext:
     return NodeContext(
         gitea=gitea,
         ca_pem=system.ca_pem(),
+        arch=system.arch,
         distros=uploaded.get("distros", []),
         apk_branches=uploaded.get("apk_branches", []),
         rpm_distros=uploaded.get("rpm_distros", []),
@@ -83,6 +85,7 @@ def proxy_host_context(system: AirGappedSystem) -> NodeContext:
     return NodeContext(
         gitea=gitea,
         ca_pem=system.ca_pem(),
+        arch=system.arch,
         distros=uploaded.get("distros", []),
         apk_branches=uploaded.get("apk_branches", []),
         rpm_distros=uploaded.get("rpm_distros", []),

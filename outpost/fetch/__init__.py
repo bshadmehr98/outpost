@@ -3,7 +3,8 @@
     results = fetch_into_box(system, all_needs(system), only=None, log=print)   # writes state/fetch.json
     for problem in failures(results): ...
 
-Each kind is one module with a fetch(needs, box, mirrors, log) function. The kinds are independent,
+Each kind is one module with a fetch(needs, box, mirrors, ...) function; the kinds whose downloads
+depend on the CPU type also take the arch. The kinds are independent,
 so a failure in one does not stop the others, and within a kind one package that fails does not
 stop the rest; the summary at the end says what to look at.
 
@@ -34,7 +35,7 @@ def fetch_into_box(system: AirGappedSystem, needs: Needs, only: set[str] | None 
     Returns:
         The results per kind, and the manifest's size under "manifest".
     """
-    results = fetch_all(needs, system.workspace.box_dir, system.mirrors, only=only, log=log)
+    results = fetch_all(needs, system.workspace.box_dir, system.mirrors, system.arch, only=only, log=log)
     system.write_state(STATE_FETCH, results)
     return results
 
@@ -46,17 +47,18 @@ def failures(results: dict) -> list[str]:
     return per_kind + per_item
 
 
-def fetch_all(needs: Needs, box: Path, mirrors: Mirrors, only: set[str] | None = None, log=print) -> dict:
-    """Fetch every kind of the needs into box, then write the box's manifest. Returns the results per kind."""
+def fetch_all(needs: Needs, box: Path, mirrors: Mirrors, arch: str, only: set[str] | None = None, log=print) -> dict:
+    """Fetch every kind of the needs into box, for the CPU type arch, then write the box's manifest.
+    Returns the results per kind."""
     box.mkdir(parents=True, exist_ok=True)
     plan = {
         "files": lambda: files.fetch(needs.files, box, mirrors, log=log),
-        "images": lambda: images.fetch(needs.images, box, mirrors, log=log),
-        "pypi": lambda: pypi.fetch(needs.pypi, box, mirrors, log=log),
+        "images": lambda: images.fetch(needs.images, box, mirrors, arch, log=log),
+        "pypi": lambda: pypi.fetch(needs.pypi, box, mirrors, arch, log=log),
         "npm": lambda: npm.fetch(needs.npm, box, mirrors, log=log),
-        "apt": lambda: apt.fetch(needs.apt, box, mirrors, log=log),
-        "apk": lambda: apk.fetch(needs.apk, box, mirrors, log=log),
-        "rpm": lambda: rpm.fetch(needs.rpm, box, mirrors, log=log),
+        "apt": lambda: apt.fetch(needs.apt, box, mirrors, arch, log=log),
+        "apk": lambda: apk.fetch(needs.apk, box, mirrors, arch, log=log),
+        "rpm": lambda: rpm.fetch(needs.rpm, box, mirrors, arch, log=log),
     }
     results: dict[str, dict] = {}
     for kind, step in plan.items():

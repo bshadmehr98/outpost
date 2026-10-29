@@ -11,6 +11,7 @@ This is how Outpost talks to Gitea's API: Gitea listens on the server, and the t
 import socket
 import subprocess
 import time
+from pathlib import Path
 
 from outpost.ssh.errors import Unreachable
 from outpost.ssh.markers import decode
@@ -27,16 +28,18 @@ class Tunnel:
         port: the port on this machine (127.0.0.1). Set when the `with` block starts.
     """
 
-    def __init__(self, alias: str, remote_port: int = 443, connect_timeout: int = 20):
+    def __init__(self, alias: str, remote_port: int = 443, connect_timeout: int = 20, config_file: Path | None = None):
         """
         Args:
             alias: the server's name in your ssh config.
             remote_port: the port on the server to reach.
             connect_timeout: seconds to wait for ssh to log in.
+            config_file: the ssh config file to use (see choose_config_file); None means ~/.ssh/config.
         """
         self.alias = alias
         self.remote_port = remote_port
         self.connect_timeout = connect_timeout
+        self.config_file = config_file
         self.port: int | None = None
         self._ssh: subprocess.Popen | None = None  # the ssh program, running in the background
 
@@ -49,7 +52,7 @@ class Tunnel:
                 "-N",  # run no command on the server; only forward the port
                 "-o",
                 "ExitOnForwardFailure=yes",  # if the port can't be forwarded, exit instead of staying up
-                *ssh_options(self.connect_timeout),
+                *ssh_options(self.connect_timeout, self.config_file),
                 "-L",  # -L here:port:there:port
                 f"127.0.0.1:{self.port}:127.0.0.1:{self.remote_port}",
                 self.alias,

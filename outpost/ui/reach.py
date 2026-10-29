@@ -6,11 +6,12 @@ The dashboard makes its own Host with a short connect timeout, so a page does no
 
 import re
 import subprocess
+from pathlib import Path
 
-from outpost import egress, ssh
+from outpost import egress
 from outpost.config import ConfigError, load_servers
 from outpost.hosts import refresh_facts
-from outpost.ssh import Host, SshError
+from outpost.ssh import Host, SshError, choose_config_file
 from outpost.ssh.options import ssh_options
 from outpost.system import AirGappedSystem
 from outpost.workspace import Workspace
@@ -25,15 +26,17 @@ def reach_server(workspace: Workspace, alias: str) -> dict:
     Returns:
         {"ok", "message"}, and "user" and "facts" when ssh worked.
     """
-    problem = _alias_or_ssh_config_problem(workspace, alias)
+    config_file, problem = _ssh_config_for_alias(workspace, alias)
     if problem:
         return {"ok": False, "message": problem}
-    plain = subprocess.run(["ssh", *ssh_options(CONNECT_TIMEOUT), alias, "id -un"], capture_output=True, text=True)
+    plain = subprocess.run(
+        ["ssh", *ssh_options(CONNECT_TIMEOUT, config_file), alias, "id -un"], capture_output=True, text=True
+    )
     if plain.returncode != 0:
         return {"ok": False, "message": f"ssh {alias} failed: {plain.stderr.strip() or 'no answer'}"}
     user = plain.stdout.strip()
     try:
-        facts = _dashboard_host(alias).facts()
+        facts = _dashboard_host(alias, config_file).facts()
     except SshError as e:
         return {
             "ok": False,
@@ -54,10 +57,10 @@ def server_status(workspace: Workspace, alias: str) -> dict:
     Returns:
         {"ok": True, "egress", "log", "uptime", "disk"}, or {"ok": False, "message"}.
     """
-    problem = _alias_or_ssh_config_problem(workspace, alias)
+    config_file, problem = _ssh_config_for_alias(workspace, alias)
     if problem:
         return {"ok": False, "message": problem}
-    host = _dashboard_host(alias)
+    host = _dashboard_host(alias, config_file)
     try:
         seal = egress.seal_status(host)
         log = host.run("tail -n 40 /var/log/outpost-egress.log 2>/dev/null || true").stdout
@@ -86,30 +89,35 @@ def refresh_hosts(workspace: Workspace, aliases: list[str] | None) -> dict:
     """
     system = AirGappedSystem.load(workspace.root)
     wanted = [alias for alias in (aliases or []) if SSH_ALIAS.fullmatch(alias)] or None
-    return refresh_facts(system, wanted, log=lambda *_: None, make_host=_dashboard_host)
+    return refresh_facts(
+        system, wanted, log=lambda *_: None, make_host=lambda alias: _dashboard_host(alias, system.ssh_config)
+    )
 
 
-def choose_ssh_config(workspace: Workspace) -> str | None:
-    """Pick the ssh config file the way the CLI does. Returns what is wrong, or None.
+def choose_ssh_config(workspace: Workspace) -> tuple[Path | None, str | None]:
+    """Pick the ssh config file the way the CLI does.
 
     A servers.yml that does not load yet still lets OUTPOST_SSH_CONFIG count.
+
+    Returns:
+        (the file, None), with None for ~/.ssh/config; or (None, what is wrong).
     """
     try:
         path = load_servers(workspace.servers_file).ssh_config
     except ConfigError:
         path = None
     try:
-        ssh.use_config(path)
+        return choose_config_file(path), None
     except SshError as e:
-        return str(e)
-    return None
+        return None, str(e)
 
 
-def _alias_or_ssh_config_problem(workspace: Workspace, alias: str) -> str | None:
+def _ssh_config_for_alias(workspace: Workspace, alias: str) -> tuple[Path | None, str | None]:
+    """choose_ssh_config(), after checking that alias looks like an ssh alias."""
     if not SSH_ALIAS.fullmatch(alias or ""):
-        return "that is not an SSH alias"
+        return None, "that is not an SSH alias"
     return choose_ssh_config(workspace)
 
 
-def _dashboard_host(alias: str) -> Host:
-    return Host(alias, connect_timeout=CONNECT_TIMEOUT)
+def _dashboard_host(alias: str, config_file: Path | None) -> Host:
+    return Host(alias, connect_timeout=CONNECT_TIMEOUT, config_file=config_file)

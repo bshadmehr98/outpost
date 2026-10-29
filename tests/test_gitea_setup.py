@@ -40,7 +40,7 @@ def prepared(workspace_dir, monkeypatch):
             (r"test -s /etc/gitea/app.ini", Result(1, "", "")),
         ],
     )
-    monkeypatch.setattr(outpost.system, "Host", lambda alias: host)
+    monkeypatch.setattr(outpost.system, "Host", lambda alias, config_file=None: host)
 
     @contextmanager
     def fake_connect(system):

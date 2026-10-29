@@ -133,7 +133,12 @@ def test_upload_box_sends_apk_and_rpm_and_records_them_for_the_config_image(clie
         and boxmod.distros_in(box, "rpm") == ["fedora40", "rocky9"]
     )
     stats = upload_box(
-        box, client, GiteaEndpoint(name="gitea.internal", ip="10.0.0.5", org="pkgs"), ca_pem, log=lambda *_: None
+        box,
+        client,
+        GiteaEndpoint(name="gitea.internal", ip="10.0.0.5", org="pkgs"),
+        ca_pem,
+        "amd64",
+        log=lambda *_: None,
     )
     assert stats["apk"] == {"uploaded": 1, "exists": 0} and stats["rpm"] == {"uploaded": 2, "exists": 0}
     assert stats["config_image"] == {"distros": [], "apk_branches": ["v3.20"], "rpm_distros": ["fedora40", "rocky9"]}
@@ -155,11 +160,11 @@ def test_upload_puts_every_image_under_the_organisation(client, fake_gitea, tmp_
     box = tmp_path / "box"
     for ref in ("python:3.12-slim", "bitnami/redis:7", "ghcr.io/org/app:1.4"):
         r = oci.parse_ref(ref)
-        oci.build_layout({"/hello": (ref.encode(), 0o644)}, box / "images" / r.safe_name, r.short)
+        oci.build_layout({"/hello": (ref.encode(), 0o644)}, box / "images" / r.safe_name, r.short, "amd64")
     boxmod.write_manifest(box)
     gitea = GiteaEndpoint(name="gitea.internal", ip="10.0.0.5", org="pkgs")
     lines = []
-    stats = upload_box(box, client, gitea, ca_pem, log=lines.append)
+    stats = upload_box(box, client, gitea, ca_pem, "amd64", log=lines.append)
     assert stats["images"] == {"uploaded": 3, "exists": 0}
     stored = {repo for repo, _tag in fake_gitea.manifests}
     assert stored == {"pkgs/library/python", "pkgs/bitnami/redis", "pkgs/org/app", "pkgs/config"}
@@ -203,12 +208,15 @@ def test_an_image_gitea_already_has_counts_as_already_there(client, fake_gitea, 
 
     box = tmp_path / "box"
     ref = oci.parse_ref("python:3.12-slim")
-    oci.build_layout({"/hello": (b"hi", 0o644)}, box / "images" / ref.safe_name, ref.short)
+    oci.build_layout({"/hello": (b"hi", 0o644)}, box / "images" / ref.safe_name, ref.short, "amd64")
     boxmod.write_manifest(box)
     gitea = GiteaEndpoint(name="gitea.internal", ip="10.0.0.5", org="pkgs")
     lines = []
-    assert upload_box(box, client, gitea, ca_pem, log=lambda *_: None)["images"] == {"uploaded": 1, "exists": 0}
-    assert upload_box(box, client, gitea, ca_pem, log=lines.append)["images"] == {"uploaded": 0, "exists": 1}
+    assert upload_box(box, client, gitea, ca_pem, "amd64", log=lambda *_: None)["images"] == {
+        "uploaded": 1,
+        "exists": 0,
+    }
+    assert upload_box(box, client, gitea, ca_pem, "amd64", log=lines.append)["images"] == {"uploaded": 0, "exists": 1}
     assert "    images: 0 uploaded, 1 already there" in lines
 
 

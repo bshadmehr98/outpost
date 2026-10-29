@@ -134,13 +134,11 @@ def list_backups(workspace: Workspace) -> list[dict]:
 
 
 def _servers_or_error(workspace: Workspace) -> tuple[Servers | None, str | None]:
-    """servers.yml and no error, or None and what is wrong with it. Downloads use its arch from now on."""
+    """servers.yml and no error, or None and what is wrong with it."""
     try:
-        servers = load_servers(workspace.servers_file)
+        return load_servers(workspace.servers_file), None
     except ConfigError as e:
         return None, str(e)
-    versions.use_arch(servers.arch)
-    return servers, None
 
 
 def _servers_view(servers: Servers | None) -> dict | None:
@@ -178,7 +176,9 @@ def _everything_to_fetch(workspace: Workspace, servers: Servers | None) -> Needs
     load, the needs files and Gitea's own download."""
     if servers:
         return all_needs(AirGappedSystem(workspace, servers), skip_unknown_proxy_distro=True)
-    return needs_and_pinned_files(workspace.needs_dir, load_mirrors(workspace.mirrors_file), set())
+    return needs_and_pinned_files(
+        workspace.needs_dir, load_mirrors(workspace.mirrors_file), set(), versions.DEFAULT_ARCH
+    )
 
 
 def _box_manifest_summary(workspace: Workspace) -> dict | None:

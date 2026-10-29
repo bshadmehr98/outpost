@@ -128,7 +128,7 @@ def connect_and_check_host(host: Host, ctx: NodeContext, log=print) -> tuple[dic
             f"[{host.alias}] runs Alpine, which Outpost does not support as an egress proxy host. "
             "Put the proxy on a Debian, Ubuntu or RHEL-family host (egress_proxy.host in servers.yml)."
         )
-    versions.check_server_arch(host.alias, facts)
+    versions.check_server_arch(host.alias, facts, ctx.arch)
     distro = distro_of_host(facts) or facts.get("id", "?")
     p = ctx.proxy
     where = "on the Gitea host" if p and p.on_gitea else "its own host"

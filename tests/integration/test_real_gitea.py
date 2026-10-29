@@ -175,7 +175,7 @@ def test_debian(gitea, tmp_path):
 def apk_files(tmp_path_factory):
     """zlib and its dependency tree for Alpine v3.20, fetched the way `outpost fetch` does (apk inside alpine:3.20)."""
     box = tmp_path_factory.mktemp("box")
-    apkmod.fetch({"v3.20": ["zlib"]}, box, Mirrors(), log=lambda *_: None)
+    apkmod.fetch({"v3.20": ["zlib"]}, box, Mirrors(), "amd64", log=lambda *_: None)
     files = sorted((box / "apk" / "v3.20").glob("*.apk"))
     assert files and any(f.name.startswith("zlib-") for f in files)
     return files
@@ -206,10 +206,10 @@ def test_generated_image_names_are_accepted_by_gitea(gitea, tmp_path, ref):
     is valid OCI and Gitea answers NAME_INVALID. Push a tiny image under the generated name, pull it back, and
     find it listed as one container package of the organisation."""
     r = oci.parse_ref(ref)
-    layout = oci.build_layout({"/hello": (ref.encode(), 0o644)}, tmp_path / "img", r.short)
+    layout = oci.build_layout({"/hello": (ref.encode(), 0o644)}, tmp_path / "img", r.short, "amd64")
     gitea.packages.push_image(layout, "pkgs", r.mirror_name, r.tag)
     pulled = gitea.packages.registry().pull(
-        oci.Ref(registry="gitea", repo=f"pkgs/{r.mirror_name}", tag=r.tag), tmp_path / "back"
+        oci.Ref(registry="gitea", repo=f"pkgs/{r.mirror_name}", tag=r.tag), tmp_path / "back", "amd64"
     )
     assert json.loads((pulled / "index.json").read_text())["manifests"]
     packages = gitea.http.get("/api/v1/packages/pkgs?type=container&limit=50").json()
@@ -218,7 +218,7 @@ def test_generated_image_names_are_accepted_by_gitea(gitea, tmp_path, ref):
 
 def test_gitea_rejects_a_double_hyphen(gitea, tmp_path):
     """The name of the first cut, kept as a record of why the nested path was chosen."""
-    layout = oci.build_layout({"/hello": (b"x", 0o644)}, tmp_path / "img", "x:1")
+    layout = oci.build_layout({"/hello": (b"x", 0o644)}, tmp_path / "img", "x:1", "amd64")
     with pytest.raises(HttpError, match="NAME_INVALID"):
         gitea.packages.push_image(layout, "pkgs", "library--python", "1")
 
@@ -226,7 +226,7 @@ def test_gitea_rejects_a_double_hyphen(gitea, tmp_path):
 def test_pull_from_docker_hub_and_push_to_gitea(gitea, tmp_path):
     """`alpine:3.20` from Docker Hub lands under the one organisation as `pkgs/library/alpine`, like every image."""
     ref = oci.parse_ref("alpine:3.20")
-    layout = oci.Registry(Http("https://registry-1.docker.io")).pull(ref, tmp_path / "alpine")
+    layout = oci.Registry(Http("https://registry-1.docker.io")).pull(ref, tmp_path / "alpine", "amd64")
     assert oci.layout_ref(layout) == "alpine:3.20"
     assert ref.mirror_name == "library/alpine"
     gitea.packages.push_image(layout, "pkgs", ref.mirror_name, "3.20")
@@ -282,7 +282,7 @@ def test_config_image_is_usable_in_a_build(gitea, tmp_path):
     host = URL.split("//")[1]
     info = GiteaEndpoint(name="gitea.internal", ip="10.0.0.5", org="pkgs")
     files = client_config.config_image_files(info, "CA PEM", "APT KEY", ["bookworm"])
-    layout = oci.build_layout(files, tmp_path / "config", info.config_image)
+    layout = oci.build_layout(files, tmp_path / "config", info.config_image, "amd64")
     gitea.packages.push_image(layout, "pkgs", "config", "latest")
     (tmp_path / "ctx").mkdir()
     (tmp_path / "ctx" / "Dockerfile").write_text(
@@ -312,7 +312,7 @@ def test_apk_add_from_gitea_with_the_config_image_key(gitea, apk_files):
         and files["/etc/apk/repositories"][0] == b"https://gitea.internal/api/packages/pkgs/alpine/v3.20/main\n"
     )
     layout = oci.build_layout(
-        files, Path(tempfile_dir := tempfile.mkdtemp(prefix="outpost-it-apk-")) / "config", info.config_image
+        files, Path(tempfile_dir := tempfile.mkdtemp(prefix="outpost-it-apk-")) / "config", info.config_image, "amd64"
     )
     gitea.packages.push_image(layout, "pkgs", "config", "apk-test")
     ctx = Path(tempfile_dir) / "ctx"
