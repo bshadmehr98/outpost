@@ -7,4 +7,6 @@ build/
 .pytest_cache/
 # a platform folder used for local testing
 /my-platform/
+# Gitea backups made while testing: they hold Gitea's keys, secrets and database
+backups/
 .ruff_cache/

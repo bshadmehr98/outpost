@@ -1,4 +1,4 @@
-# Unit tests and lint on every push and pull request; the integration suite (real Gitea, Docker Hub,
+# Unit tests, lint, format and types on every push and pull request; the integration suite (real Gitea, Docker Hub,
 # the lab) on pushes to main and on demand, because it takes ten minutes and needs Docker.
 name: tests
 on:
@@ -16,7 +16,9 @@ jobs:
       - uses: actions/setup-python@v5
         with: { python-version: "${{ matrix.python }}" }
       - run: pip install -e '.[dev]'
-      - run: ruff check --select E,F,W --ignore E501 outpost tests
+      - run: ruff check outpost tests   # rules in pyproject.toml
+      - run: scripts/format.sh --check
+      - run: pyright                    # outpost/ and tests/, settings in pyproject.toml
       - run: pytest -q
   package:
     runs-on: ubuntu-latest

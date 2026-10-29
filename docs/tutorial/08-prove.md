@@ -29,7 +29,7 @@ ok   docker run --rm outpost-check-hello python -c "...urlopen('https://pypi.org
 **hello-alpine** (for `compose` and `swarm`) does the same on an Alpine base: `COPY --from=config / /`,
 then `apk add --no-cache curl` answered by Gitea's Alpine registry, runs `curl --version` and
 expects `curl `, then a container that `wget`s pypi.org and must print *SEALED*. It exists so that
-a platform with Alpine images proves apk works offline, not only apt and pip.
+an air-gapped system with Alpine images proves apk works offline, not only apt and pip.
 
 **hello-k3s** (for `k3s`) runs a pod from `gitea.lab/pkgs/library/alpine:3.20`, the Gitea copy
 of `alpine:3.20`, reads its

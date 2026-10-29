@@ -18,6 +18,8 @@ Gitea, and cannot get anything from outside Gitea.** This page is the precise ve
 | Everything a build needs is listed | needs files and lockfiles are the only input to fetch | `outpost needs`; a build that needs more fails by name |
 | A box is what it claims to be | `manifest.json` with SHA-256 per file; ed25519 signature on pack | `upload` refuses a mismatching box |
 | A stolen `secrets/gitea-token` cannot take over Gitea | the token has `write:organization, write:repository, write:package, read:user, read:misc`; no admin, no user scope | `curl -u outpost:$token https://gitea/api/v1/admin/users` answers 403 |
+| No secret shows in `ps` on a server | the API token and the admin password reach `curl` on stdin, and the runner's registration token is an environment variable; none is a command-line argument | `ps -ef` on the server during `gitea setup` or `infra setup` |
+| Another web page cannot drive the dashboard | it listens on localhost only and refuses a request whose `Origin` is not its own, a POST without `application/json`, and a `Host` that is not this laptop (which also stops DNS rebinding) | [dashboard](../reference/dashboard.md) |
 | Nothing drifted on a node | `verify` compares Docker, Compose, k3s, CoreDNS and runner versions with the pins and checks `pip.conf` and the egress script | `outpost infra verify`, `outpost hosts` |
 
 ## Not guaranteed
@@ -25,6 +27,10 @@ Gitea, and cannot get anything from outside Gitea.** This page is the precise ve
 - **Root on a node can open the internet.** The seal is iptables; root can remove it. Outpost
   logs flips made through its script and makes the normal path easy, but it is not a sandbox
   against an administrator.
+- **Who can push a workflow is root on the first node.** Actions jobs run as root on the node
+  (host mode), so a workflow in the organisation can open that node's seal. See
+  [limits](../reference/limits.md): a separate runner user would still need Docker or the k3s
+  admin config, which are root-equivalent.
 - **The Gitea server is a single point.** No HA. `outpost gitea backup` exists and an upgrade
   takes one by itself, but running it regularly and storing the archive elsewhere is yours.
 - **Content is not vetted.** Outpost mirrors what the lockfiles say. If a lockfile pins a

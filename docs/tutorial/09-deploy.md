@@ -22,7 +22,7 @@ Then open, for the lab:
 
 ## The project
 
-`demo/` in your platform folder is a small Flask site served by gunicorn, with a Dockerfile
+`demo/` in your workspace is a small Flask site served by gunicorn, with a Dockerfile
 whose first five lines are the only Outpost-specific thing in it: the config stage, and the
 base image named by its Gitea copy.
 

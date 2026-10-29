@@ -75,13 +75,20 @@ Only one organisation exists in Gitea.
 
 | token | made by | scope | used for |
 |---|---|---|---|
-| `secrets/gitea-token` | `gitea setup`, with the Gitea CLI | all | everything Outpost does through the API: uploads, repositories, runners |
+| `secrets/gitea-token` | `gitea setup`, with the Gitea CLI | `write:organization`, `write:repository`, `write:package`, `read:user`, `read:misc` (no admin) | everything Outpost does through the API: uploads, repositories, runners |
 | `secrets/gitea-package-token` | `demo push`, with the admin password | `write:package`, `read:repository` | the Actions secret `PACKAGE_TOKEN`, so a job can `docker push` into Gitea |
 | automatic `GITEA_TOKEN` in jobs | Gitea, per job | the repository | fetching the source archive in workflows |
 | runner registration token | `infra setup`, admin API | one registration | registering a runner |
 
 Both stored tokens are checked against the server when used: if Gitea does not know them
-(reinstalled server, recreated lab), new ones are made and the files replaced.
+(reinstalled server, recreated lab), new ones are made and the files replaced. On the Gitea
+server, `secrets/gitea-token` is checked with a `curl` that reads its header on stdin, so the
+token never shows in `ps`.
+
+The admin password stays out of `ps` too. On the first setup, `gitea admin user create
+--random-password` makes it and prints it, and Outpost saves it in `secrets/gitea-admin-password`.
+When that file already holds a password (the server was reinstalled), it is set back through
+Gitea's admin API by a `curl` that reads its whole request on stdin.
 
 ## Signing keys
 
@@ -102,9 +109,10 @@ otherwise warn on every `apk` call.
 `outpost/gitea/connect.py` opens an SSH tunnel to the Gitea host's port 443 and sends HTTPS
 requests to `localhost:<port>` with `Host: gitea.lab` and the CA from `pki/`. Nothing on the
 laptop needs to resolve or route to the Gitea name; wherever `ssh gitea-1` works, the API works.
-The client (`outpost/gitea/client.py`) is a thin wrapper over `urllib`: one method per API call,
-plus the registry uploads (`upload_pypi`, `upload_npm`, `upload_debian`, `upload_alpine`,
-`upload_rpm`, `upload_generic`, `push_image`), each returning whether the file was uploaded or
-already existed. The Alpine and RPM endpoints are the ones in Gitea's documentation
+The client (`outpost/gitea/client.py`) is a thin wrapper over `urllib`: one method per API call.
+The registries are `client.packages` (`outpost/gitea/packages.py`): `upload_pypi`, `upload_npm`,
+`upload_debian`, `upload_alpine`, `upload_rpm` and `upload_generic` each return whether the file
+was uploaded or already existed, and `push_image` says whether Gitea got anything new (a blob, or a
+tag that moved). Generic, Debian, Alpine and RPM uploads stream the file from disk. The Alpine and RPM endpoints are the ones in Gitea's documentation
 (`PUT /api/packages/{owner}/alpine/{branch}/{repository}` and
 `PUT /api/packages/{owner}/rpm/{group}/upload`), with 409 meaning "already there".

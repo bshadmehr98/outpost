@@ -4,7 +4,7 @@
 outpost ui
 ```
 
-Opens `http://localhost:8484` for the platform folder you are in. Everything on the page is read
+Opens `http://localhost:8484` for the workspace you are in. Everything on the page is read
 from the files in that folder, and every button starts `outpost <command>` as a subprocess, so the
 page can never do anything the command line cannot. The command behind each button is printed
 next to it, with a copy icon, so the page doubles as a tutorial for the CLI.
@@ -22,7 +22,7 @@ downloaded? Does the local server have it? Are the servers sealed and working?* 
 flow (projects → box → local internet → servers) with every arrow in sync or behind, a "Next"
 card, what needs attention (a needs file that does not parse, a missing tool, failed downloads,
 a machine not at the pinned versions, no backup yet), recent activity in plain words, and a check
-of this computer. On an empty platform folder the Home page is a **guided list** instead: the
+of this computer. On an empty workspace the Home page is a **guided list** instead: the
 eight steps in order, each with what it is and how long it takes, and a "Start" button on the
 next one.
 
@@ -93,3 +93,11 @@ The server binds to 127.0.0.1 only. It edits only `servers.yml`, `mirrors.yml` a
 list, one at a time, and reads servers over SSH only when you click (connection test, seal status,
 *Look again*) or when you turned the five-minute heartbeat on. Anything that changes a machine
 goes through the CLI and lands in `state/runs/` like everything else.
+
+Only the page itself may change anything. A request that is not a GET must come from the dashboard's
+own origin (another site's `Origin` header is refused), and a POST must send
+`Content-Type: application/json`, which a plain form or another site's "simple" request cannot. So a
+web page open in the same browser cannot start commands on this laptop. Every request must name
+`127.0.0.1` or `localhost` in its `Host` header, so a DNS-rebinding page cannot read the API either.
+A tunnel to another port works (`ssh -L 9000:127.0.0.1:8484`), as long as the browser opens it as
+`localhost` or `127.0.0.1`.

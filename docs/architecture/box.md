@@ -22,7 +22,7 @@ box/
 
 ## Images without Docker
 
-`outpost/oci.py` is a small, readable skopeo: it speaks the registry HTTP API directly.
+`outpost/oci/` is a small, readable skopeo: it speaks the registry HTTP API directly.
 
 - **Pull:** GET the manifest with the standard `Accept` headers; when it is a multi-arch index,
   pick `linux/amd64`; then GET every blob by digest and store it under `blobs/sha256/`. On a
@@ -57,7 +57,7 @@ writes `/etc/apk/repositories` from `mirrors.yml`, runs `apk update` and `apk fe
 -o /out`; a `rockylinux:9` (`almalinux:9`, `fedora:40`, `quay.io/centos/centos:stream9`)
 container gets a repo file built from `mirrors.yml`, installs `dnf-plugins-core` and runs
 `dnf download --resolve --alldeps --destdir /out`. All three use `--platform linux/<arch>` from
-`arch:` in `servers.yml`, so an arm64 platform fetches aarch64 packages on an amd64 laptop.
+`arch:` in `servers.yml`, so an arm64 system fetches aarch64 packages on an amd64 laptop.
 
 Gitea's Debian registry re-indexes uploaded packages per suite (`bookworm`) and component
 (`main`), and signs the index with its own key, which nodes fetch at setup. Its Alpine registry

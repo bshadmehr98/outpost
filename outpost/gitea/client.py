@@ -1,53 +1,38 @@
-"""Gitea's REST API and package registries, through plain HTTP.
+"""Gitea's REST API: version, organisations, repositories, tokens, secrets, runners and workflow runs.
 
-Package registries we fill:                 Clients read them at:
-  generic  files (binaries, tarballs)       https://gitea/api/packages/ORG/generic/NAME/VERSION/FILE
-  pypi     wheels and sdists                https://gitea/api/packages/ORG/pypi/simple
-  npm      tarballs                         https://gitea/api/packages/ORG/npm/
-  debian   .deb files                       deb https://gitea/api/packages/ORG/debian DISTRO main
-  alpine   .apk files                       https://gitea/api/packages/ORG/alpine/BRANCH/main   (in /etc/apk/repositories)
-  rpm      .rpm files                       baseurl=https://gitea/api/packages/ORG/rpm/GROUP     (one group per distro)
-  container images                          docker pull gitea/OWNER/IMAGE:TAG
+    client = GiteaClient(http, "pkgs", public_url="https://gitea.internal")
+    client.ensure_org("pkgs")
+    client.packages.upload_pypi(Path("box/pypi/requests-2.31.0-py3-none-any.whl"))   # see packages.py
 
-The Alpine and RPM endpoints follow the Gitea docs (https://docs.gitea.com/usage/packages/alpine and
-https://docs.gitea.com/usage/packages/rpm): PUT /api/packages/{owner}/alpine/{branch}/{repository} and
-PUT /api/packages/{owner}/rpm/{group}/upload (or /rpm/upload without a group), 201 when stored and
-409 when the same file is already there; the signing keys are GET /alpine/key and GET /rpm/repository.key.
+`gitea.connect(system)` makes one, through an ssh tunnel.
 """
 
 import base64
-import hashlib
 import json
-import re
-import tarfile
-import uuid
-from pathlib import Path
-from typing import NamedTuple
 from urllib.parse import quote
 
-from ..http import Http, HttpError
-from .. import oci
-
-
-class AlpineKey(NamedTuple):
-    """Gitea's Alpine signing key and the file name apk needs it under. apk only trusts an APKINDEX whose
-    signature is named after a file in /etc/apk/keys/, and Gitea signs with `<owner>@<fingerprint>.rsa.pub`,
-    which it reports in the Content-Disposition of /alpine/key; so the name travels with the key."""
-    name: str
-    content: str
-
-
-ALPINE_KEY_DEFAULT_NAME = "{owner}.rsa.pub"   # only if Gitea sends no Content-Disposition; apk would then need a rename
+from outpost.gitea.packages import GiteaPackages
+from outpost.http import Http
 
 
 class GiteaClient:
+    """One Gitea, logged in, with its organisation. `client.packages` reaches its package registries."""
+
     def __init__(self, http: Http, org: str, public_url: str | None = None):
+        """
+        Args:
+            http: logged in to Gitea (Basic auth with the API token).
+            org: the organisation Outpost keeps everything in.
+            public_url: Gitea's URL as the nodes see it (default: http's base URL).
+        """
         self.http = http
         self.org = org
         self.public_url = (public_url or http.base).rstrip("/")
+        self.packages = GiteaPackages(http, org, self.public_url)
 
     # -- basics -------------------------------------------------------------
     def version(self) -> str:
+        """Gitea's version, such as "28.2.0"."""
         return self.http.get("/api/v1/version", ok=(200,)).json()["version"]
 
     def ensure_org(self, name: str) -> bool:
@@ -58,17 +43,17 @@ class GiteaClient:
         self.http.request("POST", "/api/v1/orgs", data=body, headers={"Content-Type": "application/json"}, ok=(201,))
         return True
 
-    def _json(self, method: str, path: str, body: dict | None = None, ok: tuple[int, ...] = (200, 201, 204)):
-        data = json.dumps(body).encode() if body is not None else None
-        return self.http.request(method, path, data=data, headers={"Content-Type": "application/json"}, ok=ok)
-
     # -- repositories and Actions (used by the demo) ------------------------
     def ensure_repo(self, owner: str, name: str, description: str = "") -> bool:
         """Create a public repository under an organisation, with Actions on. True when created."""
         if self.http.get(f"/api/v1/repos/{quote(owner)}/{quote(name)}").status == 200:
             return False
-        self._json("POST", f"/api/v1/orgs/{quote(owner)}/repos", {"name": name, "description": description, "auto_init": False,
-                                                                 "default_branch": "main", "private": False}, ok=(201,))
+        self._json(
+            "POST",
+            f"/api/v1/orgs/{quote(owner)}/repos",
+            {"name": name, "description": description, "auto_init": False, "default_branch": "main", "private": False},
+            ok=(201,),
+        )
         self._json("PATCH", f"/api/v1/repos/{quote(owner)}/{quote(name)}", {"has_actions": True, "has_packages": True})
         return True
 
@@ -79,13 +64,25 @@ class GiteaClient:
             return {}
         return {e["path"]: e["sha"] for e in resp.json().get("tree") or [] if e.get("type") == "blob"}
 
-    def commit_files(self, owner: str, repo: str, files: dict[str, bytes], message: str, existing: dict[str, str]) -> dict:
+    def commit_files(
+        self, owner: str, repo: str, files: dict[str, bytes], message: str, existing: dict[str, str]
+    ) -> dict:
         """One commit on main that creates or updates `files` (path -> content). Returns Gitea's answer."""
-        ops = [{"operation": "update" if path in existing else "create", "path": path,
-                "content": base64.b64encode(content).decode(), **({"sha": existing[path]} if path in existing else {})}
-               for path, content in sorted(files.items())]
-        resp = self._json("POST", f"/api/v1/repos/{quote(owner)}/{quote(repo)}/contents",
-                          {"branch": "main", "message": message, "files": ops}, ok=(201,))
+        ops = [
+            {
+                "operation": "update" if path in existing else "create",
+                "path": path,
+                "content": base64.b64encode(content).decode(),
+                **({"sha": existing[path]} if path in existing else {}),
+            }
+            for path, content in sorted(files.items())
+        ]
+        resp = self._json(
+            "POST",
+            f"/api/v1/repos/{quote(owner)}/{quote(repo)}/contents",
+            {"branch": "main", "message": message, "files": ops},
+            ok=(201,),
+        )
         return resp.json()
 
     def create_token(self, user: str, password: str, name: str, scopes: list[str]) -> str:
@@ -94,7 +91,9 @@ class GiteaClient:
         saved = self.http.basic
         self.http.basic = (user, password)
         try:
-            resp = self._json("POST", f"/api/v1/users/{quote(user)}/tokens", {"name": name, "scopes": scopes}, ok=(201,))
+            resp = self._json(
+                "POST", f"/api/v1/users/{quote(user)}/tokens", {"name": name, "scopes": scopes}, ok=(201,)
+            )
         finally:
             self.http.basic = saved
         return resp.json()["sha1"]
@@ -110,161 +109,38 @@ class GiteaClient:
 
     def set_secret(self, owner: str, repo: str, name: str, value: str) -> None:
         """An Actions secret on a repository, available to its workflows as ${{ secrets.NAME }}."""
-        self._json("PUT", f"/api/v1/repos/{quote(owner)}/{quote(repo)}/actions/secrets/{quote(name)}", {"data": value}, ok=(201, 204))
+        self._json(
+            "PUT",
+            f"/api/v1/repos/{quote(owner)}/{quote(repo)}/actions/secrets/{quote(name)}",
+            {"data": value},
+            ok=(201, 204),
+        )
 
     def runner_registration_token(self, org: str | None = None) -> str:
         """A token that registers a runner for the organisation, so every repository in it can use the
         nodes. Organisation level needs only write:organization, where the instance level needs admin."""
-        resp = self._json("POST", f"/api/v1/orgs/{quote(org or self.org)}/actions/runners/registration-token", ok=(200, 201))
-        return (resp.json() or {}).get("token") or resp.headers.get("token") or resp.headers.get("Token")
+        resp = self._json(
+            "POST", f"/api/v1/orgs/{quote(org or self.org)}/actions/runners/registration-token", ok=(200, 201)
+        )
+        return (resp.json() or {}).get("token") or resp.headers.get("token") or resp.headers.get("Token")  # pyright: ignore[reportReturnType]  Gitea may send no token; caller assumes one
 
     def runners(self, org: str | None = None) -> list[dict]:
+        """The Actions runners registered on the organisation."""
         resp = self.http.get(f"/api/v1/orgs/{quote(org or self.org)}/actions/runners")
         return (resp.json() or {}).get("runners", []) if resp.status == 200 else []
 
     def workflow_runs(self, owner: str, repo: str, limit: int = 5) -> list[dict]:
+        """The latest Actions workflow runs of a repository, newest first."""
         resp = self.http.get(f"/api/v1/repos/{quote(owner)}/{quote(repo)}/actions/runs?limit={limit}")
         return (resp.json() or {}).get("workflow_runs", []) if resp.status == 200 else []
 
     def workflow_jobs(self, owner: str, repo: str, run_id: int) -> list[dict]:
+        """The jobs of one workflow run."""
         resp = self.http.get(f"/api/v1/repos/{quote(owner)}/{quote(repo)}/actions/runs/{run_id}/jobs")
         return (resp.json() or {}).get("jobs", []) if resp.status == 200 else []
 
-    # -- package registries -------------------------------------------------
-    def upload_generic(self, name: str, version: str, path: Path, owner: str | None = None) -> str:
-        url = f"/api/packages/{owner or self.org}/generic/{quote(name)}/{quote(version)}/{quote(path.name)}"
-        resp = self.http.request("PUT", url, data=path.read_bytes(), headers={"Content-Type": "application/octet-stream"})
-        return _outcome(resp, "generic", f"{name} {version} {path.name}")
-
-    def upload_pypi(self, path: Path, owner: str | None = None) -> str:
-        name, version = pypi_name_version(path.name)
-        data = path.read_bytes()
-        fields = {
-            ":action": "file_upload",
-            "protocol_version": "1",
-            "name": name,
-            "version": version,
-            "sha256_digest": hashlib.sha256(data).hexdigest(),
-            "filetype": "bdist_wheel" if path.suffix == ".whl" else "sdist",
-        }
-        body, content_type = multipart(fields, "content", path.name, data)
-        resp = self.http.request("POST", f"/api/packages/{owner or self.org}/pypi", data=body, headers={"Content-Type": content_type})
-        return _outcome(resp, "pypi", path.name)
-
-    def upload_npm(self, path: Path, owner: str | None = None) -> str:
-        data = path.read_bytes()
-        pkg = npm_package_json(path)
-        name, version = pkg["name"], pkg["version"]
-        integrity = "sha512-" + base64.b64encode(hashlib.sha512(data).digest()).decode()
-        version_meta = dict(pkg)
-        version_meta["dist"] = {
-            "integrity": integrity,
-            "shasum": hashlib.sha1(data).hexdigest(),
-            "tarball": f"{self.public_url}/api/packages/{owner or self.org}/npm/{quote(name, safe='@')}/-/{version}/{path.name}",
-        }
-        upload = {
-            "_id": name,
-            "name": name,
-            "description": pkg.get("description", ""),
-            "dist-tags": {"latest": version},
-            "versions": {version: version_meta},
-            "_attachments": {path.name: {"content_type": "application/octet-stream", "data": base64.b64encode(data).decode(), "length": len(data)}},
-        }
-        url = f"/api/packages/{owner or self.org}/npm/{quote(name, safe='@')}"
-        resp = self.http.request("PUT", url, data=json.dumps(upload).encode(), headers={"Content-Type": "application/json"})
-        return _outcome(resp, "npm", f"{name}@{version}")
-
-    def upload_debian(self, path: Path, distro: str, component: str = "main", owner: str | None = None) -> str:
-        url = f"/api/packages/{owner or self.org}/debian/pool/{quote(distro)}/{quote(component)}/upload"
-        resp = self.http.request("PUT", url, data=path.read_bytes(), headers={"Content-Type": "application/octet-stream"})
-        return _outcome(resp, "debian", path.name)
-
-    def debian_key(self, owner: str | None = None) -> str:
-        return self.http.get(f"/api/packages/{owner or self.org}/debian/repository.key", ok=(200,)).text
-
-    def debian_has_distro(self, distro: str, owner: str | None = None) -> bool:
-        return self.http.get(f"/api/packages/{owner or self.org}/debian/dists/{quote(distro)}/Release").status == 200
-
-    def upload_alpine(self, path: Path, branch: str, repository: str = "main", owner: str | None = None) -> str:
-        """PUT /api/packages/{owner}/alpine/{branch}/{repository}; Gitea reads the architecture from the package."""
-        url = f"/api/packages/{owner or self.org}/alpine/{quote(branch)}/{quote(repository)}"
-        resp = self.http.request("PUT", url, data=path.read_bytes(), headers={"Content-Type": "application/octet-stream"})
-        return _outcome(resp, "alpine", f"{branch}/{repository} {path.name}")
-
-    def alpine_key(self, owner: str | None = None) -> AlpineKey:
-        """The RSA public key Gitea signs its APKINDEX files with, and the file name apk must store it under."""
-        owner = owner or self.org
-        resp = self.http.get(f"/api/packages/{owner}/alpine/key", ok=(200,))
-        disposition = next((v for k, v in resp.headers.items() if k.lower() == "content-disposition"), "")
-        m = re.search(r'filename\*?=(?:UTF-8\'\')?"?([^";]+)"?', disposition)
-        name = m.group(1).strip() if m else ALPINE_KEY_DEFAULT_NAME.format(owner=owner)
-        return AlpineKey(name=name.rsplit("/", 1)[-1], content=resp.text)
-
-    def alpine_has_branch(self, branch: str, arch: str, repository: str = "main", owner: str | None = None) -> bool:
-        url = f"/api/packages/{owner or self.org}/alpine/{quote(branch)}/{quote(repository)}/{quote(arch)}/APKINDEX.tar.gz"
-        return self.http.get(url).status == 200
-
-    def upload_rpm(self, path: Path, group: str = "", owner: str | None = None) -> str:
-        """PUT /api/packages/{owner}/rpm/{group}/upload, or /rpm/upload with no group. A group is a repository of
-        its own in Gitea; Outpost uses one group per distro so rocky9 and fedora40 packages never mix."""
-        group_part = f"/{quote(group, safe='/')}" if group else ""
-        url = f"/api/packages/{owner or self.org}/rpm{group_part}/upload"
-        resp = self.http.request("PUT", url, data=path.read_bytes(), headers={"Content-Type": "application/octet-stream"})
-        return _outcome(resp, "rpm", f"{group or 'no group'} {path.name}")
-
-    def rpm_key(self, owner: str | None = None) -> str:
-        """The PGP key Gitea signs its RPM repository metadata (and re-signs uploaded packages) with."""
-        return self.http.get(f"/api/packages/{owner or self.org}/rpm/repository.key", ok=(200,)).text
-
-    def rpm_has_group(self, group: str, owner: str | None = None) -> bool:
-        group_part = f"/{quote(group, safe='/')}" if group else ""
-        return self.http.get(f"/api/packages/{owner or self.org}/rpm{group_part}/repodata/repomd.xml").status == 200
-
-    def registry(self) -> oci.Registry:
-        """A container-registry view of the same Gitea. Tokens come from /v2/token with our Basic auth."""
-        return oci.Registry(self.http, token_url=f"{self.http.base}/v2/token")
-
-    def push_image(self, layout: Path, owner: str, image: str, tag: str) -> str:
-        return self.registry().push(layout, f"{owner}/{image}", tag)
-
-
-def _outcome(resp, kind: str, what: str) -> str:
-    """Uploads return 'uploaded' or 'exists'; anything else is an error with the server's words."""
-    if resp.status in (200, 201):
-        return "uploaded"
-    if resp.status == 409 or (resp.status == 400 and "exist" in resp.text.lower()):
-        return "exists"
-    raise HttpError(resp.status, resp.text, f"{kind} upload of {what}")
-
-
-# -- helpers ------------------------------------------------------------------
-
-def multipart(fields: dict[str, str], file_field: str, filename: str, file_data: bytes) -> tuple[bytes, str]:
-    boundary = uuid.uuid4().hex
-    out = bytearray()
-    for key, value in fields.items():
-        out += f"--{boundary}\r\nContent-Disposition: form-data; name=\"{key}\"\r\n\r\n{value}\r\n".encode()
-    out += f"--{boundary}\r\nContent-Disposition: form-data; name=\"{file_field}\"; filename=\"{filename}\"\r\nContent-Type: application/octet-stream\r\n\r\n".encode()
-    out += file_data + f"\r\n--{boundary}--\r\n".encode()
-    return bytes(out), f"multipart/form-data; boundary={boundary}"
-
-
-def pypi_name_version(filename: str) -> tuple[str, str]:
-    """requests-2.31.0-py3-none-any.whl -> (requests, 2.31.0);  Flask-3.0.0.tar.gz -> (Flask, 3.0.0)."""
-    if filename.endswith(".whl"):
-        name, version = filename[:-4].split("-")[:2]
-        return name, version
-    for ext in (".tar.gz", ".zip", ".tar.bz2"):
-        if filename.endswith(ext):
-            stem = filename[: -len(ext)]
-            name, _, version = stem.rpartition("-")
-            return name, version
-    raise ValueError(f"{filename}: not a wheel or sdist")
-
-
-def npm_package_json(path: Path) -> dict:
-    with tarfile.open(path, "r:gz") as tar:
-        for member in tar.getmembers():
-            if member.name.endswith("/package.json") and member.name.count("/") == 1:
-                return json.loads(tar.extractfile(member).read())
-    raise ValueError(f"{path.name}: no package/package.json inside")
+    # -- one JSON request ----------------------------------------------------
+    def _json(self, method: str, path: str, body: dict | None = None, ok: tuple[int, ...] = (200, 201, 204)):
+        """Send body as JSON; a status not in ok raises HttpError."""
+        data = json.dumps(body).encode() if body is not None else None
+        return self.http.request(method, path, data=data, headers={"Content-Type": "application/json"}, ok=ok)

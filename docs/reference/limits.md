@@ -4,8 +4,8 @@ Things Outpost does not do, on purpose or not yet.
 
 - **Nothing it was not told about.** There is no magic mirror of the internet. If a build
   needs something, it must be in a needs file. The upside is that every dependency is written down.
-- **One architecture per platform folder.** `arch: amd64` (default) or `arm64` in `servers.yml`
-  selects every download; a mixed fleet needs two platform folders. arm64 is wired through every
+- **One architecture per workspace.** `arch: amd64` (default) or `arm64` in `servers.yml`
+  selects every download; a mixed fleet needs two workspaces. arm64 is wired through every
   fetcher but has not been run against ARM servers yet.
 - **One Gitea, no high availability.** `outpost gitea backup` makes the archive and `restore`
   puts it back, and an upgrade backs up first; scheduling the backup is yours (cron on the laptop,
@@ -46,6 +46,14 @@ Things Outpost does not do, on purpose or not yet.
   without wheels fall back to an sdist and are fetched without their dependencies. Use lockfiles.
 - **Gitea Actions runners** run in host mode only: jobs are shell steps on the node. Workflows
   cannot use `uses:` actions or job containers, since there is nothing to fetch them from.
+- **The Actions runner runs jobs as root.** `outpost-runner.service` has no `User=`, so every
+  `run:` step of a workflow runs as root on the first node of its infrastructure, and could open
+  the seal there (`outpost-egress open`). Whoever can push a workflow into the organisation has
+  root on those nodes. A separate runner user would not change that much: the deploy steps need
+  `docker` (the docker group is root in all but name: a privileged container can do anything)
+  and `k3s kubectl` (the k3s admin config, which can start a privileged pod). Give write access
+  to the organisation's repositories only to people you would give root on the nodes, and protect
+  their main branches in Gitea.
 - **Runners belong to the organisation** in `servers.yml` (`pkgs` by default), so repositories
   in that organisation can use them. The token Outpost keeps has no admin scope; registering
   instance-wide runners would need one.

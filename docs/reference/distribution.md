@@ -24,7 +24,7 @@ outpost pack --out dist
 ```
 
 The workflow in `.github/workflows/fetch.yml` runs `fetch` and `pack` on a schedule in a fork
-of this repository that holds your platform folder, and attaches the files to a release.
+of this repository that holds your workspace, and attaches the files to a release.
 Download them anywhere and upload:
 
 ```

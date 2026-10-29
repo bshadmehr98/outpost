@@ -37,18 +37,21 @@ nav:
       - architecture/proxy.md
       - architecture/ci.md
       - architecture/security.md
+      - architecture/target.md
   - Reference:
       - reference/cli.md
       - reference/servers.md
       - reference/needs.md
       - reference/dockerfiles.md
       - reference/checks.md
-      - reference/platform-folder.md
+      - reference/workspace.md
       - reference/dashboard.md
       - reference/maintenance.md
       - reference/distribution.md
       - reference/limits.md
+  - Glossary: glossary.md
   - Development:
       - development/development.md
       - development/testing.md
       - development/decisions.md
+      - development/style.md

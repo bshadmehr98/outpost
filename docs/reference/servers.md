@@ -39,8 +39,10 @@ egress_proxy:                 # optional; named exceptions to the seal (docs/arc
 
 ## Notes
 
+- **`ssh_config`** is relative to the workspace. `OUTPOST_SSH_CONFIG` does the same; set both
+  only to the same file. A missing file is an error at once ([the rules](cli.md#which-ssh-config-file)).
 - **One Gitea, many infrastructures.** All of them read from the same Gitea. Set up Gitea once.
-- **One architecture.** `arch` applies to the whole folder: wheels, images, apt packages and every
+- **One architecture.** `arch` applies to the whole workspace: wheels, images, apt packages and every
   binary are fetched for it, and setup refuses a server whose `uname -m` disagrees.
 - **Node-to-node traffic.** When an infrastructure has several nodes, each node's IP is added
   to every other node's allow list automatically, so Swarm and k3s can talk across public IPs.

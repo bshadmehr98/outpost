@@ -78,14 +78,14 @@ Nothing in the tutorial depended on the lab except the addresses. For real serve
 
 1. Put the servers in `~/.ssh/config` as aliases, with a user that is root or has passwordless
    sudo, and check `ssh <alias> true` works.
-2. `outpost init my-platform`, and in `servers.yml` set `gitea.host` to the Gitea server's
+2. `outpost init my-workspace`, and in `servers.yml` set `gitea.host` to the Gitea server's
    alias, `gitea.name` to the name nodes will use (any name; it goes into `/etc/hosts`, no DNS
    needed), and the infrastructures to your node aliases. Remove `ssh_config:` if the lab put it there.
 3. Open the inbound ports in your provider's firewall: 443 to the Gitea server from the nodes,
    2222 if you want git over SSH, 2377/7946/4789 between Swarm nodes, 6443/8472/10250 between
    k3s nodes. Outpost never touches inbound rules.
 4. Fetch, `gitea setup`, `upload`, `infra setup`, `check`, in the same order as the tutorial.
-5. Commit the platform folder, without `secrets/` and `box/`. The box can be published as a
+5. Commit the workspace, without `secrets/` and `box/`. The box can be published as a
    signed GitHub release and fetched on a schedule; see [mirrors and releases](../reference/distribution.md).
 
 Things to know on real servers: Gitea needs `git` installed (Ubuntu server has it, minimal

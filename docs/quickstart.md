@@ -7,10 +7,10 @@ this is for the second time.
 # laptop: python 3.11+, ssh, openssl, docker (for OS packages and the lab)
 pipx install .                          # from a checkout; not on PyPI yet
 
-outpost init my-platform && cd my-platform
+outpost init my-workspace && cd my-workspace
 outpost lab up                          # no servers? throwaway ones in Docker; writes servers.yml
                                         # real servers: edit servers.yml with ~/.ssh/config aliases
-outpost needs                           # what will be fetched (needs/demo.yml + pinned platform files)
+outpost needs                           # what will be fetched (needs/demo.yml + pinned downloads)
 outpost fetch                           # internet → box/            (incremental)
 outpost gitea setup                     # ssh: Gitea on 443, CA, admin, token, sealed
 outpost upload                          # ssh tunnel: box → Gitea registries + config image

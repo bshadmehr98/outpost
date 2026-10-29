@@ -6,7 +6,7 @@
   <img alt="version 0.1" src="https://img.shields.io/badge/version-0.1-blue">
   <img alt="python 3.11+" src="https://img.shields.io/badge/python-3.11%2B-3776ab">
   <img alt="dependencies: PyYAML only" src="https://img.shields.io/badge/dependencies-PyYAML%20only-success">
-  <img alt="tests: 153 unit, 23 integration" src="https://img.shields.io/badge/tests-153%20unit%20%C2%B7%2023%20integration-success">
+  <img alt="tests: 272 unit, 29 integration" src="https://img.shields.io/badge/tests-272%20unit%20%C2%B7%2029%20integration-success">
   <img alt="license MIT" src="https://img.shields.io/badge/license-MIT-lightgrey">
 </p>
 
@@ -100,8 +100,8 @@ afternoon:
   Gitea, `pki rotate` for the CA, `report` for one HTML page of evidence.
 - **A lab.** `outpost lab up` makes throwaway servers in Docker (systemd, sshd, real iptables),
   so the whole flow runs on one machine. The integration tests use the same lab.
-- **No framework.** About 4,500 lines of Python, standard library plus PyYAML. Servers get
-  shell scripts and static binaries you can read in `outpost/infra/`.
+- **No framework.** About 12,900 lines of Python (with docstrings), standard library plus PyYAML.
+  Servers get shell scripts and static binaries you can read in `outpost/infra/`.
 
 ## Try it in twenty minutes
 
@@ -109,7 +109,7 @@ Needs Python 3.11+, `ssh`, `openssl` and Docker on your machine.
 
 ```
 pipx install .                         # from a checkout; not on PyPI yet
-outpost init my-platform && cd my-platform
+outpost init my-workspace && cd my-workspace
 outpost lab up                         # four "servers" in Docker; servers.yml written for them
 outpost fetch                          # the demo's needs + Gitea, Docker, k3s, CoreDNS, the runner → box/
 outpost gitea setup                    # Gitea on https://172.31.252.10, with a private CA, sealed
@@ -233,7 +233,7 @@ hole where k3s pods could reach the internet while the host could not, and how i
 
 ## The dashboard
 
-`outpost ui` opens a local page over the same platform folder. It only edits files and runs
+`outpost ui` opens a local page over the same workspace. It only edits files and runs
 CLI commands, and prints the command behind every button, so it doubles as a tutorial. It is
 written for someone who has never opened a terminal: pages are named for what they are about,
 every action says what it will do, which machines it touches and how long it takes, a running
@@ -272,8 +272,8 @@ opts in, and DNS (port 53) stays open to any resolver. [The full list](docs/arch
 
 | command | does |
 |---|---|
-| `outpost init [folder]` | create a platform folder: `servers.yml`, `needs/`, `checks/`, `demo/` |
-| `outpost needs` | print the merged needs, with the pinned platform files |
+| `outpost init [folder]` | create a workspace: `servers.yml`, `needs/`, `checks/`, `demo/` |
+| `outpost needs` | print the merged needs, with the pinned downloads |
 | `outpost fetch [--only kinds]` | download into `box/`; incremental |
 | `outpost pack [--out dist]` | signed `tar.xz` per kind, for releases or USB |
 | `outpost gitea setup` / `info` | install or upgrade Gitea (backup first); show its address and seal |
@@ -290,7 +290,7 @@ opts in, and DNS (port 53) stays open to any resolver. [The full list](docs/arch
 | `outpost pki rotate` | new CA and certificate, pushed to Gitea, the config image and every node |
 | `outpost report [--out file]` | the proof report as one HTML page |
 
-`--dir <folder>` selects another platform folder. [Full reference](docs/reference/cli.md),
+`--dir <folder>` selects another workspace. [Full reference](docs/reference/cli.md),
 [day-two commands](docs/reference/maintenance.md).
 
 ## Compared with
@@ -324,7 +324,8 @@ special case; a bare `FROM python:3.12-slim` on a sealed node fails at once, on 
 **Security updates for the OS?** Not mirrored unless you list the packages. Open egress for a
 window with a reason, run the upgrade, seal. The log keeps the record.
 
-**ARM servers?** Not yet; wheels, images and binaries are fetched for x86_64.
+**ARM servers?** Wired through but not yet run on ARM servers: `arch: arm64` in `servers.yml`
+fetches wheels, images and binaries for aarch64. The default is amd64.
 
 **Why not DROP everything instead of REJECT?** Because a rejected connection fails in
 milliseconds with the name of the host, which turns the firewall into a to-do list. The
@@ -340,7 +341,7 @@ versions in lockfiles and the box is the same each time; the manifest lets you c
 | [Quickstart](docs/quickstart.md) | the whole flow on one page |
 | [Tutorial](docs/tutorial/01-the-problem.md) | ten chapters: from the idea to a deployed app, on a lab or on real servers, with what happens on each server |
 | [Architecture](docs/architecture/overview.md) | [the box](docs/architecture/box.md), [Gitea](docs/architecture/gitea.md), [what a node runs](docs/architecture/nodes.md), [the seal](docs/architecture/egress.md), [CI](docs/architecture/ci.md), [what it proves](docs/architecture/security.md) |
-| [Reference](docs/reference/cli.md) | [commands](docs/reference/cli.md), [servers.yml](docs/reference/servers.md), [needs](docs/reference/needs.md), [Dockerfiles](docs/reference/dockerfiles.md), [checks](docs/reference/checks.md), [the platform folder](docs/reference/platform-folder.md), [the dashboard](docs/reference/dashboard.md), [day two: backup, updates, rotation, evidence](docs/reference/maintenance.md), [mirrors and releases](docs/reference/distribution.md), [limits](docs/reference/limits.md) |
+| [Reference](docs/reference/cli.md) | [commands](docs/reference/cli.md), [servers.yml](docs/reference/servers.md), [needs](docs/reference/needs.md), [Dockerfiles](docs/reference/dockerfiles.md), [checks](docs/reference/checks.md), [the workspace](docs/reference/workspace.md), [the dashboard](docs/reference/dashboard.md), [day two: backup, updates, rotation, evidence](docs/reference/maintenance.md), [mirrors and releases](docs/reference/distribution.md), [limits](docs/reference/limits.md) |
 | [Development](docs/development/development.md) | layout, [testing](docs/development/testing.md), [decisions and lessons](docs/development/decisions.md) |
 
 The docs are Markdown with Mermaid diagrams and render on GitHub as they are. `mkdocs.yml`
@@ -350,27 +351,34 @@ publishes them as a site: `uvx --with mkdocs-material mkdocs serve`.
 
 ```
 outpost/
-  cli.py          the commands, in the order you use them
-  needs/ fetch/   lockfile parsers; one fetcher per kind (images, pypi, npm, apt, apk, rpm, files)
-  box.py oci.py   manifest, pack, sign; pull and push images over HTTP
-  ssh.py http.py  Host.run / write / put, the Tunnel; urllib with a private CA
+  cli/            the commands, one file each
+  workspace.py    the workspace folder: paths, state, secrets
+  config/         servers.yml and mirrors.yml, read and checked
+  system.py       AirGappedSystem: one workspace's config, state, secrets and servers, passed to every command
+  endpoints.py    where Gitea and the egress proxy are, as clients see them
+  needs/ fetch/   needs files and lockfiles; one fetcher per kind (images, pypi, npm, apt, apk, rpm, files)
+  box.py oci/     manifest, pack, sign; pull and push images over HTTP
+  ssh/ http.py    Host.run / write / put / get, the Tunnel; urllib with a private CA
   pki.py          CA, server certificate, box signing, with the openssl CLI
-  gitea/          client (API + registries), setup over SSH, upload, connect (tunnel)
-  infra/          clients (config files), common steps, egress, compose, swarm, k3s, runner, verify
-  checks/ demo.py smoke checks; the demo project's workflow, push and status
-  hosts.py        one SSH round trip per server: versions, seal, workloads, cached in state/hosts/
-  report.py       the proof report, one HTML page from state/
-  ui/             the dashboard: server.py, status.py, explain.py (errors into sentences), projects.py, index.html
+  gitea/          setup over ssh, upload, backup, connect (tunnel), client (API), packages (registries)
+  egress.py       the seal: the outpost-egress script, its boot unit, seal and open
+  hostsfile.py    the Gitea name in /etc/hosts, kept across reboots
+  client_config/  the pip, npm, apt, apk, dnf and Docker files that point at Gitea
+  infra/          node/ (the steps every node shares), compose, swarm, k3s, runner, verify, upgrade, proxy/
+  checks/ demo/   smoke checks; the demo project's workflow, push and status
+  hosts/          one SSH round trip per server: versions, seal, workloads, cached in state/hosts/
+  report/         the proof report, one HTML page from state/
+  ui/             the dashboard: server.py (routes), overview.py, status/, projects/, explain.py, index.html
   lab.py          throwaway servers in Docker
   templates/      what `outpost init` copies, and the lab server's Dockerfile
-tests/            134 unit tests with a fake SSH host and a fake Gitea speaking real HTTP
+tests/            unit tests with a fake SSH host and a fake Gitea speaking real HTTP
 tests/integration real Gitea container and Docker Hub; the full flow on the lab (fetch, a Gitea upgrade,
                   backup and restore, compose, swarm, k3s, the demo, a reboot, the dashboard's server side)
 ```
 
 ```
-pytest                                              # ~10 s, no network
-OUTPOST_INTEGRATION=1 pytest tests/integration      # a few minutes; needs Docker and the internet
+python -m pytest -q                                          # 272 tests, ~25 s, no network
+OUTPOST_INTEGRATION=1 python -m pytest -q tests/integration  # 29 tests, 30+ minutes; Docker and the internet
 ```
 
 ## Status and limits

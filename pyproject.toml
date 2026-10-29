@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=68"]
+requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -7,7 +7,7 @@ name = "outpost-airgap"
 version = "0.1.0"
 description = "Air-gapped infrastructure from your laptop: fetch what your projects need, serve it from one sealed Gitea, and run Docker, Swarm or k3s on servers that never touch the internet."
 readme = "README.md"
-license = { text = "MIT" }
+license = "MIT"
 requires-python = ">=3.11"
 dependencies = ["pyyaml>=6.0"]
 
@@ -16,7 +16,6 @@ classifiers = [
     "Development Status :: 4 - Beta",
     "Environment :: Console",
     "Intended Audience :: System Administrators",
-    "License :: OSI Approved :: MIT License",
     "Operating System :: POSIX :: Linux",
     "Programming Language :: Python :: 3",
     "Topic :: System :: Systems Administration",
@@ -31,13 +30,34 @@ Documentation = "https://github.com/bshadmehr98/outpost/tree/main/docs"
 Changelog = "https://github.com/bshadmehr98/outpost/blob/main/CHANGELOG.md"
 
 [project.optional-dependencies]
-dev = ["pytest>=8", "ruff>=0.6"]
+dev = ["pytest>=8", "ruff>=0.6", "pyright>=1.1.380", "types-PyYAML"]
 
 [tool.setuptools.packages.find]
 include = ["outpost*"]
 
 [tool.setuptools.package-data]
-outpost = ["ui/*.html", "templates/lab/*", "templates/platform/*", "templates/platform/.gitignore", "templates/platform/needs/*", "templates/platform/needs/*.example", "templates/platform/demo/*", "templates/platform/demo/app/*", "templates/platform/demo/app/templates/*", "templates/platform/checks/*", "templates/platform/checks/*/*"]
+outpost = ["ui/*.html", "templates/lab/*", "templates/workspace/*", "templates/workspace/.gitignore", "templates/workspace/needs/*", "templates/workspace/needs/*.example", "templates/workspace/demo/*", "templates/workspace/demo/app/*", "templates/workspace/demo/app/templates/*", "templates/workspace/checks/*", "templates/workspace/checks/*/*"]
+
+[tool.ruff]
+line-length = 120
+
+[tool.ruff.lint]
+# E, W: pycodestyle   F: pyflakes   I: import order   B: bugbear   UP: modern Python
+# SIM: simpler code   N: pep8 names   C901: too complex
+select = ["E", "F", "W", "I", "B", "UP", "SIM", "N", "C901"]
+ignore = ["E501"]  # line length is ruff format's job (120)
+
+[tool.ruff.lint.mccabe]
+max-complexity = 12
+
+[tool.ruff.lint.isort]
+known-first-party = ["outpost", "tests"]
+
+[tool.pyright]
+pythonVersion = "3.11"
+typeCheckingMode = "basic"
+include = ["outpost", "tests"]
+exclude = ["**/__pycache__", "outpost/templates"]  # templates are copied into the workspace, not imported
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

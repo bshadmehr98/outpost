@@ -21,7 +21,7 @@ flowchart LR
 |---|---|
 | see it work in 20 minutes, with no servers | the [tutorial](tutorial/01-the-problem.md), which builds a lab in Docker and goes all the way to a deployed app |
 | understand the design before trusting it | [architecture](architecture/overview.md), especially [the seal](architecture/egress.md) and [what it proves](architecture/security.md) |
-| look something up | the [reference](reference/cli.md): commands, `servers.yml`, needs files, Dockerfiles, checks, the platform folder, [day-two commands](reference/maintenance.md) |
+| look something up | the [reference](reference/cli.md): commands, `servers.yml`, needs files, Dockerfiles, checks, the workspace, [day-two commands](reference/maintenance.md) |
 | run it without typing commands | [the dashboard](reference/dashboard.md): a Home page with three questions, a Machines page, and one page per step that says what each button will do |
 | change or test the code | [development](development/development.md), [testing](development/testing.md), and [decisions](development/decisions.md), which records what we tried and what we learned |
 
@@ -51,4 +51,4 @@ flowchart LR
 
 ## Reference
 
-[CLI](reference/cli.md) · [servers.yml](reference/servers.md) · [needs](reference/needs.md) · [Dockerfiles](reference/dockerfiles.md) · [checks](reference/checks.md) · [the platform folder](reference/platform-folder.md) · [the dashboard](reference/dashboard.md) · [day two: backup, updates, rotation, evidence](reference/maintenance.md) · [mirrors and releases](reference/distribution.md) · [limits](reference/limits.md)
+[CLI](reference/cli.md) · [servers.yml](reference/servers.md) · [needs](reference/needs.md) · [Dockerfiles](reference/dockerfiles.md) · [checks](reference/checks.md) · [the workspace](reference/workspace.md) · [the dashboard](reference/dashboard.md) · [day two: backup, updates, rotation, evidence](reference/maintenance.md) · [mirrors and releases](reference/distribution.md) · [limits](reference/limits.md)

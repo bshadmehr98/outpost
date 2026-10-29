@@ -1,12 +1,16 @@
 # Testing
 
 Two layers. The unit tests prove the logic with fakes and run in seconds; the integration
-tests prove the whole thing against real software and run in minutes.
+tests prove the whole thing against real software and run for half an hour or more.
 
 ```
-.venv/bin/python -m pytest                                   # unit: ~134 tests, ~12 s
-OUTPOST_INTEGRATION=1 .venv/bin/python -m pytest tests/integration   # real Gitea, Docker Hub, the lab
+python -m pytest -q                                          # unit: 272 tests, ~25 s
+OUTPOST_INTEGRATION=1 python -m pytest -q tests/integration  # 29 tests: real Gitea, Docker Hub, the lab
 ```
+
+Run them from the `.venv` where `pip install -e '.[dev]'` put the tools. The same venv has
+`ruff` and `pyright`; [development](development.md) lists the four checks to run
+before a commit.
 
 ## Unit tests and their fakes
 
@@ -14,6 +18,8 @@ OUTPOST_INTEGRATION=1 .venv/bin/python -m pytest tests/integration   # real Gite
 
 - **`FakeHost`** stands in for `outpost.ssh.Host`. It records every script and file that a
   command would send to a server, and answers scripts from a list of `(regex, stdout)` pairs.
+  Its `run()` has the real signature: a failing `Result` is returned, and raises `CommandFailed`
+  only with `raise_on_failure=True`.
   Tests then assert on what was sent and in which order: "the binary was not re-uploaded",
   "the seal came before the Docker install", "no `generate-access-token` on the second run".
 - **`FakeGitea`** is a real HTTP server in a thread that implements enough of Gitea's API and
@@ -24,12 +30,14 @@ What the unit suite covers, by file:
 
 | file | proves |
 |---|---|
-| `test_needs.py`, `test_parsers.py`, `test_projects.py` | needs files merge; every lockfile format parses; the folder scanner finds lockfiles, `FROM` lines and apt packages |
-| `test_fetch.py`, `test_oci.py`, `test_box.py` | each fetch kind with a stub registry; OCI pull/push/layout; manifest, pack, unpack, signature |
+| `test_needs.py`, `test_lockfiles.py`, `test_distros.py`, `test_projects.py` | needs files merge, and what Outpost adds to them; every lockfile format parses; distro names and families; the folder scanner finds lockfiles, `FROM` lines and apt packages |
+| `test_fetch.py`, `test_oci.py`, `test_box.py`, `test_http.py` | each fetch kind with a stub registry; OCI pull/push/layout; manifest, pack, unpack, signature, Gitea's certificate; HTTP retries only for reads, file bodies streamed |
 | `test_gitea_client.py`, `test_gitea_setup.py` | registry uploads against FakeGitea; the install flow's files, order and idempotence; token replacement |
 | `test_infra.py` | the egress script's content; node preparation order; compose, swarm, k3s setup scripts; verify parsing |
 | `test_demo.py` | workflow generation from `servers.yml`; push commits only changed files; one package token; runner labels and install |
-| `test_checks.py`, `test_cli.py`, `test_config.py`, `test_lab.py`, `test_status.py`, `test_ui.py` | the check runner, every CLI command's wiring, config errors, the lab's generated files, the dashboard's sync logic and endpoints |
+| `test_checks.py`, `test_cli.py`, `test_cli_commands.py`, `test_config.py`, `test_lab.py`, `test_status.py`, `test_ui.py` | the check runner, every CLI command's wiring and the command table, config errors, the lab's generated files, the dashboard's sync logic, endpoints and same-origin guard |
+| `test_workspace.py` | the workspace folder, `AirGappedSystem` and the endpoints worked out from it |
+| `test_proxy.py` | the egress proxy: servers.yml, the tinyproxy files, the seal's one exception, the client settings, the setup order, the needs, the CLI, the checks and the report |
 | `test_day_two.py` | backup and restore scripts and order; a Gitea upgrade backs up first; `infra upgrade`; Docker restarts on a version change; host facts parsing and drift; error translation and history sentences; progress steps; the report's verdict; arm64 download names; the arch check on a node; HTTP retries; the new commands' parsing |
 
 ## Integration tests
@@ -54,6 +62,7 @@ bare name), and a build that uses the config image.
 4  infra setup dev and verify
 5  check --infra dev
 6  egress open: pypi.org answers; egress seal: it does not; the log has the reason
+6b proxy setup: tinyproxy on lab-gitea lets sealed workloads reach example.org, only that, only with HTTPS_PROXY
 7  infra setup prod: two-node Swarm, a service with two replicas on the worker
 8  infra setup k8s: verify, hello-k3s check with the pod leak test
 9  demo push: wait for the workflow, then every node must serve the pushed commit with sealed_at_build and sealed_now
@@ -78,9 +87,9 @@ production deployment; the commands are the same.
 Use `FakeHost` and assert on `host.scripts` and `host.files`:
 
 ```python
-def test_dns_is_installed_after_the_seal(platform_dir):
+def test_dns_is_installed_after_the_seal(workspace_dir):
     host = FakeHost("node-1")
-    common.prepare_node(host, ctx, log=lambda *_: None)
+    node.prepare_node(host, ctx, log=lambda *_: None)
     seal = next(i for i, s in enumerate(host.scripts) if "outpost-egress seal" in s)
     dns = next(i for i, s in enumerate(host.scripts) if "coredns" in s)
     assert seal < dns

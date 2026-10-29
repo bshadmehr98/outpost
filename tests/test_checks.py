@@ -4,7 +4,7 @@ from outpost.checks import load_checks, run_check
 from outpost.ssh import Result
 from tests.conftest import FakeHost
 
-TEMPLATE_CHECKS = Path(__file__).resolve().parents[1] / "outpost" / "templates" / "platform" / "checks"
+TEMPLATE_CHECKS = Path(__file__).resolve().parents[1] / "outpost" / "templates" / "workspace" / "checks"
 
 
 def test_load_template_checks():
@@ -13,12 +13,24 @@ def test_load_template_checks():
     assert set(names) == {"hello-python", "hello-k3s", "hello-alpine", "hello-proxy", "hello-proxy-k3s"}
     assert names["hello-proxy"].requires == ["proxy"] and names["hello-python"].requires == []
     hello = names["hello-python"]
-    assert hello.context == TEMPLATE_CHECKS / "hello-python" and hello.applies_to("compose") and not hello.applies_to("k3s")
+    assert (
+        hello.context == TEMPLATE_CHECKS / "hello-python"
+        and hello.applies_to("compose")
+        and not hello.applies_to("k3s")
+    )
     assert hello.steps[1]["expect"] == "Hello from Outpost"
     assert names["hello-k3s"].context is None
     alpine = names["hello-alpine"]
-    assert alpine.context == TEMPLATE_CHECKS / "hello-alpine" and alpine.applies_to("swarm") and not alpine.applies_to("k3s")
-    assert alpine.steps[1]["expect"] == "curl " and "apk add --no-cache curl" in (alpine.context / "Dockerfile").read_text()
+    assert alpine.context is not None
+    assert (
+        alpine.context == TEMPLATE_CHECKS / "hello-alpine"
+        and alpine.applies_to("swarm")
+        and not alpine.applies_to("k3s")
+    )
+    assert (
+        alpine.steps[1]["expect"] == "curl "
+        and "apk add --no-cache curl" in (alpine.context / "Dockerfile").read_text()
+    )
     assert "library/alpine:3.20" in (alpine.context / "Dockerfile").read_text()
 
 
@@ -27,7 +39,12 @@ def hello_python():
 
 
 def test_run_check_passes_and_copies_context():
-    host = FakeHost(responses=[(r"docker run --rm outpost-check-hello$", "Hello from Outpost (flask 3)"), (r"LEAK \|\| echo SEALED", "SEALED")])
+    host = FakeHost(
+        responses=[
+            (r"docker run --rm outpost-check-hello$", "Hello from Outpost (flask 3)"),
+            (r"LEAK \|\| echo SEALED", "SEALED"),
+        ]
+    )
     check = hello_python()
     result = run_check(check, host, {"GITEA": "gitea.internal", "ORG": "pkgs"}, log=lambda *_: None)
     assert result["ok"] and len(result["steps"]) == 3

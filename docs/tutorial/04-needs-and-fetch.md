@@ -46,7 +46,7 @@ Dockerfiles, and the Python version, then proposes a needs file to review.
 outpost needs
 ```
 
-prints the merged list. Besides your entries you will see *platform files*: Gitea itself,
+prints the merged list. Besides your entries you will see *pinned downloads*: Gitea itself,
 CoreDNS, the Gitea Actions runner, and Docker with its Compose and buildx plugins or k3s with
 its air-gap image bundle, depending on the infrastructure types in `servers.yml`. Their versions
 are pinned in `outpost/versions.py`. These are the only things Outpost needs that you did not
